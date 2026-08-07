@@ -31,6 +31,8 @@ During development, I prioritized data integrity and privacy over complex featur
 *   `04_test_llm_api.ipynb`: Environment check for the local LLM integration.
 *   `05_etl_fhir_to_condition.ipynb`: The main ETL for diagnoses (`CONDITION_OCCURRENCE`). 
 *   `06_ai_semantic_mapping.ipynb`: The fallback loop. It extracts unmapped conditions, asks the LLM to normalize the text, and validates the suggestion against the DuckDB vocabulary using Jaro-Winkler similarity before writing it back to the database.
+*   `07_etl_fhir_to_drug_exposure.ipynb`:  Extracts prescriptions, resolving complex HL7 FHIR cross-references (medicationReference) to standard RxNorm concepts.
+*   `08_ai_semantic_mapping_drugs.ipynb`:  (Optional/Secondary) AI fallback framework for drug descriptions.
 
 ## Known Limitations & Next Steps
 
