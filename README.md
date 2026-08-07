@@ -37,7 +37,7 @@ During development, I prioritized data integrity and privacy over complex featur
 ## Known Limitations & Next Steps
 
 *   **Fuzzy Matching vs. Embeddings:** The current AI fallback relies on Jaro-Winkler string similarity to validate the LLM's output against the OMOP dictionary. While effective, it's a purely orthographic check and can occasionally accept clinically different terms if they are spelled similarly. A future iteration will replace this with Vector Embeddings for true semantic search.
-*   **Domain Expansion:** The next logical step is expanding the ETL to cover other critical OMOP domains, such as `DRUG_EXPOSURE` and `OBSERVATION`.
+*   **Domain Expansion:** Expanding the pipeline to cover additional clinical domains such as Measurement (LOINC) and Procedure.
 
 ## Setup
 
