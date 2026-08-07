@@ -1,15 +1,15 @@
-# Ambientes Virtuais (Nunca se partilham, cada um cria o seu)
+
 .venv/
 */.venv/
 
-# Dados e Bases de Dados Locais (Muito pesados)
+
 data/
 *.duckdb
 *.duckdb.wal
 
-# Ferramentas de terceiros e dados sintéticos
+
 synthea/
 
-# Cache do Python e Jupyter
+
 .ipynb_checkpoints/
 __pycache__/
