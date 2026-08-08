@@ -25,7 +25,7 @@ During development, I prioritized data integrity and privacy over complex featur
 
 ## The Pipeline
 
-*   `01_synthea_data_generation.ipynb`: Generates the synthetic patient population.
+*   `01_explore_fhir`: Generates the synthetic patient population.
 *   `02_omop_vocabulary_load.ipynb`: Ingests the OMOP vocabularies (Athena) into DuckDB.
 *   `03_etl_fhir_to_person.ipynb`: Extracts demographics and maps standard genders into the `PERSON` table.
 *   `04_test_llm_api.ipynb`: Environment check for the local LLM integration.
@@ -33,6 +33,7 @@ During development, I prioritized data integrity and privacy over complex featur
 *   `06_ai_semantic_mapping.ipynb`: The fallback loop. It extracts unmapped conditions, asks the LLM to normalize the text, and validates the suggestion against the DuckDB vocabulary using Jaro-Winkler similarity before writing it back to the database.
 *   `07_etl_fhir_to_drug_exposure.ipynb`:  Extracts prescriptions, resolving complex HL7 FHIR cross-references (medicationReference) to standard RxNorm concepts.
 *   `08_ai_semantic_mapping_drugs.ipynb`:  (Optional/Secondary) AI fallback framework for drug descriptions.
+*   `99_data_detective.ipynb`: A diagnostic notebook used to investigate missing raw FHIR data and identify root causes for ETL mapping failures.
 
 ## Known Limitations & Next Steps
 
