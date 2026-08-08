@@ -65,9 +65,10 @@ def extract_measurements(patient_file):
             
     return measurements
 
-if __name__ == "__main__":
+def run_measurement_etl():
+    """Main execution block for Measurement ETL."""
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP MEASUREMENT) [RWE CHAOS SIMULATION]\n" + "-"*50)
-
+    
     json_files = [f for f in os.listdir(FHIR_DIR) if f.endswith('.json')]
     all_measurements = []
 
@@ -139,3 +140,6 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(f"❌ Database error: {e}")
+
+if __name__ == "__main__":
+    run_measurement_etl()

@@ -1,4 +1,5 @@
 import sys
+import os
 import requests
 import duckdb
 from pathlib import Path
@@ -7,7 +8,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH, OLLAMA_URL, MODEL_NAME
+# Centralized configurations (Fallback to local if config is missing)
+try:
+    from src.utils.config import DB_PATH, OLLAMA_URL, MODEL_NAME
+except ImportError:
+    DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
+    OLLAMA_URL = "http://localhost:11434/api/generate"
+    MODEL_NAME = "qwen2.5-coder:7b"
 
 def get_unmapped_measurements():
     """Fetches unique unmapped laboratory descriptions from the database."""
@@ -52,7 +59,6 @@ def find_loinc_match_by_substring(con, clean_text):
     Finds a standard LOINC concept by checking if the official concept name 
     contains the clean analyte extracted by the LLM.
     """
-    # Clean the text for SQL safety
     clean_text_lower = clean_text.lower().strip()
     
     query = """
@@ -65,7 +71,6 @@ def find_loinc_match_by_substring(con, clean_text):
         ORDER BY LENGTH(concept_name) ASC
         LIMIT 1
     """
-    # Use wildcards to search for the substring
     search_pattern = f"%{clean_text_lower}%"
     result = con.execute(query, (search_pattern,)).fetchone()
     
@@ -73,8 +78,8 @@ def find_loinc_match_by_substring(con, clean_text):
         return result[0], result[1]
     return None, None
 
-# EXECUTION BLOCK
-if __name__ == "__main__":
+def run_semantic_mapping_measurement():
+    """Main execution block for Measurement AI Mapping."""
     print("🤖 STARTING REVISED AI SEMANTIC MAPPING (LOINC MEASUREMENTS)\n" + "-"*50)
     
     unmapped = get_unmapped_measurements()
@@ -82,38 +87,54 @@ if __name__ == "__main__":
     
     if not unmapped:
         print("✅ No unmapped tests found. The database is fully standardized!")
-    else:
-        successful_mappings = []
+        return
         
-        with duckdb.connect(DB_PATH) as con:
-            for row in unmapped:
-                raw_text = row[0]
-                print(f"\n⚙️ Processing: '{raw_text}'")
-                
-                # 1. AI Normalization (Only text cleaning, no guessing codes)
-                clean_text = normalize_lab_test(raw_text)
-                if not clean_text:
-                    continue
-                print(f"   🧠 LLM Analyte Extracted: '{clean_text}'")
-                
-                # 2. Robust SQL Substring Matching
-                concept_id, concept_name = find_loinc_match_by_substring(con, clean_text)
-                
-                if concept_id:
-                    print(f"   ✅ LOINC Match Found: {concept_name} (ID: {concept_id})")
-                    successful_mappings.append((concept_id, raw_text))
-                else:
-                    print(f"   ❌ No matching LOINC concept found for '{clean_text}'.")
+    successful_mappings = []
+    
+    with duckdb.connect(DB_PATH) as con:
+        for row in unmapped:
+            raw_text = row[0]
+            print(f"\n⚙️ Processing: '{raw_text}'")
             
-            # 3. Write-back
-            if successful_mappings:
-                print(f"\n💾 Writing {len(successful_mappings)} mapped LOINC concepts back to the database...")
-                con.executemany("""
-                    UPDATE measurement
-                    SET measurement_concept_id = ?
-                    WHERE measurement_source_value = ? 
-                      AND measurement_concept_id = 0
-                """, successful_mappings)
-                print("✅ Database successfully updated!")
+            # 1. AI Normalization (Only text cleaning, no guessing codes)
+            clean_text = normalize_lab_test(raw_text)
+            if not clean_text:
+                continue
+            print(f"   🧠 LLM Analyte Extracted: '{clean_text}'")
+            
+            # 2. Robust SQL Substring Matching
+            concept_id, concept_name = find_loinc_match_by_substring(con, clean_text)
+            
+            if concept_id:
+                print(f"   ✅ LOINC Match Found: {concept_name} (ID: {concept_id})")
+                successful_mappings.append((concept_id, raw_text))
             else:
-                print("\n⚠️ No new mappings met the criteria to write back.")
+                print(f"   ❌ No matching LOINC concept found for '{clean_text}'.")
+        
+        # 3. Write-back
+        if successful_mappings:
+            print(f"\n💾 Writing {len(successful_mappings)} mapped LOINC concepts back to the database...")
+            con.executemany("""
+                UPDATE measurement
+                SET measurement_concept_id = ?
+                WHERE measurement_source_value = ? 
+                  AND measurement_concept_id = 0
+            """, successful_mappings)
+            print("✅ Database successfully updated!")
+            
+            # 4. Integrated Audit
+            print("\n🔍 AUDIT: Verifying a sample of AI-mapped labs...")
+            audit_query = """
+                SELECT measurement_source_value, measurement_concept_id
+                FROM measurement
+                WHERE measurement_concept_id != 0
+                LIMIT 5
+            """
+            results = con.execute(audit_query).fetchall()
+            for r in results:
+                print(f"   - Raw: '{r[0]:<30}' ➡️ ID: {r[1]}")
+        else:
+            print("\n⚠️ No new mappings met the criteria to write back.")
+
+if __name__ == "__main__":
+    run_semantic_mapping_measurement()
