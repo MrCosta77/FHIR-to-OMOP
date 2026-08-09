@@ -59,6 +59,8 @@ def find_best_match(con, normalized_term):
                jaro_winkler_similarity(LOWER(concept_name), LOWER(?)) AS score
         FROM concept 
         WHERE vocabulary_id = 'SNOMED'
+        AND domain_id = 'Condition'
+        AND standard_concept = 'S'
         ORDER BY score DESC
         LIMIT 1
     """

@@ -93,12 +93,20 @@ def run_condition_etl():
                     COALESCE(c.concept_id, 0) AS condition_concept_id,
                     stg.start_date AS condition_start_date,
                     stg.condition_text AS condition_source_value,
-                    0 AS condition_source_concept_id
+                    COALESCE(sc.concept_id, 0) AS condition_source_concept_id
                 FROM stg_condition stg
+                
+                -- 1. O Mapeamento Analítico (Standard)
                 LEFT JOIN concept c 
                     ON stg.snomed_code = c.concept_code 
                     AND c.vocabulary_id = 'SNOMED'
                     AND c.domain_id = 'Condition'
+                    AND c.standard_concept = 'S'
+                    
+                -- 2. O Mapeamento de Auditoria (Source)
+                LEFT JOIN concept sc 
+                    ON stg.snomed_code = sc.concept_code 
+                    AND sc.vocabulary_id = 'SNOMED'
             """)
             
             mapped = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id != 0").fetchone()[0]

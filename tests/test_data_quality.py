@@ -56,3 +56,35 @@ def test_no_future_dates_in_conditions(db_connection):
     """).fetchone()[0]
     
     assert result == 0, f"Found {result} condition records with future dates!"
+
+def test_person_source_value_is_unique(db_connection):
+    """
+    Garante que não existem doentes duplicados na tabela PERSON.
+    Este teste teria apanhado o bug dos "doentes fantasma" da versão anterior.
+    """
+    # Procuramos source_values que apareçam mais do que 1 vez
+    duplicados = db_connection.execute("""
+        SELECT person_source_value, COUNT(*) 
+        FROM person 
+        GROUP BY person_source_value 
+        HAVING COUNT(*) > 1
+    """).fetchall()
+    
+    # O teste falha (assert) se a lista de duplicados não estiver vazia
+    assert len(duplicados) == 0, f"❌ Falha de Integridade: Encontrados doentes duplicados: {duplicados}"
+
+def test_measurement_person_fk(db_connection):
+    """
+    Garante a integridade referencial (Foreign Key) da tabela MEASUREMENT.
+    Todos os exames têm de pertencer a um person_id válido.
+    """
+    # Procuramos exames cujo person_id não exista na tabela person
+    orfaos = db_connection.execute("""
+        SELECT COUNT(*) 
+        FROM measurement m
+        LEFT JOIN person p ON m.person_id = p.person_id
+        WHERE p.person_id IS NULL
+    """).fetchone()[0]
+    
+    # O teste falha se a contagem de órfãos for maior que zero
+    assert orfaos == 0, f"❌ Falha de Integridade: Encontrados {orfaos} exames sem um doente válido associado."

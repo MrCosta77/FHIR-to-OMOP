@@ -115,12 +115,20 @@ def run_drug_etl():
                     COALESCE(c.concept_id, 0) AS drug_concept_id, 
                     stg.start_date AS drug_exposure_start_date,
                     stg.drug_text AS drug_source_value,
-                    0 AS drug_source_concept_id 
+                    COALESCE(sc.concept_id, 0) AS drug_source_concept_id 
                 FROM stg_drug stg
+                
+                -- 1. O Mapeamento Analítico (Standard)
                 LEFT JOIN concept c 
                     ON stg.rxnorm_code = c.concept_code 
                     AND c.vocabulary_id = 'RxNorm'
                     AND c.domain_id = 'Drug'
+                    AND c.standard_concept = 'S'
+                    
+                -- 2. O Mapeamento de Auditoria (Source)
+                LEFT JOIN concept sc 
+                    ON stg.rxnorm_code = sc.concept_code 
+                    AND sc.vocabulary_id = 'RxNorm'
             """)
             
             mapped = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
