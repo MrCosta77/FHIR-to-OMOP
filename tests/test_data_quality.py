@@ -59,32 +59,46 @@ def test_no_future_dates_in_conditions(db_connection):
 
 def test_person_source_value_is_unique(db_connection):
     """
-    Garante que não existem doentes duplicados na tabela PERSON.
-    Este teste teria apanhado o bug dos "doentes fantasma" da versão anterior.
+    Data Quality: Ensure no duplicate patients exist in the PERSON table based on source value.
+    This test would have caught the 'ghost patients' bug from the previous version.
     """
-    # Procuramos source_values que apareçam mais do que 1 vez
-    duplicados = db_connection.execute("""
+    # Look for source_values that appear more than once
+    duplicates = db_connection.execute("""
         SELECT person_source_value, COUNT(*) 
         FROM person 
         GROUP BY person_source_value 
         HAVING COUNT(*) > 1
     """).fetchall()
     
-    # O teste falha (assert) se a lista de duplicados não estiver vazia
-    assert len(duplicados) == 0, f"❌ Falha de Integridade: Encontrados doentes duplicados: {duplicados}"
+    # The test fails if the duplicate list is not empty
+    assert len(duplicates) == 0, f"❌ Integrity Failure: Found duplicate patients: {duplicates}"
 
 def test_measurement_person_fk(db_connection):
     """
-    Garante a integridade referencial (Foreign Key) da tabela MEASUREMENT.
-    Todos os exames têm de pertencer a um person_id válido.
+    Data Quality: Ensure referential integrity (Foreign Key) for the MEASUREMENT table.
+    All lab tests must belong to a valid person_id.
     """
-    # Procuramos exames cujo person_id não exista na tabela person
-    orfaos = db_connection.execute("""
+    # Look for measurements whose person_id does not exist in the person table
+    orphans = db_connection.execute("""
         SELECT COUNT(*) 
         FROM measurement m
         LEFT JOIN person p ON m.person_id = p.person_id
         WHERE p.person_id IS NULL
     """).fetchone()[0]
     
-    # O teste falha se a contagem de órfãos for maior que zero
-    assert orfaos == 0, f"❌ Falha de Integridade: Encontrados {orfaos} exames sem um doente válido associado."
+    # The test fails if the orphan count is greater than zero
+    assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan measurements without a valid associated patient."
+
+def test_visit_person_fk(db_connection):
+    """
+    Data Quality: Ensure referential integrity (Foreign Key) for the VISIT_OCCURRENCE table.
+    All visits must belong to a valid person_id.
+    """
+    orphans = db_connection.execute("""
+        SELECT COUNT(*) 
+        FROM visit_occurrence v
+        LEFT JOIN person p ON v.person_id = p.person_id
+        WHERE p.person_id IS NULL
+    """).fetchone()[0]
+    
+    assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan visits without a valid associated patient."
