@@ -6,12 +6,11 @@ import duckdb
 import hashlib
 from pathlib import Path
 
-# Setup paths so Python can find the 'src' folder
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-# Clean, centralized configuration import (using FHIR_DIR as defined in config.py)
 from src.utils.config import DB_PATH, FHIR_DIR
+from src.utils.helpers import stable_person_id
 
 # OMOP Standard Visit Concepts
 # FHIR Encounter class codes mapped to OMOP Concept IDs
@@ -24,13 +23,6 @@ VISIT_MAPPING = {
 }
 
 DEFAULT_VISIT_CONCEPT_ID = 0  # Unmapped visit
-
-def generate_numeric_id(uuid_string):
-    """Generates a stable numeric ID from a FHIR UUID using SHA-256."""
-    if not uuid_string:
-        return None
-    clean_uuid = uuid_string.replace('urn:uuid:', '')
-    return int(hashlib.sha256(clean_uuid.encode('utf-8')).hexdigest()[:15], 16)
 
 def run_visit_etl():
     """Extracts FHIR Encounters and loads them into OMOP VISIT_OCCURRENCE."""
@@ -61,14 +53,15 @@ def run_visit_etl():
                 if resource.get('resourceType') == 'Encounter':
                     # 1. Get Foreign Key (Patient ID)
                     patient_ref = resource.get('subject', {}).get('reference', '')
-                    person_id = generate_numeric_id(patient_ref)
+                    person_id = stable_person_id(patient_ref)
                     
                     if not person_id:
                         continue
                         
                     # 2. Get Primary Key (Visit ID)
                     encounter_id = resource.get('id', '')
-                    visit_occurrence_id = generate_numeric_id(encounter_id)
+                    clean_encounter = encounter_id.replace('urn:uuid:', '')
+                    visit_occurrence_id = int(hashlib.sha256(clean_encounter.encode('utf-8')).hexdigest()[:15], 16)
                     
                     # 3. Get Dates
                     period = resource.get('period', {})
@@ -84,22 +77,22 @@ def run_visit_etl():
                     fhir_class_code = resource.get('class', {}).get('code', '').upper()
                     visit_concept_id = VISIT_MAPPING.get(fhir_class_code, DEFAULT_VISIT_CONCEPT_ID)
                     
-                    # 32035 means "EHR" (Electronic Health Record) - standard for origin tracking
-                    visit_type_concept_id = 32035 
+                    # 32817 means "EHR" (Electronic Health Record) - standard for origin tracking
+                    visit_type_concept_id = 32817
                     
                     visit_records.append((
                         visit_occurrence_id,
                         person_id,
                         visit_concept_id,
                         start_date,
-                        start_date, # start_datetime
+                        start_date,
                         end_date,
-                        end_date,   # end_datetime
+                        end_date,
                         visit_type_concept_id,
-                        0,          # provider_id
-                        0,          # care_site_id
-                        fhir_class_code, # visit_source_value
-                        0           # visit_source_concept_id
+                        None,
+                        None,
+                        fhir_class_code,
+                        0
                     ))
 
     print(f"📊 Extracted {len(visit_records)} raw visit records.")

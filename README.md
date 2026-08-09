@@ -53,4 +53,4 @@ The pipeline has transitioned from exploratory notebooks into a modular Python a
 2. Install dependencies: `pip install -r requirements.txt` *(Note: requires `chromadb`, `duckdb`, and `sentence-transformers`)*.
 3. Download the OMOP vocabularies from Athena and place them in the `data/` folder.
 4. Ensure Ollama is running locally with the `qwen2.5-coder:7b` model.
-5. Execute the pipeline: `python src/main.py`
+5. Execute the pipeline: `python main.py`
