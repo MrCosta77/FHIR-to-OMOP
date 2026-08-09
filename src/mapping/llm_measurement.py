@@ -4,11 +4,13 @@ import requests
 import duckdb
 from pathlib import Path
 
-# Setup paths to import our centralized configurations
+# 1. Setup paths so Python can find the 'src' folder
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-# Centralized configurations (Fallback to local if config is missing)
+from src.mapping.vector_store import ClinicalVectorStore
+
+# 2. Centralized configurations
 try:
     from src.utils.config import DB_PATH, OLLAMA_URL, MODEL_NAME
 except ImportError:
@@ -16,16 +18,7 @@ except ImportError:
     OLLAMA_URL = "http://localhost:11434/api/generate"
     MODEL_NAME = "qwen2.5-coder:7b"
 
-def get_unmapped_measurements():
-    """Fetches unique unmapped laboratory descriptions from the database."""
-    with duckdb.connect(DB_PATH) as con:
-        return con.execute("""
-            SELECT DISTINCT measurement_source_value 
-            FROM measurement 
-            WHERE measurement_concept_id = 0 
-              AND measurement_source_value IS NOT NULL 
-              AND measurement_source_value != 'Unknown'
-        """).fetchall()
+CONFIDENCE_THRESHOLD = 0.35  # In cosine distance, closer to 0 is better. < 0.35 is high confidence.
 
 def ask_llm(prompt):
     """Sends a deterministic prompt to the local LLM."""
@@ -43,77 +36,78 @@ def ask_llm(prompt):
         print(f"LLM API Error: {e}")
         return None
 
-def normalize_lab_test(raw_text):
-    """Uses LLM to extract the core analyte from noisy laboratory text."""
-    prompt = f"""
-    You are an expert clinical biochemist. 
-    Extract the core biomarker, analyte, or laboratory test name from the following noisy text. 
-    Remove administrative tags, units, or sample types. Return ONLY the clean analyte name (e.g., 'Glucose', 'Cholesterol', 'Calcium', 'Hemoglobin').
+def normalize_clinical_text(dirty_text):
+    """
+    Step 1 (RAG): Uses the LLM to clean laboratory jargon and fix spelling 
+    before sending it to the vector search.
+    """
+    prompt = f"""You are an expert clinical biochemist.
+    Your only task is to fix typos and expand abbreviations in this dirty laboratory test name 
+    into standard English medical terminology.
     
-    Raw Text: {raw_text}
-    Clean Analyte Name:"""
-    return ask_llm(prompt)
+    Rules:
+    - DO NOT add explanations or conversational text.
+    - Output ONLY the clean, normalized name of the test.
+    
+    Dirty text: '{dirty_text}'
+    Clean text:"""
+    
+    clean_text = ask_llm(prompt)
+    if clean_text:
+        return clean_text.strip("'\"")
+    return dirty_text # Fallback if it fails
 
-def find_loinc_match_by_substring(con, clean_text):
-    """
-    Finds a standard LOINC concept by checking if the official concept name 
-    contains the clean analyte extracted by the LLM.
-    """
-    clean_text_lower = clean_text.lower().strip()
+def run_measurement_rag_mapping():
+    print("🚀 Starting RAG Pipeline for MEASUREMENT (LOINC)...")
     
-    query = """
-        SELECT concept_id, concept_name
-        FROM concept
-        WHERE vocabulary_id = 'LOINC' 
-          AND domain_id = 'Measurement'
-          AND standard_concept = 'S'
-          AND LOWER(concept_name) LIKE ?
-        ORDER BY LENGTH(concept_name) ASC
-        LIMIT 1
-    """
-    search_pattern = f"%{clean_text_lower}%"
-    result = con.execute(query, (search_pattern,)).fetchone()
-    
-    if result:
-        return result[0], result[1]
-    return None, None
-
-def run_semantic_mapping_measurement():
-    """Main execution block for Measurement AI Mapping."""
-    print("🤖 STARTING REVISED AI SEMANTIC MAPPING (LOINC MEASUREMENTS)\n" + "-"*50)
-    
-    unmapped = get_unmapped_measurements()
-    print(f"🔍 Found {len(unmapped)} unique unmapped laboratory tests.")
-    
-    if not unmapped:
-        print("✅ No unmapped tests found. The database is fully standardized!")
-        return
-        
-    successful_mappings = []
+    # Initialize the vector database (vectors are already saved on disk)
+    vector_store = ClinicalVectorStore(collection_name="loinc_concepts")
     
     with duckdb.connect(DB_PATH) as con:
-        for row in unmapped:
-            raw_text = row[0]
-            print(f"\n⚙️ Processing: '{raw_text}'")
-            
-            # 1. AI Normalization (Only text cleaning, no guessing codes)
-            clean_text = normalize_lab_test(raw_text)
-            if not clean_text:
-                continue
-            print(f"   🧠 LLM Analyte Extracted: '{clean_text}'")
-            
-            # 2. Robust SQL Substring Matching
-            concept_id, concept_name = find_loinc_match_by_substring(con, clean_text)
-            
-            if concept_id:
-                print(f"   ✅ LOINC Match Found: {concept_name} (ID: {concept_id})")
-                successful_mappings.append((concept_id, raw_text))
-            else:
-                print(f"   ❌ No matching LOINC concept found for '{clean_text}'.")
+        # Extract unmapped measurements
+        query_unmapped = """
+            SELECT DISTINCT measurement_source_value
+            FROM measurement
+            WHERE measurement_concept_id = 0
+              AND measurement_source_value IS NOT NULL
+        """
+        unmapped_records = con.execute(query_unmapped).fetchall()
         
-        # 3. Write-back
+        if not unmapped_records:
+            print("✅ All laboratory records are already mapped!")
+            return
+
+        print(f"🔍 Found {len(unmapped_records)} unique terms to normalize and map.")
+        
+        successful_mappings = []
+
+        for row in unmapped_records:
+            dirty_source_text = row[0]
+            
+            # 1. LLM Normalization
+            clean_text = normalize_clinical_text(dirty_source_text)
+            
+            # 2. Semantic Search in ChromaDB
+            search_results = vector_store.search(clean_text, top_k=1)
+            
+            best_concept_id = search_results['ids'][0][0]
+            best_concept_name = search_results['metadatas'][0][0]['concept_name']
+            best_concept_code = search_results['metadatas'][0][0]['concept_code']
+            distance = search_results['distances'][0][0]
+            
+            print(f"\n🧪 Original: '{dirty_source_text}'")
+            print(f"✨ LLM Clean: '{clean_text}'")
+            
+            # 3. Strict Validation
+            if distance <= CONFIDENCE_THRESHOLD:
+                print(f"✅ MATCH (Distance {distance:.4f}): {best_concept_name} (LOINC: {best_concept_code})")
+                successful_mappings.append((int(best_concept_id), dirty_source_text))
+            else:
+                print(f"❌ REJECTED (Distance {distance:.4f} > {CONFIDENCE_THRESHOLD}): Best guess was {best_concept_name}")
+        
+        # 4. Secure Bulk Write-back
         if successful_mappings:
-            print(f"\n💾 Writing {len(successful_mappings)} mapped LOINC concepts back to the database...")
+            print(f"\n💾 Writing {len(successful_mappings)} mappings to the database...")
             con.executemany("""
                 UPDATE measurement
                 SET measurement_concept_id = ?
@@ -121,20 +115,8 @@ def run_semantic_mapping_measurement():
                   AND measurement_concept_id = 0
             """, successful_mappings)
             print("✅ Database successfully updated!")
-            
-            # 4. Integrated Audit
-            print("\n🔍 AUDIT: Verifying a sample of AI-mapped labs...")
-            audit_query = """
-                SELECT measurement_source_value, measurement_concept_id
-                FROM measurement
-                WHERE measurement_concept_id != 0
-                LIMIT 5
-            """
-            results = con.execute(audit_query).fetchall()
-            for r in results:
-                print(f"   - Raw: '{r[0]:<30}' ➡️ ID: {r[1]}")
         else:
-            print("\n⚠️ No new mappings met the criteria to write back.")
+            print("\n⚠️ No new mappings met the confidence threshold to write back.")
 
 if __name__ == "__main__":
-    run_semantic_mapping_measurement()
+    run_measurement_rag_mapping()
