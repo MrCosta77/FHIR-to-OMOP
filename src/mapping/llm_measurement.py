@@ -1,122 +1,182 @@
-import sys
 import os
-import requests
+import sys
+import json
 import duckdb
+import chromadb
+import ollama
 from pathlib import Path
 
-# 1. Setup paths so Python can find the 'src' folder
+# Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.mapping.vector_store import ClinicalVectorStore
+from src.utils.config import DB_PATH, MODEL_NAME
 
-# 2. Centralized configurations
-try:
-    from src.utils.config import DB_PATH, OLLAMA_URL, MODEL_NAME
-except ImportError:
-    DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
-    OLLAMA_URL = "http://localhost:11434/api/generate"
-    MODEL_NAME = "qwen2.5-coder:7b"
+# Corrigido: Usar caminho absoluto em vez de relativo para o ChromaDB (recomendação da revisão)
+CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
-CONFIDENCE_THRESHOLD = 0.35  # In cosine distance, closer to 0 is better. < 0.35 is high confidence.
+def setup_vector_store(con):
+    """Initializes ChromaDB and populates it with valid LOINC concepts if it's empty."""
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    collection = client.get_or_create_collection(name="loinc_measurements")
+    
+    # Se já tiver dados, não precisamos de o reconstruir
+    if collection.count() > 0:
+        return collection
+        
+    print("⏳ Building LOINC Vector Store for RAG (this might take a minute)...")
+    
+    # Extrair os conceitos válidos da tabela OMOP
+    loincs = con.execute("""
+        SELECT concept_id, concept_name 
+        FROM concept 
+        WHERE vocabulary_id = 'LOINC' 
+          AND domain_id = 'Measurement' 
+          AND standard_concept = 'S' 
+          AND invalid_reason IS NULL
+    """).fetchall()
+    
+    if not loincs:
+        print("⚠️ No LOINC concepts found in database. Vector store will be empty.")
+        return collection
 
-def ask_llm(prompt):
-    """Sends a deterministic prompt to the local LLM."""
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.0}
-    }
-    try:
-        response = requests.post(OLLAMA_URL, json=payload)
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except requests.exceptions.RequestException as e:
-        print(f"LLM API Error: {e}")
-        return None
+    ids = [str(row[0]) for row in loincs]
+    documents = [row[1] for row in loincs]
+    
+    # Inserção em lotes para não sobrecarregar a memória do ChromaDB
+    batch_size = 5000
+    for i in range(0, len(ids), batch_size):
+        collection.add(
+            ids=ids[i:i+batch_size],
+            documents=documents[i:i+batch_size]
+        )
+        
+    print(f"✅ Indexed {len(ids)} LOINC concepts into Vector Store.")
+    return collection
 
-def normalize_clinical_text(dirty_text):
+def get_unmapped_measurements(con):
+    query = """
+        SELECT DISTINCT measurement_source_value
+        FROM measurement
+        WHERE measurement_concept_id = 0
+        AND measurement_source_concept_id = 0
+        AND measurement_source_value IS NOT NULL
     """
-    Step 1 (RAG): Uses the LLM to clean laboratory jargon and fix spelling 
-    before sending it to the vector search.
-    """
-    prompt = f"""You are an expert clinical biochemist.
-    Your only task is to fix typos and expand abbreviations in this dirty laboratory test name 
-    into standard English medical terminology.
-    
-    Rules:
-    - DO NOT add explanations or conversational text.
-    - Output ONLY the clean, normalized name of the test.
-    
-    Dirty text: '{dirty_text}'
-    Clean text:"""
-    
-    clean_text = ask_llm(prompt)
-    if clean_text:
-        return clean_text.strip("'\"")
-    return dirty_text # Fallback if it fails
+    return [row[0] for row in con.execute(query).fetchall()]
 
-def run_measurement_rag_mapping():
-    print("🚀 Starting RAG Pipeline for MEASUREMENT (LOINC)...")
-    
-    # Initialize the vector database (vectors are already saved on disk)
-    vector_store = ClinicalVectorStore(collection_name="loinc_concepts")
+def run_measurement_ai_mapping():
+    print("⚙️ STARTING AI-ASSISTED SEMANTIC MAPPING (MEASUREMENTS / RAG)")
+    print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
-        # Extract unmapped measurements
-        query_unmapped = """
-            SELECT DISTINCT measurement_source_value
-            FROM measurement
-            WHERE measurement_concept_id = 0
-              AND measurement_source_value IS NOT NULL
-        """
-        unmapped_records = con.execute(query_unmapped).fetchall()
-        
-        if not unmapped_records:
-            print("✅ All laboratory records are already mapped!")
+        # 1. Preparar o cérebro vetorial (ChromaDB)
+        collection = setup_vector_store(con)
+        if collection.count() == 0:
+            print("❌ Vector store is empty. Skipping RAG mapping.")
             return
 
-        print(f"🔍 Found {len(unmapped_records)} unique terms to normalize and map.")
+        # 2. Procurar lixo laboratorial injetado pelo nosso simulador
+        unmapped = get_unmapped_measurements(con)
+        if not unmapped:
+            print("✅ No unmapped measurements found. Skipping AI mapping.")
+            return
+            
+        print(f"⚠️ Found {len(unmapped)} UNIQUE legacy laboratory terms. Starting RAG pipeline...\n")
         
-        successful_mappings = []
-
-        for row in unmapped_records:
-            dirty_source_text = row[0]
-            
-            # 1. LLM Normalization
-            clean_text = normalize_clinical_text(dirty_source_text)
-            
-            # 2. Semantic Search in ChromaDB
-            search_results = vector_store.search(clean_text, top_k=1)
-            
-            best_concept_id = search_results['ids'][0][0]
-            best_concept_name = search_results['metadatas'][0][0]['concept_name']
-            best_concept_code = search_results['metadatas'][0][0]['concept_code']
-            distance = search_results['distances'][0][0]
-            
-            print(f"\n🧪 Original: '{dirty_source_text}'")
-            print(f"✨ LLM Clean: '{clean_text}'")
-            
-            # 3. Strict Validation
-            if distance <= CONFIDENCE_THRESHOLD:
-                print(f"✅ MATCH (Distance {distance:.4f}): {best_concept_name} (LOINC: {best_concept_code})")
-                successful_mappings.append((int(best_concept_id), dirty_source_text))
-            else:
-                print(f"❌ REJECTED (Distance {distance:.4f} > {CONFIDENCE_THRESHOLD}): Best guess was {best_concept_name}")
+        updates = []
+        provenance = []
         
-        # 4. Secure Bulk Write-back
-        if successful_mappings:
-            print(f"\n💾 Writing {len(successful_mappings)} mappings to the database...")
+        for idx, raw_term in enumerate(unmapped, 1):
+            try:
+                # 3. RAG Retrieval: Procurar os 5 testes LOINC mais semelhantes semanticamente
+                search_results = collection.query(
+                    query_texts=[raw_term],
+                    n_results=5
+                )
+            except Exception as e:
+                print(f"[{idx}/{len(unmapped)}] ❌ Vector Search Error on '{raw_term}': {e}")
+                continue
+            
+            # Corrigido: Proteção contra pesquisas vazias (recomendação P0 da revisão)
+            if not search_results['ids'] or not search_results['ids'][0]:
+                print(f"[{idx}/{len(unmapped)}] ❌ No vector matches found for '{raw_term}'.")
+                continue
+                
+            retrieved_loincs = []
+            for i in range(len(search_results['ids'][0])):
+                retrieved_loincs.append({
+                    "concept_id": search_results['ids'][0][i],
+                    "concept_name": search_results['documents'][0][i]
+                })
+            
+            # 4. Prompt para o LLM tomar a decisão final
+            prompt = (
+                f"You are an expert Clinical Data Manager mapping legacy lab tests to LOINC.\n"
+                f"Source Legacy Term: '{raw_term}'\n\n"
+                f"Here are the top 5 closest standard LOINC candidates retrieved from our database:\n"
+                f"{json.dumps(retrieved_loincs, indent=2)}\n\n"
+                f"Analyze the semantic meaning (e.g., Blood vs Urine, Mass vs Count). "
+                f"Reply ONLY with the exact 'concept_id' of the best match. "
+                f"If none of the candidates are a clinically safe match, reply with '0'."
+            )
+            
+            try:
+                # Temperatura a 0.0 para garantir que a IA não inventa respostas
+                response = ollama.chat(
+                    model=MODEL_NAME,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    options={'temperature': 0.0} 
+                )
+                ai_answer = response['message']['content'].strip()
+                
+                # Encontrar a correspondência exata para garantir que a IA escolheu um ID válido
+                match = next((c for c in retrieved_loincs if str(c['concept_id']) in ai_answer), None)
+                
+                if match and ai_answer != '0':
+                    concept_id = int(match['concept_id'])
+                    concept_name = match['concept_name']
+                    print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   🎯 AI selected LOINC: '{concept_name}' (ID: {concept_id})")
+                    
+                    updates.append((concept_id, raw_term))
+                    provenance.append((
+                        'measurement', 0, raw_term, concept_name, concept_id,
+                        'llm_rag', 1.0, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
+                    ))
+                else:
+                    print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   ❌ AI rejected all candidates (Returned 0).")
+                    
+            except Exception as e:
+                print(f"[{idx}/{len(unmapped)}] ❌ LLM Error on '{raw_term}': {e}")
+                
+        # 5. Escrita na Base de Dados e Auditoria
+        if updates:
+            print(f"\n💾 Writing {len(updates)} RAG-mapped concepts back to the database...")
+            
             con.executemany("""
-                UPDATE measurement
-                SET measurement_concept_id = ?
+                UPDATE measurement 
+                SET measurement_concept_id = ? 
                 WHERE measurement_source_value = ? 
                   AND measurement_concept_id = 0
-            """, successful_mappings)
-            print("✅ Database successfully updated!")
-        else:
-            print("\n⚠️ No new mappings met the confidence threshold to write back.")
+            """, updates)
+            
+            for p in provenance:
+                target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
+                
+                con.execute("""
+                    INSERT INTO mapping_provenance (
+                        target_table, target_id, source_value, normalized_value,
+                        assigned_concept_id, mapping_method, score, model_name,
+                        vocabulary_version, reviewed_by
+                    )
+                    SELECT ?, measurement_id, ?, ?, ?, ?, ?, ?, ?, ?
+                    FROM measurement
+                    WHERE measurement_source_value = ? 
+                      AND measurement_concept_id = ?
+                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, src_val, concept_id))
+            
+            print("✅ Database and Provenance Audit successfully updated!")
+        
+        print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {len(unmapped)} legacy lab terms.")
 
 if __name__ == "__main__":
-    run_measurement_rag_mapping()
+    run_measurement_ai_mapping()

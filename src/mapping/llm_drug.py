@@ -1,134 +1,122 @@
-import duckdb
-import requests
-import sys
 import os
+import sys
+import duckdb
+import ollama
+import re
 from pathlib import Path
 
-# Setup paths dynamically
+# Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-# Centralized configurations (Fallback to local if config is missing)
-try:
-    from src.utils.config import DB_PATH, OLLAMA_URL, MODEL_NAME, SIMILARITY_THRESHOLD
-except ImportError:
-    DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
-    OLLAMA_URL = "http://localhost:11434/api/generate"
-    MODEL_NAME = "qwen2.5-coder:7b"
-    SIMILARITY_THRESHOLD = 0.90
+from src.utils.config import DB_PATH, MODEL_NAME
 
 def get_unmapped_drugs(con):
-    """Fetches unique unmapped drug descriptions from the database."""
-    return con.execute("""
-        SELECT DISTINCT drug_source_value 
-        FROM drug_exposure 
-        WHERE drug_concept_id = 0 
-          AND drug_source_value IS NOT NULL 
-          AND drug_source_value != 'Unknown'
-    """).fetchall()
-
-def ask_llm(prompt):
-    """Sends a deterministic prompt to the local LLM."""
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.0} 
-    }
-    try:
-        response = requests.post(OLLAMA_URL, json=payload)
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except requests.exceptions.RequestException as e:
-        print(f"LLM API Error: {e}")
-        return None
-
-def normalize_drug(raw_text):
-    """Uses LLM to extract the core active ingredient from messy text."""
-    prompt = f"""
-    You are an expert clinical data encoder. 
-    Extract the core medication or active ingredient name from the following raw text. 
-    Remove any dosages, grammatical noise, or administrative tags.
-    Return ONLY the clean medication name, nothing else.
-    
-    Raw Text: {raw_text}
-    Clean Medication Name:"""
-    return ask_llm(prompt)
-
-def find_best_rxnorm_match(con, clean_text):
-    """Uses DuckDB's Jaro-Winkler similarity to find the best RxNorm match."""
+    """Fetch unique unmapped drug terms from DuckDB."""
     query = """
-        SELECT concept_id, concept_name, jaro_winkler_similarity(LOWER(concept_name), LOWER(?)) as score
-        FROM concept
-        WHERE vocabulary_id = 'RxNorm' 
-          AND domain_id = 'Drug'
-          AND standard_concept = 'S'
-        ORDER BY score DESC
-        LIMIT 1
+        SELECT DISTINCT drug_source_value
+        FROM drug_exposure
+        WHERE drug_concept_id = 0
+        AND drug_source_concept_id = 0
+        AND drug_source_value IS NOT NULL
     """
-    result = con.execute(query, (clean_text,)).fetchone()
+    return [row[0] for row in con.execute(query).fetchall()]
+
+def clean_llm_output(raw_text):
+    """Extracts only the clinical term from the LLM output."""
+    clean = re.sub(r'```.*?```', '', raw_text, flags=re.DOTALL)
+    return clean.replace('"', '').replace("'", '').strip()
+
+def run_drug_ai_mapping():
+    print("⚙️ STARTING AI-ASSISTED SEMANTIC MAPPING (DRUGS) ")
+    print("-" * 50)
     
-    if result and result[2] >= SIMILARITY_THRESHOLD:
-        return result[0], result[1], result[2]
-    return None, None, None
-
-def run_semantic_mapping_drugs():
-    """Main execution block for AI Semantic Mapping (Drugs)."""
-    print("🤖 STARTING AI SEMANTIC MAPPING (DRUGS)\n" + "-"*50)
-
     with duckdb.connect(DB_PATH) as con:
-        unmapped = get_unmapped_drugs(con)
-        print(f"🔍 Found {len(unmapped)} unique unmapped drug descriptions.")
-
-        if not unmapped:
-            print("✅ No unmapped valid drugs found. The database is already fully standardized!")
+        unmapped_drugs = get_unmapped_drugs(con)
+        
+        if not unmapped_drugs:
+            print("✅ No unmapped drugs found. Skipping AI mapping.")
             return
             
-        successful_mappings = []
-
-        for row in unmapped:
-            raw_text = row[0]
-            print(f"\n⚙️ Processing: '{raw_text}'")
-            
-            # 1. Ask LLM to normalize
-            clean_text = normalize_drug(raw_text)
-            if not clean_text:
-                continue
-            print(f"   🧠 LLM Normalized: '{clean_text}'")
-            
-            # 2. Check DuckDB for Jaro-Winkler match
-            concept_id, concept_name, score = find_best_rxnorm_match(con, clean_text)
-            
-            if concept_id:
-                print(f"   ✅ Match Found: {concept_name} (ID: {concept_id}) | Confidence: {score:.2f}")
-                successful_mappings.append((concept_id, raw_text))
-            else:
-                print(f"   ❌ No match met the {SIMILARITY_THRESHOLD} threshold.")
+        print(f"⚠️ Found {len(unmapped_drugs)} UNIQUE unmapped terms. Starting AI pipeline...\n")
         
-        # 3. Bulk Update the Database
-        if successful_mappings:
-            print(f"\n💾 Writing {len(successful_mappings)} mapped concepts back to the database...")
+        updates = []
+        provenance = []
+        
+        for idx, raw_term in enumerate(unmapped_drugs, 1):
+            prompt = (
+                f"You are a clinical NLP entity extractor. "
+                f"Extract the core active ingredient or medication name from this raw text: '{raw_term}'. "
+                f"Return ONLY the standardized ingredient name. Do not include dosages or explanations."
+            )
+            
+            try:
+                response = ollama.chat(
+                    model=MODEL_NAME,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    options={'temperature': 0.0}
+                )
+                ai_term = clean_llm_output(response['message']['content'])
+                
+                # Jaro-Winkler match contra vocabulário RxNorm (Standard)
+                # O revisor sugeriu usar tie-break (concept_id ASC) e limite 0.95
+                match_query = """
+                    SELECT concept_id, concept_name, jaro_winkler_similarity(LOWER(concept_name), LOWER(?)) AS score
+                    FROM concept
+                    WHERE vocabulary_id = 'RxNorm' 
+                      AND standard_concept = 'S'
+                      AND invalid_reason IS NULL
+                    HAVING score >= 0.95
+                    ORDER BY score DESC, concept_id ASC
+                    LIMIT 1
+                """
+                match = con.execute(match_query, (ai_term,)).fetchone()
+                
+                if match:
+                    concept_id, concept_name, score = match
+                    print(f"[{idx}/{len(unmapped_drugs)}] Raw: '{raw_term}'\n   ✨ AI:  '{ai_term}'\n   🎯 DB:  '{concept_name}' (ID: {concept_id}) | Score: {score:.2f}")
+                    updates.append((concept_id, raw_term))
+                    provenance.append((
+                        'drug_exposure', 0, raw_term, ai_term, concept_id,
+                        'llm_jaro_winkler', score, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
+                    ))
+                else:
+                    print(f"[{idx}/{len(unmapped_drugs)}] Raw: '{raw_term}'\n   ✨ AI:  '{ai_term}'\n   ❌ DB:  No match found above 95.0% confidence.")
+                    
+            except Exception as e:
+                print(f"[{idx}/{len(unmapped_drugs)}] ❌ LLM Error on '{raw_term}': {e}")
+                
+        if updates:
+            print(f"\n💾 Writing {len(updates)} standardized concepts back to the database...")
+            
+            # Atualizar Tabela Clínica
             con.executemany("""
-                UPDATE drug_exposure
-                SET drug_concept_id = ?
+                UPDATE drug_exposure 
+                SET drug_concept_id = ? 
                 WHERE drug_source_value = ? 
                   AND drug_concept_id = 0
-            """, successful_mappings)
-            print("✅ Database successfully updated!")
+            """, updates)
             
-            # 4. Integrated Audit
-            print("\n🔍 AUDIT: Verifying a sample of AI-mapped drugs...")
-            audit_query = """
-                SELECT drug_source_value, drug_concept_id
-                FROM drug_exposure
-                WHERE drug_concept_id != 0
-                LIMIT 5
-            """
-            results = con.execute(audit_query).fetchall()
-            for r in results:
-                print(f"   - Raw: '{r[0]:<30}' ➡️ ID: {r[1]}")
-        else:
-            print("\n⚠️ No new mappings met the confidence criteria to write back.")
+            # Precisamos do ID original para a proveniência
+            for p in provenance:
+                target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
+                
+                # Inserir um registo de auditoria por cada ocorrência desta droga
+                con.execute("""
+                    INSERT INTO mapping_provenance (
+                        target_table, target_id, source_value, normalized_value,
+                        assigned_concept_id, mapping_method, score, model_name,
+                        vocabulary_version, reviewed_by
+                    )
+                    SELECT ?, drug_exposure_id, ?, ?, ?, ?, ?, ?, ?, ?
+                    FROM drug_exposure
+                    WHERE drug_source_value = ? 
+                      AND drug_concept_id = ?
+                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, src_val, concept_id))
+            
+            print("✅ Database and Provenance Audit successfully updated!")
+        
+        print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {len(unmapped_drugs)} unique terms.")
 
 if __name__ == "__main__":
-    run_semantic_mapping_drugs()
+    run_drug_ai_mapping()

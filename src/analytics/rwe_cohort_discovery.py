@@ -57,10 +57,12 @@ def run_analytics():
                 WHERE LOWER(c.concept_name) LIKE '%hypertension%'
             ),
             Treated_HTN AS (
-                -- Destes doentes, quais têm registo na tabela de medicamentos?
+                -- Destes doentes, quais têm anti-hipertensores na tabela de medicamentos?
                 SELECT DISTINCT h.person_id
                 FROM HTN_Patients h
                 JOIN drug_exposure de ON h.person_id = de.person_id
+                JOIN concept c_drug ON de.drug_concept_id = c_drug.concept_id
+                WHERE LOWER(c_drug.concept_name) SIMILAR TO '%(pril|sartan|dipine|olol|thiazide|furosemide|spironolactone)%'
             )
             SELECT 
                 (SELECT COUNT(*) FROM HTN_Patients) as diagnosed_htn,

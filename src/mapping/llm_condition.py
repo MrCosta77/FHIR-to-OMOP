@@ -23,6 +23,7 @@ def get_unique_unmapped_conditions(con):
         SELECT DISTINCT condition_source_value
         FROM condition_occurrence
         WHERE condition_concept_id = 0
+        AND condition_source_concept_id = 0
         AND condition_source_value IS NOT NULL
     """
     return [row[0] for row in con.execute(query).fetchall()]

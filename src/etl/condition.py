@@ -54,7 +54,7 @@ def extract_conditions(file_path):
                     
                 start_date = resource.get('onsetDateTime', '')[:10]
                 if not start_date:
-                    start_date = '1900-01-01'
+                    continue 
                     
                 end_date = resource.get('abatementDateTime', '')[:10]
                 if not end_date:
@@ -173,6 +173,18 @@ def run_condition_etl():
                 AND c_std.standard_concept = 'S'
                 AND c_std.invalid_reason IS NULL
             QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.condition_occurrence_id ORDER BY c_std.concept_id DESC) = 1
+        """)
+
+        con.execute("""
+            DELETE FROM condition_occurrence
+            WHERE condition_occurrence_id IN (
+                SELECT stg.condition_occurrence_id
+                FROM stg_condition stg
+                JOIN concept c_src ON stg.snomed_code = c_src.concept_code AND c_src.vocabulary_id = 'SNOMED'
+                JOIN concept_relationship cr ON c_src.concept_id = cr.concept_id_1 AND cr.relationship_id = 'Maps to'
+                JOIN concept c_std ON cr.concept_id_2 = c_std.concept_id AND c_std.standard_concept = 'S'
+                WHERE c_std.domain_id != 'Condition'
+            )
         """)
         
         con.execute("""

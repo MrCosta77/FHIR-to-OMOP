@@ -102,3 +102,21 @@ def test_visit_person_fk(db_connection):
     """).fetchone()[0]
     
     assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan visits without a valid associated patient."
+
+def test_observation_person_fk(db_connection):
+    """Verifica se todas as observações pertencem a um doente válido na tabela Person."""
+    result = db_connection.execute("""
+        SELECT COUNT(*) FROM observation o
+        LEFT JOIN person p ON o.person_id = p.person_id
+        WHERE p.person_id IS NULL
+    """).fetchone()[0]
+    assert result == 0, f"Found {result} observations linked to non-existent persons."
+
+def test_procedure_person_fk(db_connection):
+    """Verifica se todos os procedimentos pertencem a um doente válido na tabela Person."""
+    result = db_connection.execute("""
+        SELECT COUNT(*) FROM procedure_occurrence po
+        LEFT JOIN person p ON po.person_id = p.person_id
+        WHERE p.person_id IS NULL
+    """).fetchone()[0]
+    assert result == 0, f"Found {result} procedures linked to non-existent persons."
