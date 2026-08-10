@@ -13,3 +13,5 @@ synthea/
 
 .ipynb_checkpoints/
 __pycache__/
+
+dqd_results/

@@ -8,6 +8,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 FHIR_DIR = os.path.join(PROJECT_ROOT, "synthea", "output", "fhir")
 DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
 
+# A PASTA DOS DICIONÁRIOS (Corrigida)
+VOCAB_DIR = os.path.join(PROJECT_ROOT, "data", "omop_vocab") 
+
 # LLM Configurations
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen2.5-coder:7b"
