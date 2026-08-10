@@ -1,43 +1,54 @@
-import duckdb
 import os
-import time
 import sys
+import duckdb
 from pathlib import Path
 
-# Setup dynamic paths
+# Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
+from src.utils.config import DB_PATH
+
+# Aponta para a pasta onde extraíste o zip da Athena
 VOCAB_DIR = os.path.join(PROJECT_ROOT, "data", "omop_vocab")
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
 
-def load_concept_table():
-    """Loads the OMOP CONCEPT table from the Athena CSV. (Run once per environment)"""
-    concept_csv = os.path.join(VOCAB_DIR, "CONCEPT.csv")
+def load_vocabularies():
+    print("⚙️ STARTING VOCABULARY LOAD (CONCEPT & CONCEPT_RELATIONSHIP)")
+    print("-" * 50)
     
-    if not os.path.exists(concept_csv):
-        print(f"❌ Error: The file {concept_csv} does not exist.")
+    concept_csv = os.path.join(VOCAB_DIR, "CONCEPT.csv")
+    rel_csv = os.path.join(VOCAB_DIR, "CONCEPT_RELATIONSHIP.csv")
+    
+    if not os.path.exists(concept_csv) or not os.path.exists(rel_csv):
+        print(f"❌ Error: Could not find vocabulary CSV files in {VOCAB_DIR}")
+        print("Please ensure CONCEPT.csv and CONCEPT_RELATIONSHIP.csv are present.")
         return
-
-    print("🔌 Connecting to DuckDB...")
-    try:
-        con = duckdb.connect(DB_PATH)
-        print("⏳ Loading CONCEPT table... (This takes a few seconds)")
-        start_time = time.time()
         
+    with duckdb.connect(DB_PATH) as con:
+        print("⏳ Loading CONCEPT table (this may take a few seconds)...")
         con.execute("DROP TABLE IF EXISTS concept")
+        
+        # Leitura segura sugerida na review: delimitador tab, sem aspas e forçar strings
         con.execute(f"""
             CREATE TABLE concept AS 
-            SELECT * FROM read_csv_auto('{concept_csv}', header=True, delim='\t', nullstr='', sample_size=100000)
+            SELECT * FROM read_csv('{concept_csv}', 
+                delim='\t', header=true, quote='', escape='', nullstr='', all_varchar=true)
         """)
         
-        elapsed_time = time.time() - start_time
-        count = con.execute("SELECT COUNT(*) FROM concept").fetchone()[0]
+        print("⏳ Loading CONCEPT_RELATIONSHIP table (the 'Maps to' bridge)...")
+        con.execute("DROP TABLE IF EXISTS concept_relationship")
+        con.execute(f"""
+            CREATE TABLE concept_relationship AS 
+            SELECT * FROM read_csv('{rel_csv}', 
+                delim='\t', header=true, quote='', escape='', nullstr='', all_varchar=true)
+        """)
         
-        print(f"✅ Success! Loaded {count:,} concepts in {elapsed_time:.2f} seconds.")
-    except Exception as e:
-        print(f"❌ Critical error during load: {e}")
-    finally:
-        con.close()
-        print("🔒 DuckDB connection closed.")
+        concept_count = con.execute("SELECT COUNT(*) FROM concept").fetchone()[0]
+        rel_count = con.execute("SELECT COUNT(*) FROM concept_relationship").fetchone()[0]
+        
+    print("\n✅ Vocabularies successfully loaded into DuckDB!")
+    print(f" - CONCEPT: {concept_count:,} rows")
+    print(f" - CONCEPT_RELATIONSHIP: {rel_count:,} rows")
 
 if __name__ == "__main__":
-    load_concept_table()
+    load_vocabularies()

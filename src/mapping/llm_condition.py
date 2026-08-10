@@ -1,9 +1,10 @@
-import duckdb
-import ollama
+import os
+import sys
 import re
 import time
-import sys
-import os
+import json
+import duckdb
+import ollama
 from pathlib import Path
 
 # Setup paths dynamically
@@ -11,9 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 # Configuration
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
-MODEL_NAME = "qwen2.5-coder:7b"
-SIMILARITY_THRESHOLD = 0.90 # 90% confidence minimum to accept a match
+from src.utils.config import DB_PATH, MODEL_NAME
+
+# Stricter threshold to avoid false positives in short clinical strings
+SIMILARITY_THRESHOLD = 0.95 
 
 def get_unique_unmapped_conditions(con):
     """Fetch ALL unique unmapped clinical conditions from DuckDB."""
@@ -37,14 +39,17 @@ def ai_semantic_normalization(raw_term):
     4. Keep it as short and precise as possible.
     """
     try:
+        # Added temperature=0.0 for strict determinism
         response = ollama.chat(
             model=MODEL_NAME,
             messages=[
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': f"Raw clinical text: '{raw_term}'"}
-            ]
+            ],
+            options={'temperature': 0.0} 
         )
         clean_text = response['message']['content'].strip().strip("'").strip('"')
+        
         # Hardcode fallback to ensure tags are removed even if AI forgets
         clean_text = re.sub(r'\([^)]*\)', '', clean_text).strip()
         return clean_text
@@ -61,7 +66,8 @@ def find_best_match(con, normalized_term):
         WHERE vocabulary_id = 'SNOMED'
         AND domain_id = 'Condition'
         AND standard_concept = 'S'
-        ORDER BY score DESC
+        AND invalid_reason IS NULL
+        ORDER BY score DESC, concept_id ASC -- Deterministic tie-breaking
         LIMIT 1
     """
     match = con.execute(search_query, [normalized_term]).fetchone()
@@ -71,7 +77,7 @@ def find_best_match(con, normalized_term):
     return None
 
 def run_semantic_mapping():
-    """Main execution block for AI-Assisted Mapping."""
+    """Main execution block for AI-Assisted Mapping with Audit Trail."""
     print("⚙️ STARTING AI-ASSISTED SEMANTIC MAPPING (CONDITIONS) \n" + "-"*50)
 
     with duckdb.connect(DB_PATH) as con:
@@ -85,7 +91,7 @@ def run_semantic_mapping():
         total_terms = len(unique_terms)
         print(f"⚠️ Found {total_terms} UNIQUE unmapped terms. Starting AI pipeline...\n")
         
-        successful_updates = []
+        updates = []
         
         for i, term in enumerate(unique_terms, 1):
             print(f"[{i}/{total_terms}] Raw: '{term}'")
@@ -108,40 +114,55 @@ def run_semantic_mapping():
             if match:
                 concept_id, concept_name, domain, score = match
                 print(f"   🎯 DB:  '{concept_name}' (ID: {concept_id}) | Score: {score:.2f} | Time: {db_time:.1f}s")
-                successful_updates.append((concept_id, term))
+                updates.append((concept_id, ai_term, score, term))
             else:
                 print(f"   ❌ DB:  No match found above {SIMILARITY_THRESHOLD*100}% confidence.")
             print("-" * 40)
             
-        # 4. The Write-Back
-        if successful_updates:
-            print(f"\n💾 Writing {len(successful_updates)} standardized concepts back to the database in BULK...")
+        # 4. The Write-Back & Provenance Registration
+        if updates:
+            print(f"\n💾 Writing {len(updates)} standardized concepts back to the database...")
             
-            update_query = """
-                UPDATE condition_occurrence
-                SET condition_concept_id = ?
-                WHERE condition_source_value = ? 
-                  AND condition_concept_id = 0
-            """
-            con.executemany(update_query, successful_updates)
-            print("✅ Database successfully updated!")
-            
-            # 5. Integrated Audit
-            print("\n🔍 AUDIT: Verifying a sample of AI-mapped clinical conditions...")
-            audit_query = """
-                SELECT condition_source_value, condition_concept_id
-                FROM condition_occurrence
-                WHERE condition_concept_id != 0
-                LIMIT 5
-            """
-            results = con.execute(audit_query).fetchall()
-            for row in results:
-                print(f"   - Raw: '{row[0]:<30}' ➡️ ID: {row[1]}")
+            for concept_id, llm_term, score, raw_term in updates:
+                # 4a. Update the main clinical table
+                con.execute("""
+                    UPDATE condition_occurrence 
+                    SET condition_concept_id = ? 
+                    WHERE condition_source_value = ? 
+                      AND condition_concept_id = 0
+                """, (concept_id, raw_term))
                 
+                # 4b. Insert the Audit Trail for the newly mapped rows
+                con.execute("""
+                    INSERT INTO mapping_provenance (
+                        target_table, target_id, source_value, normalized_value,
+                        assigned_concept_id, mapping_method, score, model_name,
+                        vocabulary_version, reviewed_by
+                    )
+                    SELECT 
+                        'condition_occurrence',
+                        condition_occurrence_id,
+                        condition_source_value,
+                        ?, 
+                        ?, 
+                        'llm_jaro_winkler',
+                        ?,
+                        ?, 
+                        'Athena_v5.4',
+                        'Pending_Human_Review'
+                    FROM condition_occurrence
+                    WHERE condition_source_value = ? AND condition_concept_id = ?
+                    AND condition_occurrence_id NOT IN (
+                        SELECT target_id FROM mapping_provenance WHERE target_table = 'condition_occurrence'
+                    )
+                """, (llm_term, concept_id, score, MODEL_NAME, raw_term, concept_id))
+                
+            print("✅ Database and Provenance Audit successfully updated!")
+            
         else:
             print("\n⚠️ No matches met the confidence threshold. Database was not updated.")
             
-        print(f"\n📊 SUMMARY: Successfully mapped {len(successful_updates)} out of {total_terms} unique terms.")
+        print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {total_terms} unique terms.")
 
 if __name__ == "__main__":
     run_semantic_mapping()

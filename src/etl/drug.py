@@ -1,145 +1,231 @@
 import os
-import json
-import duckdb
 import sys
+import json
+import glob
+import duckdb
+import hashlib
 from pathlib import Path
 
-# Setup dynamic paths relative to this script
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-FHIR_DIR = os.path.join(PROJECT_ROOT, "synthea", "output", "fhir")
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
-
-# Centralized imports
 sys.path.append(str(PROJECT_ROOT))
+
+from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 
-def extract_drugs(patient_file):
-    """
-    Reads a FHIR bundle and extracts MedicationRequest records, 
-    resolving medicationReferences when inline coding is missing.
-    """
-    file_path = os.path.join(FHIR_DIR, patient_file)
-    with open(file_path, 'r', encoding='utf-8') as f:
-        fhir_data = json.load(f)
-        
-    drugs = []
-    
-    # PASS 1: Build a dictionary of Medication resources
-    medication_dict = {}
-    for entry in fhir_data.get('entry', []):
-        resource = entry.get('resource', {})
-        if resource.get('resourceType') == 'Medication':
-            full_url = entry.get('fullUrl', '')
-            coding = resource.get('code', {}).get('coding', [])
-            if coding:
-                medication_dict[full_url] = {
-                    'code': coding[0].get('code', '0'),
-                    'display': coding[0].get('display', 'Unknown')
-                }
+def generate_drug_id(unique_string):
+    """Generates a stable, deterministic ID from a unique string."""
+    clean_string = unique_string.replace('urn:uuid:', '')
+    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
-    # PASS 2: Extract Prescriptions (MedicationRequests)
-    for entry in fhir_data.get('entry', []):
-        resource = entry.get('resource', {})
+def extract_drugs(file_path):
+    records = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        bundle = json.load(f)
         
-        if resource.get('resourceType') == 'MedicationRequest':
-            subject_ref = resource.get('subject', {}).get('reference', '')
-            patient_source_id = subject_ref.replace('urn:uuid:', '')
-            person_id = stable_person_id(patient_source_id)
-            
-            rxnorm_code = "0"
-            drug_text = "Unknown"
-            
-            medication_cc = resource.get('medicationCodeableConcept', {})
-            if medication_cc and medication_cc.get('coding'):
-                rxnorm_code = medication_cc['coding'][0].get('code', '0')
-                drug_text = medication_cc['coding'][0].get('display', 'Unknown')
+        if bundle.get('resourceType') != 'Bundle':
+            return records
+
+        # Pass 1: Build a dictionary of Medication resources (UUID -> RxNorm details)
+        medications = {}
+        for entry in bundle.get('entry', []):
+            res = entry.get('resource', {})
+            if res.get('resourceType') == 'Medication':
+                med_id = "urn:uuid:" + res.get('id', '')
+                code = None
+                display = "Unknown"
+                codings = res.get('code', {}).get('coding', [])
+                for c in codings:
+                    if c.get('system') == 'http://www.nlm.nih.gov/research/umls/rxnorm':
+                        code = c.get('code')
+                        display = c.get('display', '')
+                        break
+                if not code and codings:
+                    code = codings[0].get('code')
+                    display = codings[0].get('display', '')
                 
-            elif 'medicationReference' in resource:
-                ref_url = resource['medicationReference'].get('reference', '')
-                if ref_url in medication_dict:
-                    rxnorm_code = medication_dict[ref_url]['code']
-                    drug_text = medication_dict[ref_url]['display']
+                if code:
+                    medications[med_id] = {'code': code, 'display': display}
+
+        # Pass 2: Process MedicationRequests
+        for entry in bundle.get('entry', []):
+            res = entry.get('resource', {})
+            if res.get('resourceType') == 'MedicationRequest':
+                patient_ref = res.get('subject', {}).get('reference', '')
+                person_id = stable_person_id(patient_ref)
+                if not person_id:
+                    continue
                 
-            start_date = resource.get('authoredOn', '1900-01-01')[:10] 
-            
-            drugs.append((person_id, rxnorm_code, drug_text, start_date))
-            
-    return drugs
+                code = None
+                display = "Unknown"
+                
+                # Try inline coding first
+                med_cc = res.get('medicationCodeableConcept', {})
+                codings = med_cc.get('coding', [])
+                for c in codings:
+                    if c.get('system') == 'http://www.nlm.nih.gov/research/umls/rxnorm':
+                        code = c.get('code')
+                        display = c.get('display', '')
+                        break
+                        
+                # If not inline, use two-pass medicationReference lookup
+                if not code:
+                    med_ref = res.get('medicationReference', {}).get('reference', '')
+                    if med_ref in medications:
+                        code = medications[med_ref]['code']
+                        display = medications[med_ref]['display']
+                        
+                if not code:
+                    continue
+                    
+                start_date = res.get('authoredOn', '')[:10]
+                if not start_date:
+                    continue
+
+                # A forma mais segura de identificar um recurso num Bundle FHIR é o seu 'fullUrl'
+                full_url = entry.get('fullUrl', '')
+                if full_url:
+                    base_string = full_url
+                else:
+                    # Fallback à prova de bala: transformar o recurso inteiro numa string e fazer o hash
+                    base_string = json.dumps(res, sort_keys=True)
+                    
+                drug_id = generate_drug_id(base_string)
+                
+                records.append((
+                    drug_id,
+                    person_id,
+                    code,
+                    display,
+                    start_date
+                ))
+                
+    return records
 
 def run_drug_etl():
-    """Main execution block for Drug ETL."""
-    print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP DRUG) [PRODUCTION]\n" + "-"*50)
-
+    print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP DRUG) [PRODUCTION]")
+    print("-" * 50)
+    
     print("🔍 Extracting medications from FHIR JSON files...")
-    json_files = [f for f in os.listdir(FHIR_DIR) if f.endswith('.json')]
-    all_drugs = []
+    fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
+    
+    all_records = []
+    for f in fhir_files:
+        all_records.extend(extract_drugs(f))
+        
+    print(f"📊 Extracted {len(all_records)} raw medication records.")
+    print("🔌 Connecting to DuckDB for standardized insertion...")
+    
+    with duckdb.connect(DB_PATH) as con:
+        con.execute("DROP TABLE IF EXISTS drug_exposure")
+        
+        con.execute("""
+            CREATE TABLE drug_exposure (
+                drug_exposure_id BIGINT PRIMARY KEY,
+                person_id BIGINT,
+                drug_concept_id INTEGER,
+                drug_exposure_start_date DATE,
+                drug_exposure_start_datetime TIMESTAMP,
+                drug_exposure_end_date DATE,
+                drug_exposure_end_datetime TIMESTAMP,
+                drug_type_concept_id INTEGER,
+                stop_reason VARCHAR,
+                refills INTEGER,
+                quantity DOUBLE,
+                days_supply INTEGER,
+                sig VARCHAR,
+                route_concept_id INTEGER,
+                lot_number VARCHAR,
+                provider_id BIGINT,
+                visit_occurrence_id BIGINT,
+                visit_detail_id BIGINT,
+                drug_source_value VARCHAR,
+                drug_source_concept_id INTEGER,
+                route_source_value VARCHAR,
+                dose_unit_source_value VARCHAR
+            )
+        """)
+        
+        con.execute("DROP TABLE IF EXISTS stg_drug")
+        con.execute("""
+            CREATE TEMPORARY TABLE stg_drug (
+                drug_exposure_id BIGINT,
+                person_id BIGINT,
+                rxnorm_code VARCHAR,
+                display_text VARCHAR,
+                start_date DATE
+            )
+        """)
+        
+        con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?)", all_records)
+        
+        con.execute("""
+            INSERT INTO drug_exposure (
+                drug_exposure_id, person_id, drug_concept_id,
+                drug_exposure_start_date, drug_exposure_start_datetime,
+                drug_exposure_end_date, drug_exposure_end_datetime,
+                drug_type_concept_id, drug_source_value, drug_source_concept_id
+            )
+            SELECT 
+                stg.drug_exposure_id,
+                stg.person_id,
+                CASE 
+                    WHEN c_std.domain_id = 'Drug' THEN COALESCE(c_std.concept_id::INTEGER, 0)
+                    ELSE 0 
+                END AS drug_concept_id,
+                stg.start_date,
+                stg.start_date::TIMESTAMP,
+                stg.start_date,
+                stg.start_date::TIMESTAMP,
+                32817 AS drug_type_concept_id,
+                stg.display_text AS drug_source_value,
+                COALESCE(c_src.concept_id::INTEGER, 0) AS drug_source_concept_id
+            FROM stg_drug stg
+            LEFT JOIN concept c_src 
+                ON stg.rxnorm_code = c_src.concept_code 
+                AND c_src.vocabulary_id = 'RxNorm'
+                AND c_src.invalid_reason IS NULL -- Evita duplicados de conceitos descontinuados
+            LEFT JOIN concept_relationship cr 
+                ON c_src.concept_id = cr.concept_id_1 
+                AND cr.relationship_id = 'Maps to'
+                AND cr.invalid_reason IS NULL
+            LEFT JOIN concept c_std 
+                ON cr.concept_id_2 = c_std.concept_id 
+                AND c_std.standard_concept = 'S'
+                AND c_std.invalid_reason IS NULL
+            -- QUALIFY garante que, mesmo que haja múltiplos mapeamentos, só levamos 1 linha por ID
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.drug_exposure_id ORDER BY c_std.concept_id DESC) = 1
+        """)
 
-    for file in json_files:
-        all_drugs.extend(extract_drugs(file))
-
-    print(f"📊 Extracted {len(all_drugs)} raw medication records.")
-    print("🔌 Connecting to DuckDB for RxNorm vocabulary mapping...")
-
-    try:
-        with duckdb.connect(DB_PATH) as con:
-            con.execute("DROP TABLE IF EXISTS stg_drug")
-            con.execute("""
-                CREATE TEMPORARY TABLE stg_drug (
-                    person_id BIGINT,
-                    rxnorm_code VARCHAR,
-                    drug_text VARCHAR,
-                    start_date DATE
-                )
-            """)
-            
-            con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?)", all_drugs)
-            
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS drug_exposure (
-                    drug_exposure_id BIGINT PRIMARY KEY,
-                    person_id BIGINT,
-                    drug_concept_id INTEGER,
-                    drug_exposure_start_date DATE,
-                    drug_source_value VARCHAR,
-                    drug_source_concept_id INTEGER
-                )
-            """)
-            con.execute("DELETE FROM drug_exposure")
-            
-            # Insertion with strict OMOP semantic separation
-            con.execute("""
-                INSERT INTO drug_exposure 
-                SELECT 
-                    ROW_NUMBER() OVER () AS drug_exposure_id,
-                    stg.person_id,
-                    COALESCE(c.concept_id, 0) AS drug_concept_id, 
-                    stg.start_date AS drug_exposure_start_date,
-                    stg.drug_text AS drug_source_value,
-                    COALESCE(sc.concept_id, 0) AS drug_source_concept_id 
-                FROM stg_drug stg
-                
-                -- 1. O Mapeamento Analítico (Standard)
-                LEFT JOIN concept c 
-                    ON stg.rxnorm_code = c.concept_code 
-                    AND c.vocabulary_id = 'RxNorm'
-                    AND c.domain_id = 'Drug'
-                    AND c.standard_concept = 'S'
-                    
-                -- 2. O Mapeamento de Auditoria (Source)
-                LEFT JOIN concept sc 
-                    ON stg.rxnorm_code = sc.concept_code 
-                    AND sc.vocabulary_id = 'RxNorm'
-            """)
-            
-            mapped = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
-            unmapped = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]
-            
-            print("\n✅ ETL Complete!")
-            print(f" - Successfully mapped to OMOP Standards: {mapped} medications")
-            print(f" - Failed to map (Unknown/Custom): {unmapped} medications")
-
-    except Exception as e:
-        print(f"❌ Database error: {e}")
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value, normalized_value,
+                assigned_concept_id, mapping_method, score, model_name,
+                vocabulary_version, reviewed_by
+            )
+            SELECT 
+                'drug_exposure',
+                drug_exposure_id,
+                drug_source_value,
+                drug_source_value,
+                drug_concept_id,
+                'deterministic_maps_to',
+                1.0,
+                'N/A',
+                'Athena_v5.4',
+                'System'
+            FROM drug_exposure
+            WHERE drug_concept_id != 0
+            AND drug_exposure_id NOT IN (
+                SELECT target_id FROM mapping_provenance WHERE target_table = 'drug_exposure'
+            )
+        """)
+        
+        mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
+        unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]
+        
+    print("\n✅ ETL Complete!")
+    print(f" - Successfully mapped (OMOP Standard): {mapped_count} medications")
+    print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} medications")
 
 if __name__ == "__main__":
     run_drug_etl()

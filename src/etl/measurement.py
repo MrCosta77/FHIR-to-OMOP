@@ -1,145 +1,214 @@
 import os
-import json
-import duckdb
-import random
 import sys
+import json
+import glob
+import duckdb
+import hashlib
 from pathlib import Path
 
-# Setup paths based on our new modular architecture
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-FHIR_DIR = os.path.join(PROJECT_ROOT, "synthea", "output", "fhir")
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
-
-# Import our reusable hash function
 sys.path.append(str(PROJECT_ROOT))
+
+from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 
-def simulate_legacy_lis(loinc_code: str, display_text: str):
-    """
-    Controlled Chaos: Simulates real-world messy hospital data.
-    20% of the time, it strips the LOINC code and slightly alters the text,
-    forcing the record into the AI fallback queue.
-    """
-    if random.random() < 0.20:
-        # Erase the code and simulate a messy manual entry
-        messy_text = display_text.upper().replace(" IN SERUM OR PLASMA", "").strip()
-        return "0", messy_text
-    return loinc_code, display_text
+def generate_measurement_id(unique_string):
+    """Generates a stable, deterministic ID from a unique string."""
+    clean_string = unique_string.replace('urn:uuid:', '')
+    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
-def extract_measurements(patient_file):
-    """Extracts lab results and vital signs from FHIR bundles."""
-    file_path = os.path.join(FHIR_DIR, patient_file)
+def extract_measurements(file_path):
+    records = []
     with open(file_path, 'r', encoding='utf-8') as f:
-        fhir_data = json.load(f)
+        bundle = json.load(f)
         
-    measurements = []
-    
-    for entry in fhir_data.get('entry', []):
-        resource = entry.get('resource', {})
-        
-        # Look for Observations (Labs and Vitals)
-        if resource.get('resourceType') == 'Observation':
+        if bundle.get('resourceType') != 'Bundle':
+            return records
             
-            # Extract Person ID
-            subject_ref = resource.get('subject', {}).get('reference', '')
-            patient_source_id = subject_ref.replace('urn:uuid:', '')
-            person_id = stable_person_id(patient_source_id)
+        for entry in bundle.get('entry', []):
+            resource = entry.get('resource', {})
             
-            # Extract the raw LOINC code and text
-            code_block = resource.get('code', {}).get('coding', [{}])[0]
-            raw_code = code_block.get('code', '0')
-            raw_text = code_block.get('display', 'Unknown')
-            
-            # 🌪️ INJECT CONTROLLED CHAOS 🌪️
-            source_code, source_text = simulate_legacy_lis(raw_code, raw_text)
-            
-            # Extract the Value and Unit
-            value_qty = resource.get('valueQuantity', {})
-            value_as_number = value_qty.get('value', None)
-            unit_source_value = value_qty.get('unit', None)
-            
-            # We only want quantitative measurements for this phase
-            if value_as_number is not None:
-                start_date = resource.get('effectiveDateTime', '1900-01-01')[:10]
-                measurements.append((person_id, source_code, source_text, start_date, value_as_number, unit_source_value))
-            
-    return measurements
+            if resource.get('resourceType') == 'Observation':
+                patient_ref = resource.get('subject', {}).get('reference', '')
+                person_id = stable_person_id(patient_ref)
+                
+                if not person_id:
+                    continue
+                    
+                code = None
+                display = "Unknown"
+                codings = resource.get('code', {}).get('coding', [])
+                
+                for c in codings:
+                    if c.get('system') == 'http://loinc.org':
+                        code = c.get('code')
+                        display = c.get('display', '')
+                        break
+                        
+                if not code:
+                    continue
+                    
+                date = resource.get('effectiveDateTime', '')[:10]
+                if not date:
+                    continue
+                    
+                value = None
+                unit = None
+                
+                if 'valueQuantity' in resource:
+                    value = resource['valueQuantity'].get('value')
+                    unit = resource['valueQuantity'].get('unit')
+                
+                if value is None:
+                    continue
+                    
+                # Identificador Único Universal do Bundle FHIR
+                full_url = entry.get('fullUrl', '')
+                if full_url:
+                    base_string = full_url
+                else:
+                    # Fallback de segurança: transformar o JSON do lab resource numa string
+                    base_string = json.dumps(resource, sort_keys=True)
+                    
+                measurement_id = generate_measurement_id(base_string)
+                
+                records.append((
+                    measurement_id,
+                    person_id,
+                    code,
+                    display,
+                    float(value),
+                    unit,
+                    date
+                ))
+    return records
 
 def run_measurement_etl():
-    """Main execution block for Measurement ETL."""
-    print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP MEASUREMENT) [RWE CHAOS SIMULATION]\n" + "-"*50)
+    print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP MEASUREMENT) [PRODUCTION]")
+    print("-" * 50)
     
-    json_files = [f for f in os.listdir(FHIR_DIR) if f.endswith('.json')]
-    all_measurements = []
-
-    print("🔍 Extracting laboratory results and injecting real-world noise...")
-    for file in json_files:
-        all_measurements.extend(extract_measurements(file))
-
-    print(f"📊 Extracted {len(all_measurements)} quantitative measurements.")
+    print("🔍 Extracting laboratory results from FHIR JSON files...")
+    fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
     
-    try:
-        with duckdb.connect(DB_PATH) as con:
-            # Staging table
-            con.execute("DROP TABLE IF EXISTS stg_measurement")
-            con.execute("""
-                CREATE TEMPORARY TABLE stg_measurement (
-                    person_id BIGINT,
-                    loinc_code VARCHAR,
-                    measurement_text VARCHAR,
-                    start_date DATE,
-                    value_as_number DOUBLE,
-                    unit_source_value VARCHAR
-                )
-            """)
-            
-            con.executemany("INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?)", all_measurements)
-            
-            # Create Target Table with proper OMOP fields
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS measurement (
-                    measurement_id BIGINT PRIMARY KEY,
-                    person_id BIGINT,
-                    measurement_concept_id INTEGER,
-                    measurement_date DATE,
-                    value_as_number DOUBLE,
-                    unit_source_value VARCHAR,
-                    measurement_source_value VARCHAR,
-                    measurement_source_concept_id INTEGER
-                )
-            """)
-            
-            con.execute("DELETE FROM measurement")
-            
-            # Insertion with Semantic Rigor (LOINC code mapping)
-            con.execute("""
-                INSERT INTO measurement 
-                SELECT 
-                    ROW_NUMBER() OVER () AS measurement_id,
-                    stg.person_id,
-                    COALESCE(c.concept_id, 0) AS measurement_concept_id,
-                    stg.start_date AS measurement_date,
-                    stg.value_as_number,
-                    stg.unit_source_value,
-                    stg.measurement_text AS measurement_source_value,
-                    0 AS measurement_source_concept_id
-                FROM stg_measurement stg
-                LEFT JOIN concept c 
-                    ON stg.loinc_code = c.concept_code 
-                    AND c.vocabulary_id = 'LOINC'
-                    AND c.domain_id = 'Measurement'
-                    AND c.standard_concept = 'S'
-            """)
-            
-            mapped = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
-            unmapped = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]
-            
-            print("\n✅ ETL Complete!")
-            print(f" - Successfully mapped (Clean Data): {mapped} records")
-            print(f" - Corrupted / Unmapped (AI Queue): {unmapped} records")
+    all_records = []
+    for f in fhir_files:
+        all_records.extend(extract_measurements(f))
+        
+    print(f"📊 Extracted {len(all_records)} raw measurement records.")
+    print("🔌 Connecting to DuckDB for standardized insertion...")
+    
+    with duckdb.connect(DB_PATH) as con:
+        con.execute("DROP TABLE IF EXISTS measurement")
+        
+        con.execute("""
+            CREATE TABLE measurement (
+                measurement_id BIGINT PRIMARY KEY,
+                person_id BIGINT,
+                measurement_concept_id INTEGER,
+                measurement_date DATE,
+                measurement_datetime TIMESTAMP,
+                measurement_time VARCHAR,
+                measurement_type_concept_id INTEGER,
+                operator_concept_id INTEGER,
+                value_as_number DOUBLE,
+                value_as_concept_id INTEGER,
+                unit_concept_id INTEGER,
+                range_low DOUBLE,
+                range_high DOUBLE,
+                provider_id BIGINT,
+                visit_occurrence_id BIGINT,
+                visit_detail_id BIGINT,
+                measurement_source_value VARCHAR,
+                measurement_source_concept_id INTEGER,
+                unit_source_value VARCHAR,
+                value_source_value VARCHAR
+            )
+        """)
+        
+        con.execute("DROP TABLE IF EXISTS stg_measurement")
+        con.execute("""
+            CREATE TEMPORARY TABLE stg_measurement (
+                measurement_id BIGINT,
+                person_id BIGINT,
+                loinc_code VARCHAR,
+                display_text VARCHAR,
+                value DOUBLE,
+                unit VARCHAR,
+                date DATE
+            )
+        """)
+        
+        con.executemany("INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?)", all_records)
+        
+        con.execute("""
+            INSERT INTO measurement (
+                measurement_id, person_id, measurement_concept_id,
+                measurement_date, measurement_datetime,
+                measurement_type_concept_id, value_as_number,
+                measurement_source_value, measurement_source_concept_id,
+                unit_source_value
+            )
+            SELECT 
+                stg.measurement_id,
+                stg.person_id,
+                CASE 
+                    WHEN c_std.domain_id = 'Measurement' THEN COALESCE(c_std.concept_id::INTEGER, 0)
+                    ELSE 0 
+                END AS measurement_concept_id,
+                stg.date,
+                stg.date::TIMESTAMP,
+                32817 AS measurement_type_concept_id,
+                stg.value AS value_as_number,
+                stg.display_text AS measurement_source_value,
+                COALESCE(c_src.concept_id::INTEGER, 0) AS measurement_source_concept_id,
+                stg.unit AS unit_source_value
+            FROM stg_measurement stg
+            LEFT JOIN concept c_src 
+                ON stg.loinc_code = c_src.concept_code 
+                AND c_src.vocabulary_id = 'LOINC'
+                AND c_src.invalid_reason IS NULL
+            LEFT JOIN concept_relationship cr 
+                ON c_src.concept_id = cr.concept_id_1 
+                AND cr.relationship_id = 'Maps to'
+                AND cr.invalid_reason IS NULL
+            LEFT JOIN concept c_std 
+                ON cr.concept_id_2 = c_std.concept_id 
+                AND c_std.standard_concept = 'S'
+                AND c_std.invalid_reason IS NULL
+            -- O escudo contra o 'merge-inflation' garantindo apenas 1 conceito por registo
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.measurement_id ORDER BY c_std.concept_id DESC) = 1
+        """)
 
-    except Exception as e:
-        print(f"❌ Database error: {e}")
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value, normalized_value,
+                assigned_concept_id, mapping_method, score, model_name,
+                vocabulary_version, reviewed_by
+            )
+            SELECT 
+                'measurement',
+                measurement_id,
+                measurement_source_value,
+                measurement_source_value,
+                measurement_concept_id,
+                'deterministic_maps_to',
+                1.0,
+                'N/A',
+                'Athena_v5.4',
+                'System'
+            FROM measurement
+            WHERE measurement_concept_id != 0
+            AND measurement_id NOT IN (
+                SELECT target_id FROM mapping_provenance WHERE target_table = 'measurement'
+            )
+        """)
+        
+        mapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
+        unmapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]
+        
+    print("\n✅ ETL Complete!")
+    print(f" - Successfully mapped (Clean Data): {mapped_count} records")
+    print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} records")
 
 if __name__ == "__main__":
     run_measurement_etl()
