@@ -1,56 +1,40 @@
-# Clinical Mapping Framework: FHIR to OMOP CDM
+# 🏥 Clinical Mapping Framework (FHIR to OMOP CDM)
 
-This repository contains a local, privacy-first clinical data engineering pipeline that transforms raw synthetic healthcare data (FHIR) into the OMOP Common Data Model (CDM). 
+An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)** using deterministic vocabulary mapping, and enriches unmapped concepts using **Local Large Language Models (LLMs)** with full audit provenance.
 
-The primary goal of this project is to address a major challenge in Health Data Science and Real-World Evidence (RWE): handling messy, unstructured clinical text that fails standard deterministic ETL mapping, without compromising patient data privacy.
+## 🚀 Key Features
 
-## 🏗️ Architecture & Tech Stack
+* **Strict Domain Routing:** Clinically robust ETL that actively separates Medical Conditions from Social/Categorical Observations based on the official Athena vocabulary domains.
+* **Deterministic Mapping Pipeline:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the `Maps To` relationship.
+* **Longitudinal Patient Context:** Autonomously computes `observation_period` and links all independent clinical events to their respective hospital encounters (`visit_occurrence_id`).
+* **AI Semantic Enrichment:** Uses a local LLM (Qwen via Ollama) and Jaro-Winkler similarity to map orphan clinical terms, keeping a strict confidence threshold (0.95).
+* **Regulatory-Grade Provenance:** Maintains a dedicated `mapping_provenance` table to audit AI vs. Deterministic decisions (ready for human review).
+* **Autonomous Text-to-SQL Agent:** An integrated AI assistant capable of answering clinical questions in natural language by autonomously generating and executing DuckDB queries.
 
-- **Data Generation:** Synthea (FHIR JSON Bundles)
-- **Database / SQL Engine:** DuckDB (Chosen for in-process, memory-efficient analytical queries over 6.4M+ OMOP vocabulary concepts)
-- **Orchestration & ETL:** Python 3.12 (Modularized under `src/`)
-- **Semantic Engine:** Local Ollama (`qwen2.5-coder:7b`) + ChromaDB (`all-MiniLM-L6-v2` embeddings)
+## 🛠️ Tech Stack
 
-## 🧠 Core Engineering Philosophy
+* **Database Engine:** DuckDB (Columnar, high-performance analytical engine)
+* **Language:** Python 3.x
+* **AI / LLM:** Ollama (qwen2.5-coder:7b) for local, privacy-preserving inference
+* **Standardization:** OHDSI / OMOP CDM v5.4 Vocabularies
 
-During development, I prioritized data integrity, clinical accuracy, and privacy:
+## 📁 Pipeline Orchestration
 
-1. **Deterministic Relational Integrity:** Built using stable cryptographic hashing (`hashlib.sha256`) on original FHIR UUIDs. This ensures `person_id` remains strictly consistent across different ETL runs, maintaining perfect referential integrity between clinical event tables.
-2. **Idempotency & Data Quality:** The pipeline is designed to be safely re-run without record duplication. Automated Pytest suites validate unique IDs, foreign keys, and temporal constraints (e.g., no future dates).
-3. **Local-Only Processing:** Clinical data processing is designed to remain local; the AI inference layer and vector databases run entirely on-machine, avoiding external API calls to safeguard potential PHI.
+The entire infrastructure can be instantiated from scratch using the unified orchestrator:
 
-## 🧬 The Hybrid Mapping Strategy (Rules + AI)
+```bash
+python main.py
+```
+*This executes a 10-step pipeline spanning vocabulary setup, base extraction (Visits, Conditions, Drugs, Measurements, Observations, Procedures), longitudinal linkage, and final AI semantic mapping.*
 
-A purely deterministic pipeline leaves noisy data behind, while a purely LLM-based pipeline risks clinical hallucinations. This framework uses a **3-Tiered Hybrid Approach**:
+## 📊 Analytics & Text-to-SQL
 
-### 1. Deterministic ETL (The Foundation)
-Extracts and loads clean FHIR resources using structured coding (e.g., SNOMED, RxNorm). Complex HL7 FHIR structures, such as resolving `medicationReference` UUIDs to standard RxNorm concepts, are handled natively in SQL/Python.
+To test the database's Real-World Evidence capabilities:
 
-### 2. Orthographic Fallback for Conditions
-For unmapped diseases and conditions (`CONDITION_OCCURRENCE`), the pipeline utilizes the local LLM to normalize raw text, validated against the OMOP dictionary using **Jaro-Winkler similarity**. This solves superficial noise (e.g., typos, shorthand) effectively.
+```bash
+# Run predefined cohort discovery scripts
+python src/analytics/rwe_cohort_discovery.py
 
-### 3. Vector RAG for Laboratory Data (The LOINC Challenge)
-Clinical chemistry and laboratory data (`MEASUREMENT`) cannot be mapped using string similarity. An orthographic algorithm might erroneously map "Bilirubin in Blood" to "Bilirubin in Urine", ignoring the biological sample axis.
-To solve this, I implemented a **Retrieval-Augmented Generation (RAG) pipeline**:
-- The LLM first acts as a clinical normalizer, expanding jargon and abbreviations.
-- The normalized text is converted into vector embeddings.
-- A local **ChromaDB** vector store searches the LOINC vocabulary by spatial semantic proximity, correctly isolating the clinical context (analyte, specimen, and method) before applying a strict cosine-distance confidence threshold for database write-back.
-
-## 🚀 The Pipeline
-
-The pipeline has transitioned from exploratory notebooks into a modular Python architecture.
-
-- `01_explore_fhir.ipynb` / `02_load_omop_vocabularies.ipynb`: Data ingestion and dictionary setup.
-- `99_data_detective.ipynb`: A methodology notebook demonstrating raw JSON debugging and root-cause analysis for missing clinical references.
-- `src/main.py`: Central orchestrator running the ETL and AI mapping sequentially.
-- `src/etl/`: Deterministic extraction modules (`person.py`, `condition.py`, `drug.py`, `measurement.py`).
-- `src/mapping/`: AI and semantic search engines, including the Vector Store initialization.
-- `tests/test_data_quality.py`: Automated Pytest framework ensuring OMOP compliance.
-
-## ⚙️ Setup & Execution
-
-1. Clone the repository and set up a virtual environment.
-2. Install dependencies: `pip install -r requirements.txt` *(Note: requires `chromadb`, `duckdb`, and `sentence-transformers`)*.
-3. Download the OMOP vocabularies from Athena and place them in the `data/` folder.
-4. Ensure Ollama is running locally with the `qwen2.5-coder:7b` model.
-5. Execute the pipeline: `python main.py`
+# Launch the interactive Text-to-SQL AI Agent
+python src/analytics/text_to_sql_agent.py
+```

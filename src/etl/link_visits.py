@@ -54,17 +54,31 @@ def link_events_to_visits():
               AND observation.observation_date <= v.visit_end_date
         """)
         
-        # Calcular estatísticas de ligação
+        print("⏳ Linking Procedures to Visits...")
+        con.execute("""
+            UPDATE procedure_occurrence
+            SET visit_occurrence_id = v.visit_occurrence_id
+            FROM visit_occurrence v
+            WHERE procedure_occurrence.person_id = v.person_id
+              AND procedure_occurrence.procedure_date >= v.visit_start_date
+              AND procedure_occurrence.procedure_date <= v.visit_end_date
+        """)
+
+        # Fazemos TODAS as contagens dentro do bloco `with`, enquanto a ligação está aberta
         cond_linked = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE visit_occurrence_id IS NOT NULL").fetchone()[0]
         drug_linked = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE visit_occurrence_id IS NOT NULL").fetchone()[0]
         meas_linked = con.execute("SELECT COUNT(*) FROM measurement WHERE visit_occurrence_id IS NOT NULL").fetchone()[0]
         obs_linked  = con.execute("SELECT COUNT(*) FROM observation WHERE visit_occurrence_id IS NOT NULL").fetchone()[0]
+        proc_linked = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE visit_occurrence_id IS NOT NULL").fetchone()[0]
         
+    # Quando o bloco `with` acaba, o Python fecha a base de dados em segurança.
+    # Agora podemos imprimir as variáveis livremente.
     print("\n✅ All Clinical Events Successfully Linked to Visits!")
     print(f" - Conditions Linked:   {cond_linked}")
     print(f" - Medications Linked:  {drug_linked}")
     print(f" - Measurements Linked: {meas_linked}")
     print(f" - Observations Linked: {obs_linked}")
+    print(f" - Procedures Linked:   {proc_linked}")
 
 if __name__ == "__main__":
     link_events_to_visits()

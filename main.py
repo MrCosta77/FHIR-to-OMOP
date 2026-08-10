@@ -19,6 +19,7 @@ PIPELINE_STEPS = [
     {"name": "5. Extract Medications", "script": "src/etl/drug.py"},
     {"name": "6. Extract Measurements", "script": "src/etl/measurement.py"},
     {"name": "7. Extract Observations", "script": "src/etl/observation.py"},
+    {"name": "7b. Extract Procedures", "script": "src/etl/procedure.py"},
     
     # FASE 3: Tabelas Derivadas e Ligações
     {"name": "8. Build Observation Periods", "script": "src/etl/observation_period.py"},
