@@ -17,11 +17,11 @@ def get_pending_reviews():
     """Fetches all pending AI mappings from the database."""
     with duckdb.connect(DB_PATH) as con:
         query = """
-            SELECT rowid as provenance_id, target_table, source_value, normalized_value, 
+            SELECT provenance_id, target_table, source_value, normalized_value, 
                    assigned_concept_id, mapping_method, score, model_name
             FROM mapping_provenance
             WHERE reviewed_by = 'Pending_Human_Review'
-            ORDER BY target_id DESC
+            ORDER BY provenance_id DESC
         """
         return con.execute(query).df()
 
@@ -33,18 +33,23 @@ def get_metrics():
         rejected = con.execute("SELECT COUNT(*) FROM mapping_provenance WHERE reviewed_by = 'Rejected_by_Human'").fetchone()[0]
         return pending, approved, rejected
 
-def process_review(rowid, source_value, action):
+def process_review(provenance_id, source_value, action):
     """Updates the database based on the human curator's decision."""
     with duckdb.connect(DB_PATH) as con:
         if action == "approve":
-            # 1. Update provenance audit trail using rowid
-            con.execute(f"UPDATE mapping_provenance SET reviewed_by = 'Approved_by_Human' WHERE rowid = {rowid}")
+            # UPDATE seguro sem f-strings
+            con.execute(
+                "UPDATE mapping_provenance SET reviewed_by = 'Approved_by_Human' WHERE rowid = ?", 
+                (provenance_id,)
+            )
             st.toast(f"✅ Mapping '{source_value}' approved!")
             
         elif action == "reject":
-            # 1. Update provenance audit trail using rowid
-            con.execute(f"UPDATE mapping_provenance SET reviewed_by = 'Rejected_by_Human' WHERE rowid = {rowid}")
-            # 2. Remove from Dictionary (STCM) so ETL doesn't use it again
+            # UPDATE seguro sem f-strings
+            con.execute(
+                "UPDATE mapping_provenance SET reviewed_by = 'Rejected_by_Human' WHERE rowid = ?", 
+                (provenance_id,)
+            )
             con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (source_value,))
             st.toast(f"❌ Mapping '{source_value}' rejected and removed from dictionary.")
 

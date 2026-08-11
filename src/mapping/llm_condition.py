@@ -15,7 +15,7 @@ from src.utils.config import DB_PATH, MODEL_NAME
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
 def get_few_shot_examples(con, limit=3):
-    """Busca exemplos reais já aprovados pelo humano na interface Streamlit."""
+    """Fetches real examples already approved by a human in the Streamlit interface."""
     query = f"""
         SELECT source_value, assigned_concept_id, normalized_value
         FROM mapping_provenance
@@ -27,7 +27,7 @@ def get_few_shot_examples(con, limit=3):
     examples = con.execute(query).fetchall()
     
     if not examples:
-        return "" # Se ainda não houver aprovações, não envia nada
+        return "" # If no approvals yet, send nothing
         
     fs_text = "Here are examples of correct SNOMED CT mappings previously approved by a human expert:\n"
     for raw, concept_id, norm in examples:
@@ -87,7 +87,7 @@ def run_condition_ai_mapping():
         # 1. Setup Vector Store
         collection = setup_vector_store(con)
         
-        # 2. Obter termos órfãos
+        # 2. Get orphan terms
         unique_terms = get_unmapped_conditions(con)
         if not unique_terms:
             print("✅ No unmapped conditions found! Database is fully normalized.")
@@ -96,10 +96,10 @@ def run_condition_ai_mapping():
         total_terms = len(unique_terms)
         print(f"⚠️ Found {total_terms} UNIQUE unmapped terms. Starting RAG pipeline...\n")
         
-        # 3. EXTRAIR CÁBULA (Few-Shot Dinâmico)
+        # 3. EXTRACT DYNAMIC FEW-SHOT EXAMPLES
         few_shot_prompt = get_few_shot_examples(con, limit=3)
         if few_shot_prompt:
-            print("🧠 Dynamic Few-Shot ATIVO: A injetar exemplos previamente aprovados no cérebro da IA...\n")
+            print("🧠 Dynamic Few-Shot ACTIVE: Injecting previously approved examples into AI context...\n")
         
         updates = []
         
@@ -124,7 +124,7 @@ def run_condition_ai_mapping():
                     "concept_name": search_results['documents'][0][i]
                 })
             
-            # 4. Prompt Híbrido RAG + FEW-SHOT
+            # 4. Hybrid Prompt RAG + FEW-SHOT
             prompt = (
                 f"You are an expert Clinical Data Scientist mapping raw EHR condition texts to SNOMED CT.\n"
                 f"{few_shot_prompt}"
@@ -170,18 +170,21 @@ def run_condition_ai_mapping():
                     )
                 """, (raw_term, raw_term, concept_id))
                 
-                # Regista que foi mapeado pelo motor atualizado (llm_rag_few_shot)
+                # Register mapping provenance using WHERE NOT EXISTS to avoid duplicates
                 con.execute("""
                     INSERT INTO mapping_provenance (
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
-                    ) VALUES (
-                        'condition_occurrence', 0, ?, ?,
-                        ?, 'llm_rag_few_shot', ?, ?, 
-                        'Athena_v5.4', 'Pending_Human_Review'
                     )
-                """, (raw_term, llm_term, concept_id, score, MODEL_NAME))
+                    SELECT 'condition_occurrence', 0, ?, ?,
+                           ?, 'llm_rag_few_shot', ?, ?, 
+                           'Athena_v5.4', 'Pending_Human_Review'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM mapping_provenance 
+                        WHERE target_table = 'condition_occurrence' AND source_value = ?
+                    )
+                """, (raw_term, llm_term, concept_id, score, MODEL_NAME, raw_term))
                 
             print("✅ STCM Dictionary and Provenance Audit successfully updated!")
         else:

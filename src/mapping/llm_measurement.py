@@ -15,7 +15,7 @@ from src.utils.config import DB_PATH, MODEL_NAME
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
 def get_few_shot_examples(con, limit=3):
-    """Busca exemplos de laboratórios já aprovados pelo humano na interface Streamlit."""
+    """Fetches real laboratory examples already approved by a human in the Streamlit interface."""
     query = f"""
         SELECT source_value, assigned_concept_id, normalized_value
         FROM mapping_provenance
@@ -96,10 +96,10 @@ def run_measurement_ai_mapping():
             
         print(f"⚠️ Found {len(unmapped)} UNIQUE legacy laboratory terms. Starting RAG pipeline...\n")
         
-        # FEW-SHOT DINÂMICO
+        # DYNAMIC FEW-SHOT
         few_shot_prompt = get_few_shot_examples(con, limit=3)
         if few_shot_prompt:
-            print("🧠 Dynamic Few-Shot ATIVO: A injetar exemplos previamente aprovados no cérebro da IA...\n")
+            print("🧠 Dynamic Few-Shot ACTIVE: Injecting previously approved examples into AI context...\n")
         
         updates = []
         provenance = []
@@ -185,11 +185,14 @@ def run_measurement_ai_mapping():
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
-                    ) VALUES (
-                        ?, 0, ?, ?,
-                        ?, ?, ?, ?, ?, ?
+                    ) 
+                    SELECT ?, 0, ?, ?,
+                           ?, ?, ?, ?, ?, ?
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM mapping_provenance 
+                        WHERE target_table = ? AND source_value = ?
                     )
-                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review))
+                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, target_table, src_val))
             
             print("✅ STCM Dictionary and Provenance Audit successfully updated!")
         

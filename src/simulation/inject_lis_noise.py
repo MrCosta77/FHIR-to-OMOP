@@ -11,14 +11,19 @@ sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH
 
 def run_noise_injection():
+    # 1. O Portão de Segurança (Só corre se o utilizador pedir explicitamente)
+    if os.getenv("SIMULATE_LIS_NOISE") != "true":
+        print("🧪 LIS NOISE SIMULATION: Disabled.")
+        print("⏭️  Skipping noise injection. To run, use: $env:SIMULATE_LIS_NOISE=\"true\"; python main.py")
+        return
+
     print("🧪 STARTING SIMULATION: INJECTING LEGACY LIS NOISE")
     print("-" * 50)
     
-    # 1. Garantir reprodutibilidade (o mesmo ruído sempre)
+    # 2. Garantir reprodutibilidade absoluta
     random.seed(42)
 
     with duckdb.connect(DB_PATH) as con:
-        # 2. Criar a Tabela de "Ground Truth" (A Verdade Absoluta)
         con.execute("DROP TABLE IF EXISTS lis_noise_ground_truth")
         con.execute("""
             CREATE TABLE lis_noise_ground_truth (
@@ -29,7 +34,6 @@ def run_noise_injection():
             )
         """)
 
-        # 3. Escolher 10% das medições válidas para corromper
         total_measurements = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         limit = int(total_measurements * 0.10)
         
@@ -37,14 +41,15 @@ def run_noise_injection():
             print("⚠️ No valid measurements found to corrupt.")
             return
 
+        # 3. Correção: Adicionado o ORDER BY para a seleção ser sempre idêntica
         candidates = con.execute(f"""
             SELECT measurement_id, measurement_concept_id, measurement_source_value
             FROM measurement
             WHERE measurement_concept_id != 0
+            ORDER BY measurement_id
             LIMIT {limit}
         """).fetchall()
 
-        # 4. Dicionário de corrupções laboratoriais comuns (abreviaturas, falta de unidades)
         noise_map = {
             "Glucose [Mass/volume] in Blood": ["Glu (Blood)", "GLUCOSE RANDOM", "Blood sugar lvl", "GLUC-B"],
             "Hemoglobin [Mass/volume] in Blood": ["HGB", "Hb blood test", "Haemoglobin", "HB"],
@@ -60,24 +65,17 @@ def run_noise_injection():
 
         for row in candidates:
             m_id, true_concept, true_text = row
-            
-            # Se conhecermos o teste, usamos o nosso dicionário; senão, criamos um erro genérico
             clean_text = true_text.split('(')[0].strip() if true_text else "Lab"
+            
             if clean_text in noise_map:
                 messy_text = random.choice(noise_map[clean_text])
             else:
-                # Exemplo: "Urea nitrogen [Mass/volume] in Blood" -> "UREA NITROGEN (LEGACY)"
                 messy_text = clean_text.replace('[Mass/volume]', '').replace('in Blood', '').strip().upper() + " (LEGACY)"
 
             ground_truth.append((m_id, true_concept, true_text, messy_text))
             updates.append((messy_text, m_id))
 
-        # 5. Guardar a Verdade
-        con.executemany("""
-            INSERT INTO lis_noise_ground_truth VALUES (?, ?, ?, ?)
-        """, ground_truth)
-
-        # 6. Corromper a base de dados principal (forçar a IA a trabalhar)
+        con.executemany("INSERT INTO lis_noise_ground_truth VALUES (?, ?, ?, ?)", ground_truth)
         con.executemany("""
             UPDATE measurement
             SET measurement_concept_id = 0,

@@ -4,17 +4,17 @@ import time
 import subprocess
 from pathlib import Path
 
-# Garante que o script corre a partir da raiz do projeto
+# Ensure the script runs from the project root
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-# A ordem exata de dependências do pipeline
+# Exact execution order of the pipeline dependencies
 PIPELINE_STEPS = [
-    # FASE 1: Inicialização e Vocabulários
+    # --- PHASE 1: Initialization & Vocabularies ---
     {"name": "1. Setup Vocabularies", "script": "src/utils/setup_vocab.py"},
     {"name": "2. Setup Audit/Provenance", "script": "src/utils/setup_audit.py"},
     {"name": "2b. Build OMOP DDL Skeleton", "script": "src/utils/setup_cdm_schema.py"},
     
-    # FASE 2: Extração Base (FHIR -> OMOP)
+    # --- PHASE 2: Base Extraction (FHIR -> OMOP) ---
     {"name": "3. Extract Persons", "script": "src/etl/person.py"},
     {"name": "4. Extract Visits", "script": "src/etl/visit.py"},
     {"name": "5. Extract Conditions", "script": "src/etl/condition.py"},
@@ -23,23 +23,26 @@ PIPELINE_STEPS = [
     {"name": "8. Extract Observations", "script": "src/etl/observation.py"},
     {"name": "9. Extract Procedures", "script": "src/etl/procedure.py"},
     
-    # FASE 3: Tabelas Derivadas, Ligações e Simulação
+    # --- PHASE 3: Derived Tables, Linkage & Simulation ---
     {"name": "10. Build Observation Periods", "script": "src/etl/observation_period.py"},
     {"name": "11. Link Events to Visits", "script": "src/etl/link_visits.py"},
     {"name": "11b. Inject Legacy LIS Noise", "script": "src/simulation/inject_lis_noise.py"},
-    
-    # FASE 4: Enriquecimento Semântico com Inteligência Artificial
+
+    # --- PHASE 4: AI Semantic Mapping ---
     {"name": "12. AI Semantic Mapping (Conditions)", "script": "src/mapping/llm_condition.py"},
     {"name": "13. AI Semantic Mapping (Drugs)", "script": "src/mapping/llm_drug.py"},
     {"name": "14. AI Semantic Mapping (Measurements)", "script": "src/mapping/llm_measurement.py"},
-    
-    # FASE 5: Controlo de Qualidade e Analytics
-    {"name": "15. Run Quality Gate (Tests)", "script": "tests/test_data_quality.py", "is_pytest": True},
-    {"name": "16. Generate RWE Analytics Report", "script": "src/analytics/rwe_cohort_discovery.py"}
-]
+        
+    # --- PHASE 5: Apply AI Mappings ---
+    {"name": "15. Apply STCM Mappings", "script": "src/etl/apply_stcm.py"},
+        
+    # --- PHASE 6: Validation & Analytics ---
+    {"name": "16. Run Quality Gate (Tests)", "script": "tests/test_data_quality.py", "is_pytest": True},
+    {"name": "17. Generate RWE Analytics Report", "script": "src/analytics/rwe_cohort_discovery.py"}
+] # <-- THE MISSING BRACKET WAS HERE!
 
 def run_step(step):
-    """Executa um script Python individualmente e mede o tempo."""
+    """Executes a Python script individually and measures execution time."""
     step_name = step["name"]
     script_path = step["script"]
     
@@ -50,7 +53,7 @@ def run_step(step):
     
     start_time = time.time()
     
-    # Verifica se o ficheiro existe antes de tentar correr
+    # Check if the file exists before attempting to run it
     full_path = os.path.join(PROJECT_ROOT, script_path)
     if not os.path.exists(full_path):
         print(f"❌ ERROR: File not found -> {full_path}")
@@ -58,7 +61,7 @@ def run_step(step):
         return False 
         
     try:
-        # sys.executable garante que usamos o Python do teu .venv e não o global do sistema
+        # sys.executable ensures we use the isolated .venv Python, not the global system one
         if step.get("is_pytest"):
             subprocess.run([sys.executable, "-m", "pytest", script_path, "-v", "--disable-warnings"], cwd=PROJECT_ROOT, check=True)
         else:

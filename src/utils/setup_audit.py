@@ -15,20 +15,18 @@ def setup_audit_tables():
     print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
-        # 1. CRIAR A SEQUÊNCIA PRIMEIRO (A Correção!)
-        con.execute("CREATE SEQUENCE IF NOT EXISTS seq_provenance_id START 1")
-        
-        # 2. TABELA DE PROVENIÊNCIA (Mapeamentos de IA)
+        # 1. Tabela de Proveniência
+        con.execute("CREATE SEQUENCE IF NOT EXISTS seq_provenance_id")
         con.execute("""
             CREATE TABLE IF NOT EXISTS mapping_provenance (
-                provenance_id BIGINT PRIMARY KEY DEFAULT nextval('seq_provenance_id'),
+                provenance_id BIGINT DEFAULT nextval('seq_provenance_id') PRIMARY KEY,
                 target_table VARCHAR NOT NULL,
-                target_id BIGINT NOT NULL,
-                source_value VARCHAR,
+                target_id BIGINT,
+                source_value VARCHAR NOT NULL,
                 normalized_value VARCHAR,
-                assigned_concept_id INTEGER NOT NULL,
-                mapping_method VARCHAR NOT NULL,
-                score DOUBLE NOT NULL,
+                assigned_concept_id INTEGER,
+                mapping_method VARCHAR,
+                score DOUBLE,
                 model_name VARCHAR,
                 vocabulary_version VARCHAR,
                 reviewed_by VARCHAR DEFAULT 'Pending_Human_Review',

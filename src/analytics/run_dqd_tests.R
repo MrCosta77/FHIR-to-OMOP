@@ -1,9 +1,15 @@
 library(DatabaseConnector)
 library(DataQualityDashboard)
 
-# 1. Configurar caminhos e ligação
-db_path <- "C:/Users/mario/Documents/Clinical-Mapping-Framework/data/omop_clinical.duckdb"
-output_folder <- "C:/Users/mario/Documents/Clinical-Mapping-Framework/dqd_results"
+# Descobre automaticamente a pasta do projeto (funciona no RStudio)
+if (interactive() && requireNamespace("rstudioapi", quietly = TRUE)) {
+  setwd(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))))
+}
+project_root <- getwd()
+
+# 1. Configurar caminhos relativos
+db_path <- file.path(project_root, "data", "omop_clinical.duckdb")
+output_folder <- file.path(project_root, "dqd_results")
 connectionDetails <- createConnectionDetails(dbms = "duckdb", server = db_path)
 
 # 2. Ignorar o teste problemático do DuckDB
@@ -11,9 +17,9 @@ available_checks <- DataQualityDashboard::listDqChecks()
 all_check_names <- unique(available_checks$checkDescriptions$checkName)
 safe_checks <- all_check_names[all_check_names != "measureValueCompleteness"]
 
-message("🚀 A iniciar a re-avaliação da base de dados...")
+message("🚀 A iniciar a re-avaliação da base de dados no caminho: ", db_path)
 
-# 3. Disparar os testes (Vai ler o DuckDB atualizado e gerar um JSON novo)
+# 3. Disparar os testes
 executeDqChecks(
   connectionDetails = connectionDetails,
   cdmDatabaseSchema = "main", 

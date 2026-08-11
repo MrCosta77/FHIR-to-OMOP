@@ -177,14 +177,8 @@ def run_condition_etl():
 
         con.execute("""
             DELETE FROM condition_occurrence
-            WHERE condition_occurrence_id IN (
-                SELECT stg.condition_occurrence_id
-                FROM stg_condition stg
-                JOIN concept c_src ON stg.snomed_code = c_src.concept_code AND c_src.vocabulary_id = 'SNOMED'
-                JOIN concept_relationship cr ON c_src.concept_id = cr.concept_id_1 AND cr.relationship_id = 'Maps to'
-                JOIN concept c_std ON cr.concept_id_2 = c_std.concept_id AND c_std.standard_concept = 'S'
-                WHERE c_std.domain_id != 'Condition'
-            )
+            WHERE condition_concept_id = 0 
+              AND condition_source_concept_id != 0
         """)
         
         con.execute("""
@@ -212,14 +206,6 @@ def run_condition_etl():
             )
         """)
 
-        con.execute("""
-            UPDATE condition_occurrence
-            SET condition_concept_id = stcm.target_concept_id
-            FROM source_to_concept_map stcm
-            WHERE condition_occurrence.condition_source_value = stcm.source_code
-              AND condition_occurrence.condition_concept_id = 0;
-        """)
-        
         mapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id = 0").fetchone()[0]
         

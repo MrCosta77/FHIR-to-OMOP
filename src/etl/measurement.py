@@ -203,14 +203,6 @@ def run_measurement_etl():
             )
         """)
 
-        con.execute("""
-            UPDATE measurement
-            SET measurement_concept_id = stcm.target_concept_id
-            FROM source_to_concept_map stcm
-            WHERE measurement.measurement_source_value = stcm.source_code
-              AND measurement.measurement_concept_id = 0;
-        """)
-        
         mapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]
         

@@ -1,32 +1,71 @@
-# 🏥 Clinical Data Mapping Framework (CMF)
+# 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
 
-An enterprise-grade, AI-powered ETL pipeline designed to ingest, harmonize, and standardize legacy healthcare data into the **OMOP Common Data Model (v5.4)**. Built for modern Health Data Science and Real-World Evidence (RWE) applications, this framework ensures clinical semantic interoperability with robust data governance.
+An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)**, and maps messy/legacy clinical text using a **Retrieval-Augmented Generation (RAG) + Human-in-the-Loop Architecture**.
 
-## 🚀 Key Features
+## 🚀 Core Engineering Philosophy
 
-* **Resilient ETL Engine:** Idempotent Python pipeline that safely extracts complex EHR/FHIR data (simulated via Synthea) and normalizes it into core OMOP clinical domains (`person`, `condition_occurrence`, `measurement`, `drug_exposure`, etc.).
-* **AI Semantic Mapping (RAG):** Utilizes Local LLMs (Ollama) combined with Vector Databases (ChromaDB) for high-accuracy semantic normalization against official vocabularies (**SNOMED CT, LOINC, RxNorm**).
-* **Dynamic Few-Shot Learning:** The AI engine dynamically learns from human curator decisions, injecting approved mappings directly into the context window for continuous accuracy improvement.
-* **Human-in-the-Loop Governance:** Includes a fully interactive Web Portal (built with Streamlit) for clinical data managers to audit, approve, or reject AI-generated terminology mappings, ensuring 100% regulatory compliance.
-* **Automated Data Quality Gates:** Integrated `pytest` suite enforcing OMOP referential integrity and medical logic validation before analytics generation.
+This project was built with strict adherence to clinical data management standards, focusing on determinism, auditability, and OHDSI conventions:
 
-## 🏗️ Architecture
+1. **OMOP-Canonical Mapping (STCM):** AI-derived mappings are not forced directly into clinical event tables. Instead, they are written to the `source_to_concept_map` (STCM) dictionary. This isolates mapping decisions from clinical data, allowing for versioning, retraction, and human review.
+2. **Deterministic Tie-Breaking:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the official `Maps To` relationship and Domain routing.
+3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
 
-1. **Extraction & Orchestration:** `main.py` orchestrates the deterministic ETL pipeline.
-2. **Semantic Resolution:** Orphan legacy concepts trigger the Retrieval-Augmented Generation (RAG) module to find the closest standard medical concepts.
-3. **Audit & Provenance:** Every AI decision is heavily audited (`mapping_provenance` table) with confidence scores and model versioning.
-4. **Curation:** The Streamlit Web UI allows experts to review pending decisions.
-5. **Analytics Ready:** Standardized data sits in a high-performance **DuckDB** instance, ready for large-scale RWE cohort discovery.
+## 🧠 The AI Mapping Engine & Governance Loop
 
-## 🛠️ Technology Stack
+Standard OMOP vocabularies handle the majority of clinical data, but real-world data (like legacy LIS lab results) is messy. This framework uses a progressive retrieval-adjudication system:
 
-* **Core:** Python 3.12, SQL, DuckDB
-* **Artificial Intelligence:** Ollama (Local LLMs), ChromaDB (Vector Store), Prompt Engineering
-* **Data Governance & UI:** Streamlit, Pandas
-* **Testing:** Pytest
+1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies (e.g., LOINC) to retrieve the top 5 clinically valid candidates.
+2. **LLM Adjudication:** A local LLM evaluates the 5 candidates and selects the exact match or explicitly refuses (Returns 0), eliminating free-text hallucination.
+3. **Human-in-the-Loop (Streamlit):** Mappings are flagged as `Pending_Human_Review` in a `mapping_provenance` audit table. Curators use a Streamlit portal to Approve or Reject mappings.
+4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
-## ⚙️ How to Run
+## 📊 Results & Validation
 
-### 1. Install Dependencies
+### 1. Mapping Accuracy (against seeded synthetic LIS noise)
+To prove the efficacy of the RAG tier, the pipeline deliberately corrupts 10% of lab measurements with legacy formats, maps them via AI, and evaluates against a ground-truth table.
+
+| Metric | Score | Description |
+| :--- | :--- | :--- |
+| **Coverage** | 97.8% | Frequency of the AI providing a candidate vs. refusing. |
+| **Precision** | 70.3% | Accuracy of the AI when a mapping was provided. |
+| **Recall** | 68.8% | Overall recovery rate of the corrupted dataset. |
+
+### 2. OHDSI Data Quality Dashboard (DQD)
+The resulting DuckDB instance is successfully validated using the native R `DataQualityDashboard` package against OMOP v5.4 rules:
+* **Overall Pass Rate:** 55% (Baseline for synthetic data)
+* **Plausibility (Validation):** 99% Pass Rate (Temporal and clinical logic integrity)
+
+## 🛠️ Setup & Execution
+
+**1. Environment Setup**
 ```bash
-python -m pip install -r requirements.txt
+# Clone the repository
+git clone [https://github.com/your-username/Clinical-Mapping-Framework.git](https://github.com/your-username/Clinical-Mapping-Framework.git)
+cd Clinical-Mapping-Framework
+
+# Set up Python virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**2. Prerequisites**
+* Download the **OMOP Vocabularies** (v5.4) from [Athena](https://athena.ohdsi.org/) and place the CSV files in `data/omop_vocab/`.
+* Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `data/fhir_raw/`.
+* Ensure [Ollama](https://ollama.ai/) is installed and running locally with the target model: `ollama pull qwen2.5-coder:7b`
+
+**3. Run the Full Orchestrator**
+Executes the 16-step pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ Tests ➔ Analytics). 
+*(To test AI accuracy, inject LIS noise by setting `SIMULATE_LIS_NOISE="true"`).*
+```bash
+python main.py
+```
+
+**4. Run the Human-in-the-Loop Portal**
+Launch the Streamlit app to curate pending AI mappings:
+```bash
+streamlit run src/app/review_portal.py
+```
+
+**5. Run OHDSI Clinical Validation (RStudio)**
+Launch `src/analytics/view_dqd_dashboard.R` to view the interactive quality report.

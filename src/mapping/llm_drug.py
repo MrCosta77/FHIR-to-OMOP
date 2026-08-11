@@ -15,7 +15,7 @@ from src.utils.config import DB_PATH, MODEL_NAME
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
 def get_few_shot_examples(con, limit=3):
-    """Busca exemplos de medicamentos já aprovados pelo humano na interface Streamlit."""
+    """Fetches real medication examples already approved by a human in the Streamlit interface."""
     query = f"""
         SELECT source_value, assigned_concept_id, normalized_value
         FROM mapping_provenance
@@ -98,10 +98,10 @@ def run_drug_ai_mapping():
         total_terms = len(unique_terms)
         print(f"⚠️ Found {total_terms} UNIQUE unmapped terms. Starting RAG pipeline...\n")
         
-        # FEW-SHOT DINÂMICO
+        # DYNAMIC FEW-SHOT
         few_shot_prompt = get_few_shot_examples(con, limit=3)
         if few_shot_prompt:
-            print("🧠 Dynamic Few-Shot ATIVO: A injetar exemplos previamente aprovados no cérebro da IA...\n")
+            print("🧠 Dynamic Few-Shot ACTIVE: Injecting previously approved examples into AI context...\n")
         
         updates = []
         
@@ -179,12 +179,15 @@ def run_drug_ai_mapping():
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
-                    ) VALUES (
-                        'drug_exposure', 0, ?, ?,
-                        ?, 'llm_rag_few_shot', ?, ?, 
-                        'Athena_v5.4', 'Pending_Human_Review'
                     )
-                """, (raw_term, llm_term, concept_id, score, MODEL_NAME))
+                    SELECT 'drug_exposure', 0, ?, ?,
+                           ?, 'llm_rag_few_shot', ?, ?, 
+                           'Athena_v5.4', 'Pending_Human_Review'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM mapping_provenance 
+                        WHERE target_table = 'drug_exposure' AND source_value = ?
+                    )
+                """, (raw_term, llm_term, concept_id, score, MODEL_NAME, raw_term))
                 
             print("✅ STCM Dictionary and Provenance Audit successfully updated!")
             
