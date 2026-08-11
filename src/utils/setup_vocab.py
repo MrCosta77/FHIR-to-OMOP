@@ -16,11 +16,13 @@ def load_vocabularies():
     
     start_time = time.time()
     
+    # Caminhos para os ficheiros
     concept_csv = os.path.join(VOCAB_DIR, "CONCEPT.csv")
     concept_rel_csv = os.path.join(VOCAB_DIR, "CONCEPT_RELATIONSHIP.csv")
     vocabulary_csv = os.path.join(VOCAB_DIR, "VOCABULARY.csv")
     domain_csv = os.path.join(VOCAB_DIR, "DOMAIN.csv")
     concept_class_csv = os.path.join(VOCAB_DIR, "CONCEPT_CLASS.csv")
+    concept_ancestor_csv = os.path.join(VOCAB_DIR, "CONCEPT_ANCESTOR.csv") # <-- NOVO
     
     if not os.path.exists(concept_csv) or not os.path.exists(concept_rel_csv):
         print("❌ ERROR: CONCEPT.csv or CONCEPT_RELATIONSHIP.csv not found in vocabulary folder.")
@@ -70,6 +72,20 @@ def load_vocabularies():
                 SELECT * FROM read_csv_auto('{concept_class_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
             """)
             
+        # 6. CONCEPT_ANCESTOR (NOVO)
+        print("⏳ Loading CONCEPT_ANCESTOR table (the hierarchy tree)...")
+        con.execute("DROP TABLE IF EXISTS concept_ancestor")
+        ca_count = 0
+        if os.path.exists(concept_ancestor_csv):
+            con.execute(f"""
+                CREATE TABLE concept_ancestor AS 
+                SELECT * FROM read_csv_auto('{concept_ancestor_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
+            """)
+            ca_count = con.execute("SELECT COUNT(*) FROM concept_ancestor").fetchone()[0]
+        else:
+            print("⚠️ WARNING: CONCEPT_ANCESTOR.csv not found. Skipping hierarchy load.")
+            
+        # Contagens finais
         c_count = con.execute("SELECT COUNT(*) FROM concept").fetchone()[0]
         cr_count = con.execute("SELECT COUNT(*) FROM concept_relationship").fetchone()[0]
         
@@ -77,6 +93,8 @@ def load_vocabularies():
     print(f"\n✅ Vocabularies successfully loaded into DuckDB in {elapsed:.1f} seconds!")
     print(f" - CONCEPT: {c_count:,} rows")
     print(f" - CONCEPT_RELATIONSHIP: {cr_count:,} rows")
+    if ca_count > 0:
+        print(f" - CONCEPT_ANCESTOR: {ca_count:,} rows")
 
 if __name__ == "__main__":
     load_vocabularies()

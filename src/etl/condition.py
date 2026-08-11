@@ -211,6 +211,14 @@ def run_condition_etl():
                 SELECT target_id FROM mapping_provenance WHERE target_table = 'condition_occurrence'
             )
         """)
+
+        con.execute("""
+            UPDATE condition_occurrence
+            SET condition_concept_id = stcm.target_concept_id
+            FROM source_to_concept_map stcm
+            WHERE condition_occurrence.condition_source_value = stcm.source_code
+              AND condition_occurrence.condition_concept_id = 0;
+        """)
         
         mapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id = 0").fetchone()[0]

@@ -200,6 +200,14 @@ def run_observation_etl():
                 SELECT target_id FROM mapping_provenance WHERE target_table = 'observation'
             )
         """)
+
+        con.execute("""
+            UPDATE observation
+            SET observation_concept_id = stcm.target_concept_id
+            FROM source_to_concept_map stcm
+            WHERE observation.observation_source_value = stcm.source_code
+              AND observation.observation_concept_id = 0;
+        """)
         
         mapped_count = con.execute("SELECT COUNT(*) FROM observation").fetchone()[0]
         

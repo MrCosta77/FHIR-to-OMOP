@@ -219,6 +219,14 @@ def run_drug_etl():
                 SELECT target_id FROM mapping_provenance WHERE target_table = 'drug_exposure'
             )
         """)
+
+        con.execute("""
+            UPDATE drug_exposure
+            SET drug_concept_id = stcm.target_concept_id
+            FROM source_to_concept_map stcm
+            WHERE drug_exposure.drug_source_value = stcm.source_code
+              AND drug_exposure.drug_concept_id = 0;
+        """)
         
         mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]

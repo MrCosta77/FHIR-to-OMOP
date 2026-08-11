@@ -12,6 +12,7 @@ PIPELINE_STEPS = [
     # FASE 1: Inicialização e Vocabulários
     {"name": "1. Setup Vocabularies", "script": "src/utils/setup_vocab.py"},
     {"name": "2. Setup Audit/Provenance", "script": "src/utils/setup_audit.py"},
+    {"name": "2b. Build OMOP DDL Skeleton", "script": "src/utils/setup_cdm_schema.py"},
     
     # FASE 2: Extração Base (FHIR -> OMOP)
     {"name": "3. Extract Persons", "script": "src/etl/person.py"},

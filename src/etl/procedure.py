@@ -175,6 +175,14 @@ def run_procedure_etl():
                 SELECT target_id FROM mapping_provenance WHERE target_table = 'procedure_occurrence'
             )
         """)
+
+        con.execute("""
+            UPDATE procedure_occurrence
+            SET procedure_concept_id = stcm.target_concept_id
+            FROM source_to_concept_map stcm
+            WHERE procedure_occurrence.procedure_source_value = stcm.source_code
+              AND procedure_occurrence.procedure_concept_id = 0;
+        """)
         
         mapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0").fetchone()[0]

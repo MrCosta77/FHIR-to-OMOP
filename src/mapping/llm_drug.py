@@ -86,35 +86,40 @@ def run_drug_ai_mapping():
             except Exception as e:
                 print(f"[{idx}/{len(unmapped_drugs)}] ❌ LLM Error on '{raw_term}': {e}")
                 
+        # 5. Escrita no Dicionário (STCM)
         if updates:
-            print(f"\n💾 Writing {len(updates)} standardized concepts back to the database...")
+            print(f"\n💾 Writing {len(updates)} standardized concepts to the STCM Dictionary...")
             
-            # Atualizar Tabela Clínica
-            con.executemany("""
-                UPDATE drug_exposure 
-                SET drug_concept_id = ? 
-                WHERE drug_source_value = ? 
-                  AND drug_concept_id = 0
-            """, updates)
-            
-            # Precisamos do ID original para a proveniência
             for p in provenance:
                 target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
                 
-                # Inserir um registo de auditoria por cada ocorrência desta droga
+                # Remover duplicados antigos
+                con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (src_val,))
+                
+                # Inserir no dicionário oficial
+                con.execute("""
+                    INSERT INTO source_to_concept_map (
+                        source_code, source_concept_id, source_vocabulary_id, source_code_description,
+                        target_concept_id, target_vocabulary_id, valid_start_date, valid_end_date, invalid_reason
+                    ) VALUES (
+                        ?, 0, 'CMF_SYNTHEA', ?,
+                        ?, 'RxNorm', CURRENT_DATE, '2099-12-31', NULL
+                    )
+                """, (src_val, src_val, concept_id))
+                
+                # Auditoria
                 con.execute("""
                     INSERT INTO mapping_provenance (
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
+                    ) VALUES (
+                        'source_to_concept_map', 0, ?, ?,
+                        ?, ?, ?, ?, ?, ?
                     )
-                    SELECT ?, drug_exposure_id, ?, ?, ?, ?, ?, ?, ?, ?
-                    FROM drug_exposure
-                    WHERE drug_source_value = ? 
-                      AND drug_concept_id = ?
-                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, src_val, concept_id))
+                """, (src_val, norm_val, concept_id, method, score, model, vocab, review))
             
-            print("✅ Database and Provenance Audit successfully updated!")
+            print("✅ STCM Dictionary and Provenance Audit successfully updated!")
         
         print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {len(unmapped_drugs)} unique terms.")
 

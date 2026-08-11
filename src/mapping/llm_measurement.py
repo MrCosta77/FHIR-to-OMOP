@@ -148,33 +148,40 @@ def run_measurement_ai_mapping():
             except Exception as e:
                 print(f"[{idx}/{len(unmapped)}] ❌ LLM Error on '{raw_term}': {e}")
                 
-        # 5. Escrita na Base de Dados e Auditoria
+        # 5. Escrita no Dicionário (STCM)
         if updates:
-            print(f"\n💾 Writing {len(updates)} RAG-mapped concepts back to the database...")
-            
-            con.executemany("""
-                UPDATE measurement 
-                SET measurement_concept_id = ? 
-                WHERE measurement_source_value = ? 
-                  AND measurement_concept_id = 0
-            """, updates)
+            print(f"\n💾 Writing {len(updates)} RAG-mapped concepts to the STCM Dictionary...")
             
             for p in provenance:
                 target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
                 
+                # Remover duplicados antigos
+                con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (src_val,))
+                
+                # Inserir no dicionário oficial
+                con.execute("""
+                    INSERT INTO source_to_concept_map (
+                        source_code, source_concept_id, source_vocabulary_id, source_code_description,
+                        target_concept_id, target_vocabulary_id, valid_start_date, valid_end_date, invalid_reason
+                    ) VALUES (
+                        ?, 0, 'CMF_SYNTHEA', ?,
+                        ?, 'LOINC', CURRENT_DATE, '2099-12-31', NULL
+                    )
+                """, (src_val, src_val, concept_id))
+                
+                # Auditoria
                 con.execute("""
                     INSERT INTO mapping_provenance (
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
+                    ) VALUES (
+                        'source_to_concept_map', 0, ?, ?,
+                        ?, ?, ?, ?, ?, ?
                     )
-                    SELECT ?, measurement_id, ?, ?, ?, ?, ?, ?, ?, ?
-                    FROM measurement
-                    WHERE measurement_source_value = ? 
-                      AND measurement_concept_id = ?
-                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, src_val, concept_id))
+                """, (src_val, norm_val, concept_id, method, score, model, vocab, review))
             
-            print("✅ Database and Provenance Audit successfully updated!")
+            print("✅ STCM Dictionary and Provenance Audit successfully updated!")
         
         print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {len(unmapped)} legacy lab terms.")
 
