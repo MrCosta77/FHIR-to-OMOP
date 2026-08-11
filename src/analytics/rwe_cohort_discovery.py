@@ -63,7 +63,6 @@ def generate_report():
         # 4. HIERARCHICAL PHENOTYPING (THE POWER OF CONCEPT_ANCESTOR)
         print("4. HIERARCHICAL PHENOTYPING (Using CONCEPT_ANCESTOR)\n" + "-"*50)
         
-        # Função reutilizável para pesquisar qualquer ramo da árvore médica
         def get_hierarchical_count(ancestor_id, group_name):
             count = con.execute(f"""
                 SELECT COUNT(DISTINCT co.person_id)
@@ -71,13 +70,13 @@ def generate_report():
                 JOIN concept_ancestor ca ON co.condition_concept_id = ca.descendant_concept_id
                 WHERE ca.ancestor_concept_id = {ancestor_id}
             """).fetchone()[0]
-            print(f" - {group_name:<35}: {count} distinct patients")
+            print(f" - {group_name:<38}: {count} distinct patients")
 
-        # IDs genéricos (Avós) da SNOMED CT
+        # IDs validados ontologicamente na base de dados OMOP
         get_hierarchical_count(432250, "Any Infectious Disease")
         get_hierarchical_count(320136, "Any Respiratory System Disease")
-        get_hierarchical_count(312437, "Any Cardiovascular Disease")
-        get_hierarchical_count(4005676, "Any Dental/Oral Disease")
+        get_hierarchical_count(134057, "Any Cardiovascular Disease")       # ID validado hoje!
+        get_hierarchical_count(201603, "Any Dental/Oral Disease")          # ID validado hoje!
 
 if __name__ == "__main__":
     generate_report()

@@ -12,21 +12,37 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, MODEL_NAME
 
-# Corrigido: Usar caminho absoluto em vez de relativo para o ChromaDB (recomendação da revisão)
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
+def get_few_shot_examples(con, limit=3):
+    """Busca exemplos de laboratórios já aprovados pelo humano na interface Streamlit."""
+    query = f"""
+        SELECT source_value, assigned_concept_id, normalized_value
+        FROM mapping_provenance
+        WHERE reviewed_by = 'Approved_by_Human'
+          AND target_table = 'measurement'
+        ORDER BY RANDOM()
+        LIMIT {limit}
+    """
+    examples = con.execute(query).fetchall()
+    
+    if not examples:
+        return ""
+        
+    fs_text = "Here are examples of correct LOINC mappings previously approved by a human expert:\n"
+    for raw, concept_id, norm in examples:
+        fs_text += f" - Raw Term: '{raw}' -> Concept ID: {concept_id} (Reasoning: Matches '{norm}')\n"
+    return fs_text + "\n"
+
 def setup_vector_store(con):
-    """Initializes ChromaDB and populates it with valid LOINC concepts if it's empty."""
     client = chromadb.PersistentClient(path=CHROMA_PATH)
     collection = client.get_or_create_collection(name="loinc_measurements")
     
-    # Se já tiver dados, não precisamos de o reconstruir
     if collection.count() > 0:
         return collection
         
     print("⏳ Building LOINC Vector Store for RAG (this might take a minute)...")
     
-    # Extrair os conceitos válidos da tabela OMOP
     loincs = con.execute("""
         SELECT concept_id, concept_name 
         FROM concept 
@@ -43,7 +59,6 @@ def setup_vector_store(con):
     ids = [str(row[0]) for row in loincs]
     documents = [row[1] for row in loincs]
     
-    # Inserção em lotes para não sobrecarregar a memória do ChromaDB
     batch_size = 5000
     for i in range(0, len(ids), batch_size):
         collection.add(
@@ -65,17 +80,15 @@ def get_unmapped_measurements(con):
     return [row[0] for row in con.execute(query).fetchall()]
 
 def run_measurement_ai_mapping():
-    print("⚙️ STARTING AI-ASSISTED SEMANTIC MAPPING (MEASUREMENTS / RAG)")
+    print("⚙️ STARTING AI-ASSISTED SEMANTIC MAPPING (MEASUREMENTS / RAG + FEW-SHOT)")
     print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
-        # 1. Preparar o cérebro vetorial (ChromaDB)
         collection = setup_vector_store(con)
         if collection.count() == 0:
             print("❌ Vector store is empty. Skipping RAG mapping.")
             return
 
-        # 2. Procurar lixo laboratorial injetado pelo nosso simulador
         unmapped = get_unmapped_measurements(con)
         if not unmapped:
             print("✅ No unmapped measurements found. Skipping AI mapping.")
@@ -83,12 +96,16 @@ def run_measurement_ai_mapping():
             
         print(f"⚠️ Found {len(unmapped)} UNIQUE legacy laboratory terms. Starting RAG pipeline...\n")
         
+        # FEW-SHOT DINÂMICO
+        few_shot_prompt = get_few_shot_examples(con, limit=3)
+        if few_shot_prompt:
+            print("🧠 Dynamic Few-Shot ATIVO: A injetar exemplos previamente aprovados no cérebro da IA...\n")
+        
         updates = []
         provenance = []
         
         for idx, raw_term in enumerate(unmapped, 1):
             try:
-                # 3. RAG Retrieval: Procurar os 5 testes LOINC mais semelhantes semanticamente
                 search_results = collection.query(
                     query_texts=[raw_term],
                     n_results=5
@@ -97,7 +114,6 @@ def run_measurement_ai_mapping():
                 print(f"[{idx}/{len(unmapped)}] ❌ Vector Search Error on '{raw_term}': {e}")
                 continue
             
-            # Corrigido: Proteção contra pesquisas vazias (recomendação P0 da revisão)
             if not search_results['ids'] or not search_results['ids'][0]:
                 print(f"[{idx}/{len(unmapped)}] ❌ No vector matches found for '{raw_term}'.")
                 continue
@@ -109,19 +125,18 @@ def run_measurement_ai_mapping():
                     "concept_name": search_results['documents'][0][i]
                 })
             
-            # 4. Prompt para o LLM tomar a decisão final
             prompt = (
                 f"You are an expert Clinical Data Manager mapping legacy lab tests to LOINC.\n"
-                f"Source Legacy Term: '{raw_term}'\n\n"
+                f"{few_shot_prompt}"
+                f"Now, map the following Source Legacy Term: '{raw_term}'\n\n"
                 f"Here are the top 5 closest standard LOINC candidates retrieved from our database:\n"
                 f"{json.dumps(retrieved_loincs, indent=2)}\n\n"
                 f"Analyze the semantic meaning (e.g., Blood vs Urine, Mass vs Count). "
-                f"Reply ONLY with the exact 'concept_id' of the best match. "
+                f"Reply ONLY with the exact numeric 'concept_id' of the best match. "
                 f"If none of the candidates are a clinically safe match, reply with '0'."
             )
             
             try:
-                # Temperatura a 0.0 para garantir que a IA não inventa respostas
                 response = ollama.chat(
                     model=MODEL_NAME,
                     messages=[{'role': 'user', 'content': prompt}],
@@ -129,7 +144,6 @@ def run_measurement_ai_mapping():
                 )
                 ai_answer = response['message']['content'].strip()
                 
-                # Encontrar a correspondência exata para garantir que a IA escolheu um ID válido
                 match = next((c for c in retrieved_loincs if str(c['concept_id']) in ai_answer), None)
                 
                 if match and ai_answer != '0':
@@ -140,7 +154,7 @@ def run_measurement_ai_mapping():
                     updates.append((concept_id, raw_term))
                     provenance.append((
                         'measurement', 0, raw_term, concept_name, concept_id,
-                        'llm_rag', 1.0, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
+                        'llm_rag_few_shot', 1.0, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
                     ))
                 else:
                     print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   ❌ AI rejected all candidates (Returned 0).")
@@ -148,17 +162,14 @@ def run_measurement_ai_mapping():
             except Exception as e:
                 print(f"[{idx}/{len(unmapped)}] ❌ LLM Error on '{raw_term}': {e}")
                 
-        # 5. Escrita no Dicionário (STCM)
         if updates:
             print(f"\n💾 Writing {len(updates)} RAG-mapped concepts to the STCM Dictionary...")
             
             for p in provenance:
                 target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
                 
-                # Remover duplicados antigos
                 con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (src_val,))
                 
-                # Inserir no dicionário oficial
                 con.execute("""
                     INSERT INTO source_to_concept_map (
                         source_code, source_concept_id, source_vocabulary_id, source_code_description,
@@ -169,17 +180,16 @@ def run_measurement_ai_mapping():
                     )
                 """, (src_val, src_val, concept_id))
                 
-                # Auditoria
                 con.execute("""
                     INSERT INTO mapping_provenance (
                         target_table, target_id, source_value, normalized_value,
                         assigned_concept_id, mapping_method, score, model_name,
                         vocabulary_version, reviewed_by
                     ) VALUES (
-                        'source_to_concept_map', 0, ?, ?,
+                        ?, 0, ?, ?,
                         ?, ?, ?, ?, ?, ?
                     )
-                """, (src_val, norm_val, concept_id, method, score, model, vocab, review))
+                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review))
             
             print("✅ STCM Dictionary and Provenance Audit successfully updated!")
         

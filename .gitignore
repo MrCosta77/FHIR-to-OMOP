@@ -1,17 +1,29 @@
-
+# Python Virtual Environments
 .venv/
 */.venv/
+env/
+venv/
 
+# Python Cache & Compiled Files
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
 
-data/
+# Databases and Vector Stores (Too large for Git)
 *.duckdb
 *.duckdb.wal
+data/chroma_db/
 
-
+# Raw & Temporary Data (Synthetic data and vocabularies)
+data/synthea_output/
+data/vocabularies/
+data/omop_vocab/
 synthea/
 
-
-.ipynb_checkpoints/
-__pycache__/
-
+# Evaluation and Output Results
 dqd_results/
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
