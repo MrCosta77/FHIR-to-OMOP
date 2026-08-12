@@ -172,13 +172,15 @@ def run_condition_etl():
                 ON cr.concept_id_2 = c_std.concept_id 
                 AND c_std.standard_concept = 'S'
                 AND c_std.invalid_reason IS NULL
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.condition_occurrence_id ORDER BY c_std.concept_id DESC) = 1
-        """)
-
-        con.execute("""
-            DELETE FROM condition_occurrence
-            WHERE condition_concept_id = 0 
-              AND condition_source_concept_id != 0
+            -- Só insere se for estritamente uma condição, ou se não teve mapeamento nenhum (IS NULL)
+            WHERE (c_std.domain_id = 'Condition' OR c_std.domain_id IS NULL)
+            -- Em caso de empate, dá prioridade ao conceito cujo domínio é 'Condition'
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY stg.condition_occurrence_id 
+                ORDER BY 
+                    CASE WHEN c_std.domain_id = 'Condition' THEN 0 ELSE 1 END ASC,
+                    c_std.concept_id ASC
+            ) = 1
         """)
         
         con.execute("""

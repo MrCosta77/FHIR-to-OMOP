@@ -22,18 +22,20 @@ Standard OMOP vocabularies handle the majority of clinical data, but real-world 
 ## 📊 Results & Validation
 
 ### 1. Mapping Accuracy (against seeded synthetic LIS noise)
-To prove the efficacy of the RAG tier, the pipeline deliberately corrupts 10% of lab measurements with legacy formats, maps them via AI, and evaluates against a ground-truth table.
+The architecture is explicitly designed to handle unstructured, legacy clinical text. To prove the efficacy of the RAG tier, the pipeline deliberately corrupts 10% of standard lab measurements into "Legacy LIS" formats (e.g., converting "Glucose [Mass/volume] in Blood" to "GLUCOSE RANDOM (LEGACY)"), maps them via AI, and evaluates against a strictly held ground-truth table.
 
 | Metric | Score | Description |
 | :--- | :--- | :--- |
-| **Coverage** | 97.8% | Frequency of the AI providing a candidate vs. refusing. |
-| **Precision** | 70.3% | Accuracy of the AI when a mapping was provided. |
-| **Recall** | 68.8% | Overall recovery rate of the corrupted dataset. |
+| **Coverage** | 97.11% | Proportion of dirty terms the AI successfully found a candidate for. |
+| **Precision** | 77.01% | Proportion of AI mappings that were exactly correct. |
+| **Recall** | 74.78% | Overall recovery rate of the corrupted dataset. |
 
 ### 2. OHDSI Data Quality Dashboard (DQD)
 The resulting DuckDB instance is successfully validated using the native R `DataQualityDashboard` package against OMOP v5.4 rules:
-* **Overall Pass Rate:** 55% (Baseline for synthetic data)
-* **Plausibility (Validation):** 99% Pass Rate (Temporal and clinical logic integrity)
+* **Overall Pass Rate:** 77% (Achieved by deploying the full OMOP v5.4 schema and enforcing strict STCM domain routing)
+* **Plausibility (Validation):** 100% Pass Rate (Flawless temporal and clinical logic integrity)
+* **Conformance (Total):** 69% Pass Rate (Up from baseline due to proper vocabulary metadata and DDL adherence)
+* **Completeness (Total):** 65% Pass Rate
 
 ## 🛠️ Setup & Execution
 

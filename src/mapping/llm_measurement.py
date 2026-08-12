@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import re
 import duckdb
 import chromadb
 import ollama
@@ -21,7 +22,8 @@ def get_few_shot_examples(con, limit=3):
         FROM mapping_provenance
         WHERE reviewed_by = 'Approved_by_Human'
           AND target_table = 'measurement'
-        ORDER BY RANDOM()
+        -- ORDENAÇÃO DETERMINÍSTICA PELOS MAIS RECENTES (Resolve a quebra de reprodutibilidade)
+        ORDER BY created_at DESC
         LIMIT {limit}
     """
     examples = con.execute(query).fetchall()
@@ -119,18 +121,24 @@ def run_measurement_ai_mapping():
                 continue
                 
             retrieved_loincs = []
+            distances = search_results.get('distances', [[0]*5])[0]
+            
             for i in range(len(search_results['ids'][0])):
                 retrieved_loincs.append({
                     "concept_id": search_results['ids'][0][i],
-                    "concept_name": search_results['documents'][0][i]
+                    "concept_name": search_results['documents'][0][i],
+                    "distance": distances[i]
                 })
+            
+            # Removemos a distância do prompt visual para não confundir o LLM, enviamos apenas ID e Nome
+            prompt_candidates = [{"concept_id": c["concept_id"], "concept_name": c["concept_name"]} for c in retrieved_loincs]
             
             prompt = (
                 f"You are an expert Clinical Data Manager mapping legacy lab tests to LOINC.\n"
                 f"{few_shot_prompt}"
                 f"Now, map the following Source Legacy Term: '{raw_term}'\n\n"
                 f"Here are the top 5 closest standard LOINC candidates retrieved from our database:\n"
-                f"{json.dumps(retrieved_loincs, indent=2)}\n\n"
+                f"{json.dumps(prompt_candidates, indent=2)}\n\n"
                 f"Analyze the semantic meaning (e.g., Blood vs Urine, Mass vs Count). "
                 f"Reply ONLY with the exact numeric 'concept_id' of the best match. "
                 f"If none of the candidates are a clinically safe match, reply with '0'."
@@ -144,17 +152,30 @@ def run_measurement_ai_mapping():
                 )
                 ai_answer = response['message']['content'].strip()
                 
-                match = next((c for c in retrieved_loincs if str(c['concept_id']) in ai_answer), None)
+                # PARSING ESTRITO: Extrai apenas números da resposta para evitar falsos positivos
+                extracted_nums = re.findall(r'\d+', ai_answer)
+                selected_id = extracted_nums[0] if extracted_nums else '0'
                 
-                if match and ai_answer != '0':
+                match = None
+                confidence_score = 0.0
+                
+                for c in retrieved_loincs:
+                    if str(c['concept_id']) == selected_id:
+                        match = c
+                        # Converte a distância vetorial numa Pseudo-Probabilidade (0.0 a 1.0)
+                        # Chroma default (L2): mais perto de 0 é melhor.
+                        confidence_score = round(max(0.0, 1.0 - (c['distance'] / 2.0)), 4)
+                        break
+                
+                if match and selected_id != '0':
                     concept_id = int(match['concept_id'])
                     concept_name = match['concept_name']
-                    print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   🎯 AI selected LOINC: '{concept_name}' (ID: {concept_id})")
+                    print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   🎯 AI selected: '{concept_name}' (ID: {concept_id}) | Confidence: {confidence_score}")
                     
                     updates.append((concept_id, raw_term))
                     provenance.append((
                         'measurement', 0, raw_term, concept_name, concept_id,
-                        'llm_rag_few_shot', 1.0, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
+                        'llm_rag_few_shot', confidence_score, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
                     ))
                 else:
                     print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   ❌ AI rejected all candidates (Returned 0).")
