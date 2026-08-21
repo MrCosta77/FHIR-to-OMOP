@@ -89,6 +89,33 @@ def test_measurement_person_fk(db_connection):
     # The test fails if the orphan count is greater than zero
     assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan measurements without a valid associated patient."
 
+
+def test_measurement_units_have_explicit_mapping_outcome(db_connection):
+    """A provided unit must resolve to a Standard Unit or explicit concept 0."""
+    missing_outcome = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM measurement
+        WHERE unit_source_value IS NOT NULL
+          AND unit_concept_id IS NULL
+    """).fetchone()[0]
+    assert missing_outcome == 0
+
+
+def test_nonzero_measurement_units_are_valid_standard_units(db_connection):
+    invalid = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM measurement m
+        LEFT JOIN concept c ON m.unit_concept_id = c.concept_id
+        WHERE m.unit_concept_id <> 0
+          AND (
+              c.concept_id IS NULL
+              OR c.domain_id <> 'Unit'
+              OR c.standard_concept <> 'S'
+              OR c.invalid_reason IS NOT NULL
+          )
+    """).fetchone()[0]
+    assert invalid == 0
+
 def test_visit_person_fk(db_connection):
     """
     Data Quality: Ensure referential integrity (Foreign Key) for the VISIT_OCCURRENCE table.

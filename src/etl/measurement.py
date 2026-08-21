@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.utils.unit_mapping import canonical_ucum_code
 
 def generate_measurement_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -54,10 +55,19 @@ def extract_measurements(file_path):
                     
                 value = None
                 unit = None
+                unit_system = None
+                unit_code = None
+                canonical_unit_code = None
                 
                 if 'valueQuantity' in resource:
                     value = resource['valueQuantity'].get('value')
-                    unit = resource['valueQuantity'].get('unit')
+                    quantity = resource['valueQuantity']
+                    unit_system = quantity.get('system')
+                    unit_code = quantity.get('code')
+                    unit = quantity.get('unit') or unit_code
+                    canonical_unit_code = canonical_ucum_code(
+                        unit_system, unit_code
+                    )
                 
                 if value is None:
                     continue
@@ -79,6 +89,9 @@ def extract_measurements(file_path):
                     display,
                     float(value),
                     unit,
+                    unit_system,
+                    unit_code,
+                    canonical_unit_code,
                     date
                 ))
     return records
@@ -121,6 +134,7 @@ def run_measurement_etl():
                 measurement_source_value VARCHAR,
                 measurement_source_concept_id INTEGER,
                 unit_source_value VARCHAR,
+                unit_source_concept_id INTEGER,
                 value_source_value VARCHAR
             )
         """)
@@ -134,11 +148,17 @@ def run_measurement_etl():
                 display_text VARCHAR,
                 value DOUBLE,
                 unit VARCHAR,
+                unit_system VARCHAR,
+                unit_code VARCHAR,
+                canonical_unit_code VARCHAR,
                 date DATE
             )
         """)
         
-        con.executemany("INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?)", all_records)
+        con.executemany(
+            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            all_records,
+        )
         
         con.execute("""
             INSERT INTO measurement (
@@ -146,7 +166,8 @@ def run_measurement_etl():
                 measurement_date, measurement_datetime,
                 measurement_type_concept_id, value_as_number,
                 measurement_source_value, measurement_source_concept_id,
-                unit_source_value
+                unit_concept_id, unit_source_value, unit_source_concept_id,
+                value_source_value
             )
             SELECT 
                 stg.measurement_id,
@@ -161,7 +182,16 @@ def run_measurement_etl():
                 stg.value AS value_as_number,
                 stg.display_text AS measurement_source_value,
                 COALESCE(c_src.concept_id::INTEGER, 0) AS measurement_source_concept_id,
-                stg.unit AS unit_source_value
+                CASE
+                    WHEN COALESCE(stg.unit_code, stg.unit) IS NULL THEN NULL
+                    ELSE COALESCE(c_unit_std.concept_id::INTEGER, 0)
+                END AS unit_concept_id,
+                stg.unit AS unit_source_value,
+                CASE
+                    WHEN COALESCE(stg.unit_code, stg.unit) IS NULL THEN NULL
+                    ELSE COALESCE(c_unit_src.concept_id::INTEGER, 0)
+                END AS unit_source_concept_id,
+                stg.value::VARCHAR AS value_source_value
             FROM stg_measurement stg
             LEFT JOIN concept c_src 
                 ON stg.loinc_code = c_src.concept_code 
@@ -175,8 +205,24 @@ def run_measurement_etl():
                 ON cr.concept_id_2 = c_std.concept_id 
                 AND c_std.standard_concept = 'S'
                 AND c_std.invalid_reason IS NULL
+            LEFT JOIN concept c_unit_src
+                ON stg.unit_system = 'http://unitsofmeasure.org'
+                AND stg.unit_code = c_unit_src.concept_code
+                AND c_unit_src.vocabulary_id = 'UCUM'
+                AND c_unit_src.invalid_reason IS NULL
+            LEFT JOIN concept c_unit_std
+                ON stg.canonical_unit_code = c_unit_std.concept_code
+                AND c_unit_std.vocabulary_id = 'UCUM'
+                AND c_unit_std.domain_id = 'Unit'
+                AND c_unit_std.standard_concept = 'S'
+                AND c_unit_std.invalid_reason IS NULL
             -- O escudo contra o 'merge-inflation' garantindo apenas 1 conceito por registo
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.measurement_id ORDER BY c_std.concept_id DESC) = 1
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY stg.measurement_id
+                ORDER BY c_std.concept_id DESC,
+                         c_unit_std.concept_id DESC,
+                         c_unit_src.concept_id DESC
+            ) = 1
         """)
 
         con.execute("""

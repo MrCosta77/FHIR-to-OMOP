@@ -9,6 +9,7 @@ This project was built with strict adherence to clinical data management standar
 1. **OMOP-Canonical Mapping (STCM):** AI-derived mappings are not forced directly into clinical event tables. Instead, they are written to the `source_to_concept_map` (STCM) dictionary. This isolates mapping decisions from clinical data, allowing for versioning, retraction, and human review.
 2. **Deterministic Tie-Breaking:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the official `Maps To` relationship and Domain routing.
 3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
+4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
 
 ## 🧠 The AI Mapping Engine & Governance Loop
 
@@ -36,6 +37,16 @@ The resulting DuckDB instance is successfully validated using the native R `Data
 * **Plausibility (Validation):** 100% Pass Rate (Flawless temporal and clinical logic integrity)
 * **Conformance (Total):** 69% Pass Rate (Up from baseline due to proper vocabulary metadata and DDL adherence)
 * **Completeness (Total):** 65% Pass Rate
+
+### 3. Unit Mapping Contract
+
+FHIR `valueQuantity` units use three explicit outcomes: a known UCUM unit maps
+to its Standard OMOP `Unit` Concept; a supplied but unsupported unit maps to
+concept ID `0`; and a genuinely absent unit remains `NULL`. Reviewed UCUM
+aliases are centralized in `src/utils/unit_mapping.py`. The current synthetic
+cohort maps 11,766 of 13,692 measurements (85.9%); the remaining 1,926 values
+are annotation-like units such as `{score}` and are preserved verbatim with
+concept ID `0` rather than assigned a misleading clinical unit.
 
 ## 🛠️ Setup & Execution
 
