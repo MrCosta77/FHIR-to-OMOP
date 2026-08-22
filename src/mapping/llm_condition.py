@@ -11,61 +11,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, MODEL_NAME
+from src.mapping.mapping_service import (
+    get_few_shot_prompt,
+    get_versioned_collection,
+    record_mapping_proposal,
+    selected_candidate,
+)
 
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
 def get_few_shot_examples(con, limit=3):
     """Fetches real examples already approved by a human in the Streamlit interface."""
-    query = f"""
-        SELECT source_value, assigned_concept_id, normalized_value
-        FROM mapping_provenance
-        WHERE reviewed_by = 'Approved_by_Human'
-          AND target_table = 'condition_occurrence'
-        ORDER BY RANDOM()
-        LIMIT {limit}
-    """
-    examples = con.execute(query).fetchall()
-    
-    if not examples:
-        return "" # If no approvals yet, send nothing
-        
-    fs_text = "Here are examples of correct SNOMED CT mappings previously approved by a human expert:\n"
-    for raw, concept_id, norm in examples:
-        fs_text += f" - Raw Term: '{raw}' -> Concept ID: {concept_id} (Reasoning: Matches '{norm}')\n"
-    return fs_text + "\n"
+    return get_few_shot_prompt(
+        con, "condition_occurrence", "SNOMED CT condition", limit
+    )
 
 def setup_vector_store(con):
     """Initializes ChromaDB and populates it with valid SNOMED Condition concepts."""
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    collection = client.get_or_create_collection(name="snomed_conditions")
-    
-    if collection.count() > 0:
-        return collection
-        
-    print("⏳ Building SNOMED Vector Store for RAG (this will take a few minutes)...")
-    
-    conditions = con.execute("""
-        SELECT concept_id, concept_name 
-        FROM concept 
-        WHERE vocabulary_id = 'SNOMED' 
-          AND domain_id = 'Condition'
-          AND standard_concept = 'S' 
-          AND invalid_reason IS NULL
-    """).fetchall()
-
-    ids = [str(row[0]) for row in conditions]
-    documents = [row[1] for row in conditions]
-    
-    batch_size = 5000
-    for i in range(0, len(ids), batch_size):
-        collection.add(
-            ids=ids[i:i+batch_size],
-            documents=documents[i:i+batch_size]
-        )
-        print(f"   Indexed {min(i+batch_size, len(ids))} / {len(ids)} conditions...")
-        
-    print(f"✅ Indexed {len(ids)} SNOMED concepts into Vector Store.")
-    return collection
+    return get_versioned_collection(
+        con, CHROMA_PATH, "condition_occurrence"
+    )
 
 def get_unmapped_conditions(con):
     """Fetch unique unmapped condition terms from DuckDB."""
@@ -101,7 +66,8 @@ def run_condition_ai_mapping():
         if few_shot_prompt:
             print("🧠 Dynamic Few-Shot ACTIVE: Injecting previously approved examples into AI context...\n")
         
-        updates = []
+        proposed_count = 0
+        below_threshold_count = 0
         
         for idx, raw_term in enumerate(unique_terms, 1):
             try:
@@ -143,54 +109,36 @@ def run_condition_ai_mapping():
                 )
                 ai_answer = response['message']['content'].strip()
                 
-                match = next((c for c in retrieved_snomed if str(c['concept_id']) in ai_answer), None)
-                
-                if match and ai_answer != '0':
-                    concept_id = int(match['concept_id'])
-                    concept_name = match['concept_name']
-                    print(f"[{idx}/{total_terms}] Raw: '{raw_term}'\n   🎯 AI selected SNOMED: '{concept_name}' (ID: {concept_id})")
-                    updates.append((concept_id, concept_name, 1.0, raw_term))
+                match = selected_candidate(
+                    search_results, ai_answer,
+                    (collection.metadata or {}).get("distance_metric", "cosine"),
+                )
+                if match:
+                    concept_id, concept_name, _distance, score = match
+                    status, event_count = record_mapping_proposal(
+                        con, "condition_occurrence", raw_term, match
+                    )
+                    print(
+                        f"[{idx}/{total_terms}] Raw: '{raw_term}'\n"
+                        f"   🎯 AI selected SNOMED: '{concept_name}' "
+                        f"(ID: {concept_id}) | score={score:.4f} | {status} | "
+                        f"events={event_count}"
+                    )
+                    if status == "Pending_Human_Review":
+                        proposed_count += 1
+                    else:
+                        below_threshold_count += 1
                 else:
                     print(f"[{idx}/{total_terms}] Raw: '{raw_term}'\n   ❌ AI rejected all candidates.")
                     
             except Exception as e:
                 print(f"[{idx}/{total_terms}] ❌ LLM Error on '{raw_term}': {e}")
                 
-        if updates:
-            print(f"\n💾 Writing {len(updates)} standardized concepts to the STCM Dictionary...")
-            for concept_id, llm_term, score, raw_term in updates:
-                con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (raw_term,))
-                con.execute("""
-                    INSERT INTO source_to_concept_map (
-                        source_code, source_concept_id, source_vocabulary_id, source_code_description,
-                        target_concept_id, target_vocabulary_id, valid_start_date, valid_end_date, invalid_reason
-                    ) VALUES (
-                        ?, 0, 'CMF_SYNTHEA', ?,
-                        ?, 'SNOMED', CURRENT_DATE, '2099-12-31', NULL
-                    )
-                """, (raw_term, raw_term, concept_id))
-                
-                # Register mapping provenance using WHERE NOT EXISTS to avoid duplicates
-                con.execute("""
-                    INSERT INTO mapping_provenance (
-                        target_table, target_id, source_value, normalized_value,
-                        assigned_concept_id, mapping_method, score, model_name,
-                        vocabulary_version, reviewed_by
-                    )
-                    SELECT 'condition_occurrence', 0, ?, ?,
-                           ?, 'llm_rag_few_shot', ?, ?, 
-                           'Athena_v5.4', 'Pending_Human_Review'
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM mapping_provenance 
-                        WHERE target_table = 'condition_occurrence' AND source_value = ?
-                    )
-                """, (raw_term, llm_term, concept_id, score, MODEL_NAME, raw_term))
-                
-            print("✅ STCM Dictionary and Provenance Audit successfully updated!")
-        else:
-            print("\n⚠️ No matches met the confidence threshold. Database was not updated.")
-            
-        print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {total_terms} unique terms.")
+        print(
+            f"\n📊 SUMMARY: {proposed_count} proposals awaiting human review; "
+            f"{below_threshold_count} candidates below the configured threshold; "
+            f"{total_terms} terms evaluated."
+        )
 
 if __name__ == "__main__":
     run_condition_ai_mapping()

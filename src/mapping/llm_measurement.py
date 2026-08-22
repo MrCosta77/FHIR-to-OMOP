@@ -12,64 +12,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, MODEL_NAME
+from src.mapping.mapping_service import (
+    get_few_shot_prompt,
+    get_versioned_collection,
+    record_mapping_proposal,
+    selected_candidate,
+)
 
 CHROMA_PATH = os.path.join(PROJECT_ROOT, "data", "chroma_db")
 
 def get_few_shot_examples(con, limit=3):
     """Fetches real laboratory examples already approved by a human in the Streamlit interface."""
-    query = f"""
-        SELECT source_value, assigned_concept_id, normalized_value
-        FROM mapping_provenance
-        WHERE reviewed_by = 'Approved_by_Human'
-          AND target_table = 'measurement'
-        -- ORDENAÇÃO DETERMINÍSTICA PELOS MAIS RECENTES (Resolve a quebra de reprodutibilidade)
-        ORDER BY created_at DESC
-        LIMIT {limit}
-    """
-    examples = con.execute(query).fetchall()
-    
-    if not examples:
-        return ""
-        
-    fs_text = "Here are examples of correct LOINC mappings previously approved by a human expert:\n"
-    for raw, concept_id, norm in examples:
-        fs_text += f" - Raw Term: '{raw}' -> Concept ID: {concept_id} (Reasoning: Matches '{norm}')\n"
-    return fs_text + "\n"
+    return get_few_shot_prompt(con, "measurement", "LOINC measurement", limit)
 
 def setup_vector_store(con):
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    collection = client.get_or_create_collection(name="loinc_measurements")
-    
-    if collection.count() > 0:
-        return collection
-        
-    print("⏳ Building LOINC Vector Store for RAG (this might take a minute)...")
-    
-    loincs = con.execute("""
-        SELECT concept_id, concept_name 
-        FROM concept 
-        WHERE vocabulary_id = 'LOINC' 
-          AND domain_id = 'Measurement' 
-          AND standard_concept = 'S' 
-          AND invalid_reason IS NULL
-    """).fetchall()
-    
-    if not loincs:
-        print("⚠️ No LOINC concepts found in database. Vector store will be empty.")
-        return collection
-
-    ids = [str(row[0]) for row in loincs]
-    documents = [row[1] for row in loincs]
-    
-    batch_size = 5000
-    for i in range(0, len(ids), batch_size):
-        collection.add(
-            ids=ids[i:i+batch_size],
-            documents=documents[i:i+batch_size]
-        )
-        
-    print(f"✅ Indexed {len(ids)} LOINC concepts into Vector Store.")
-    return collection
+    return get_versioned_collection(con, CHROMA_PATH, "measurement")
 
 def get_unmapped_measurements(con):
     query = """
@@ -103,8 +60,8 @@ def run_measurement_ai_mapping():
         if few_shot_prompt:
             print("🧠 Dynamic Few-Shot ACTIVE: Injecting previously approved examples into AI context...\n")
         
-        updates = []
-        provenance = []
+        proposed_count = 0
+        below_threshold_count = 0
         
         for idx, raw_term in enumerate(unmapped, 1):
             try:
@@ -152,72 +109,35 @@ def run_measurement_ai_mapping():
                 )
                 ai_answer = response['message']['content'].strip()
                 
-                # PARSING ESTRITO: Extrai apenas números da resposta para evitar falsos positivos
-                extracted_nums = re.findall(r'\d+', ai_answer)
-                selected_id = extracted_nums[0] if extracted_nums else '0'
-                
-                match = None
-                confidence_score = 0.0
-                
-                for c in retrieved_loincs:
-                    if str(c['concept_id']) == selected_id:
-                        match = c
-                        # Converte a distância vetorial numa Pseudo-Probabilidade (0.0 a 1.0)
-                        # Chroma default (L2): mais perto de 0 é melhor.
-                        confidence_score = round(max(0.0, 1.0 - (c['distance'] / 2.0)), 4)
-                        break
-                
-                if match and selected_id != '0':
-                    concept_id = int(match['concept_id'])
-                    concept_name = match['concept_name']
-                    print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   🎯 AI selected: '{concept_name}' (ID: {concept_id}) | Confidence: {confidence_score}")
-                    
-                    updates.append((concept_id, raw_term))
-                    provenance.append((
-                        'measurement', 0, raw_term, concept_name, concept_id,
-                        'llm_rag_few_shot', confidence_score, MODEL_NAME, 'Athena_v5.4', 'Pending_Human_Review'
-                    ))
+                match = selected_candidate(
+                    search_results, ai_answer,
+                    (collection.metadata or {}).get("distance_metric", "cosine"),
+                )
+                if match:
+                    concept_id, concept_name, _distance, score = match
+                    status, event_count = record_mapping_proposal(
+                        con, "measurement", raw_term, match
+                    )
+                    print(
+                        f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n"
+                        f"   🎯 AI selected: '{concept_name}' (ID: {concept_id}) "
+                        f"| score={score:.4f} | {status} | events={event_count}"
+                    )
+                    if status == "Pending_Human_Review":
+                        proposed_count += 1
+                    else:
+                        below_threshold_count += 1
                 else:
                     print(f"[{idx}/{len(unmapped)}] Raw: '{raw_term}'\n   ❌ AI rejected all candidates (Returned 0).")
                     
             except Exception as e:
                 print(f"[{idx}/{len(unmapped)}] ❌ LLM Error on '{raw_term}': {e}")
                 
-        if updates:
-            print(f"\n💾 Writing {len(updates)} RAG-mapped concepts to the STCM Dictionary...")
-            
-            for p in provenance:
-                target_table, _, src_val, norm_val, concept_id, method, score, model, vocab, review = p
-                
-                con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (src_val,))
-                
-                con.execute("""
-                    INSERT INTO source_to_concept_map (
-                        source_code, source_concept_id, source_vocabulary_id, source_code_description,
-                        target_concept_id, target_vocabulary_id, valid_start_date, valid_end_date, invalid_reason
-                    ) VALUES (
-                        ?, 0, 'CMF_SYNTHEA', ?,
-                        ?, 'LOINC', CURRENT_DATE, '2099-12-31', NULL
-                    )
-                """, (src_val, src_val, concept_id))
-                
-                con.execute("""
-                    INSERT INTO mapping_provenance (
-                        target_table, target_id, source_value, normalized_value,
-                        assigned_concept_id, mapping_method, score, model_name,
-                        vocabulary_version, reviewed_by
-                    ) 
-                    SELECT ?, 0, ?, ?,
-                           ?, ?, ?, ?, ?, ?
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM mapping_provenance 
-                        WHERE target_table = ? AND source_value = ?
-                    )
-                """, (target_table, src_val, norm_val, concept_id, method, score, model, vocab, review, target_table, src_val))
-            
-            print("✅ STCM Dictionary and Provenance Audit successfully updated!")
-        
-        print(f"\n📊 SUMMARY: Successfully mapped {len(updates)} out of {len(unmapped)} legacy lab terms.")
+        print(
+            f"\n📊 SUMMARY: {proposed_count} proposals awaiting human review; "
+            f"{below_threshold_count} candidates below the configured threshold; "
+            f"{len(unmapped)} terms evaluated."
+        )
 
 if __name__ == "__main__":
     run_measurement_ai_mapping()

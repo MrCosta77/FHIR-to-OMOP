@@ -63,9 +63,9 @@ def run_step(step):
     try:
         # sys.executable ensures we use the isolated .venv Python, not the global system one
         if step.get("is_pytest"):
-            subprocess.run([sys.executable, "-m", "pytest", script_path, "-v", "--disable-warnings"], cwd=PROJECT_ROOT, check=True)
+            subprocess.run([sys.executable, "-X", "utf8", "-m", "pytest", script_path, "-v", "--disable-warnings"], cwd=PROJECT_ROOT, check=True)
         else:
-            subprocess.run([sys.executable, script_path], cwd=PROJECT_ROOT, check=True)
+            subprocess.run([sys.executable, "-X", "utf8", script_path], cwd=PROJECT_ROOT, check=True)
         
         elapsed = time.time() - start_time
         print(f"\n✅ SUCCESS: '{step_name}' completed in {elapsed:.1f} seconds.")
@@ -94,7 +94,10 @@ def main():
     
     print(f"\n{'='*70}")
     print(f"🎉 PIPELINE FULLY COMPLETED IN {minutes}m {seconds}s! 🎉")
-    print("Database is now clean, linked, domain-routed, AI-mapped, and tested.")
+    print(
+        "Database is clean, linked, domain-routed, and tested; "
+        "LLM candidates remain gated until human approval."
+    )
     print(f"{'='*70}\n")
 
 if __name__ == "__main__":

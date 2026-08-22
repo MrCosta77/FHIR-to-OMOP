@@ -33,6 +33,12 @@ def setup_audit_tables():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        con.execute("""
+            UPDATE mapping_provenance
+            SET reviewed_by = 'Superseded_Legacy_Placeholder'
+            WHERE target_id = 0
+              AND reviewed_by = 'Pending_Human_Review'
+        """)
         print("✅ 'mapping_provenance' table verified/created successfully!")
 
         # 3. TABELA CDM_SOURCE (Obrigatória para o OHDSI Data Quality Dashboard)

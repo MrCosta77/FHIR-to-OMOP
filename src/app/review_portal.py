@@ -17,10 +17,14 @@ def get_pending_reviews():
     """Fetches all pending AI mappings from the database."""
     with duckdb.connect(DB_PATH) as con:
         query = """
-            SELECT provenance_id, target_table, source_value, normalized_value, 
-                   assigned_concept_id, mapping_method, score, model_name
+            SELECT MIN(provenance_id) AS provenance_id, target_table,
+                   source_value, normalized_value, assigned_concept_id,
+                   mapping_method, score, model_name,
+                   COUNT(DISTINCT target_id) AS affected_events
             FROM mapping_provenance
             WHERE reviewed_by = 'Pending_Human_Review'
+            GROUP BY target_table, source_value, normalized_value,
+                     assigned_concept_id, mapping_method, score, model_name
             ORDER BY provenance_id DESC
         """
         return con.execute(query).df()
@@ -28,30 +32,46 @@ def get_pending_reviews():
 def get_metrics():
     """Quick metrics for the Dashboard."""
     with duckdb.connect(DB_PATH) as con:
-        pending = con.execute("SELECT COUNT(*) FROM mapping_provenance WHERE reviewed_by = 'Pending_Human_Review'").fetchone()[0]
-        approved = con.execute("SELECT COUNT(*) FROM mapping_provenance WHERE reviewed_by = 'Approved_by_Human'").fetchone()[0]
-        rejected = con.execute("SELECT COUNT(*) FROM mapping_provenance WHERE reviewed_by = 'Rejected_by_Human'").fetchone()[0]
+        def mapping_count(status):
+            return con.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT 1 FROM mapping_provenance
+                    WHERE reviewed_by = ?
+                    GROUP BY target_table, source_value, assigned_concept_id
+                )
+            """, [status]).fetchone()[0]
+
+        pending = mapping_count("Pending_Human_Review")
+        approved = mapping_count("Approved_by_Human")
+        rejected = mapping_count("Rejected_by_Human")
         return pending, approved, rejected
 
-def process_review(provenance_id, source_value, action):
+def process_review(target_table, source_value, concept_id, action):
     """Updates the database based on the human curator's decision."""
     with duckdb.connect(DB_PATH) as con:
         if action == "approve":
             # UPDATE seguro sem f-strings
             con.execute(
-                "UPDATE mapping_provenance SET reviewed_by = 'Approved_by_Human' WHERE rowid = ?", 
-                (provenance_id,)
+                """UPDATE mapping_provenance
+                   SET reviewed_by = 'Approved_by_Human'
+                   WHERE target_table = ? AND source_value = ?
+                     AND assigned_concept_id = ?
+                     AND reviewed_by = 'Pending_Human_Review'""",
+                (target_table, source_value, int(concept_id))
             )
             st.toast(f"✅ Mapping '{source_value}' approved!")
             
         elif action == "reject":
             # UPDATE seguro sem f-strings
             con.execute(
-                "UPDATE mapping_provenance SET reviewed_by = 'Rejected_by_Human' WHERE rowid = ?", 
-                (provenance_id,)
+                """UPDATE mapping_provenance
+                   SET reviewed_by = 'Rejected_by_Human'
+                   WHERE target_table = ? AND source_value = ?
+                     AND assigned_concept_id = ?
+                     AND reviewed_by = 'Pending_Human_Review'""",
+                (target_table, source_value, int(concept_id))
             )
-            con.execute("DELETE FROM source_to_concept_map WHERE source_code = ?", (source_value,))
-            st.toast(f"❌ Mapping '{source_value}' rejected and removed from dictionary.")
+            st.toast(f"❌ Mapping '{source_value}' rejected.")
 
 # --- USER INTERFACE (UI) ---
 
@@ -111,11 +131,17 @@ else:
         # Action Buttons
         btn_col1, btn_col2 = col6.columns(2)
         if btn_col1.button("✅ Approve", key=f"app_{row['provenance_id']}", use_container_width=True):
-            process_review(row['provenance_id'], row['source_value'], "approve")
+            process_review(
+                row['target_table'], row['source_value'],
+                row['assigned_concept_id'], "approve"
+            )
             st.rerun() # Refresh page automatically
             
         if btn_col2.button("❌ Reject", key=f"rej_{row['provenance_id']}", type="primary", use_container_width=True):
-            process_review(row['provenance_id'], row['source_value'], "reject")
+            process_review(
+                row['target_table'], row['source_value'],
+                row['assigned_concept_id'], "reject"
+            )
             st.rerun() # Refresh page automatically
 
     st.markdown("---")

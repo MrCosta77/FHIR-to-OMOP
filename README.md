@@ -20,6 +20,20 @@ Standard OMOP vocabularies handle the majority of clinical data, but real-world 
 3. **Human-in-the-Loop (Streamlit):** Mappings are flagged as `Pending_Human_Review` in a `mapping_provenance` audit table. Curators use a Streamlit portal to Approve or Reject mappings.
 4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
+The retrieval layer is reproducible: the three active Chroma collections carry
+a fingerprint of the valid vocabulary/domain slice, index schema version,
+distance metric, and `build_complete` marker. Changed vocabularies trigger a
+resumable rebuild; matching legacy collections are adopted without recomputing
+embeddings. Few-shot examples use a stable order, candidate IDs are parsed by
+exact membership, and `SIMILARITY_THRESHOLD` is enforced before a proposal can
+enter the review queue.
+
+LLM candidates are recorded once per affected clinical event. They are never
+applied merely because they exist in STCM: `apply_stcm.py` requires matching
+human-approved provenance, the correct domain-specific source vocabulary, a
+current Standard Concept, and valid STCM dates. Legacy `target_id=0` proposals
+are retained as superseded history rather than treated as active decisions.
+
 ## 📊 Results & Validation
 
 ### 1. Mapping Accuracy (against seeded synthetic LIS noise)
@@ -73,6 +87,10 @@ Executes the 16-step pipeline (Vocabularies ➔ Base ETL ➔ STCM Application �
 ```bash
 python main.py
 ```
+
+The first run after a vocabulary change can take considerably longer while
+active vector indexes are rebuilt. Progress is printed per 5,000 concepts and
+an interrupted build resumes from the IDs already indexed.
 
 **4. Run the Human-in-the-Loop Portal**
 Launch the Streamlit app to curate pending AI mappings:
