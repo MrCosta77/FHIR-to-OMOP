@@ -49,7 +49,12 @@ def test_pinned_specification_is_exempt_from_eol_normalization():
 
 
 def test_dqd_runner_explicitly_uses_cdm_54_checks():
-    runner = (SPEC_PATH.parents[2] / "src" / "analytics" / "run_dqd_tests.R").read_text(
+    analytics = SPEC_PATH.parents[2] / "src" / "analytics"
+    runner = (analytics / "run_dqd_tests.R").read_text(
         encoding="utf-8"
     )
-    assert runner.count('cdmVersion = "5.4"') == 2
+    worker = (analytics / "run_dqd_worker.R").read_text(encoding="utf-8")
+    assert worker.count('cdmVersion = "5.4"') == 2
+    assert 'run_worker("base"' in runner
+    assert 'run_worker("future_high"' in runner
+    assert "src.quality.merge_dqd_results" in runner

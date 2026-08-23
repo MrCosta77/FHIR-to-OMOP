@@ -10,6 +10,7 @@ This project was built with strict adherence to clinical data management standar
 2. **Deterministic Tie-Breaking:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the official `Maps To` relationship and Domain routing.
 3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
 4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
+5. **Standards-Based Era Derivation:** After approved STCM mappings are applied, mapped conditions are collapsed into `CONDITION_ERA` with a 30-day persistence window. Drug products are expanded through `CONCEPT_ANCESTOR` to every current Standard Ingredient before `DRUG_ERA` is derived. Both tables use deterministic IDs and are published together only after coverage and integrity checks pass.
 
 ## 🧠 The AI Mapping Engine & Governance Loop
 
@@ -46,21 +47,29 @@ The architecture is explicitly designed to handle unstructured, legacy clinical 
 | **Recall** | 74.78% | Overall recovery rate of the corrupted dataset. |
 
 ### 2. OHDSI Data Quality Dashboard (DQD)
-The resulting DuckDB instance is successfully validated using the native R `DataQualityDashboard` package against OMOP v5.4 rules:
-* **Overall Pass Rate:** 77% (Achieved by deploying the full OMOP v5.4 schema and enforcing strict STCM domain routing)
-* **Plausibility (Validation):** 100% Pass Rate (Flawless temporal and clinical logic integrity)
-* **Conformance (Total):** 69% Pass Rate (Up from baseline due to proper vocabulary metadata and DDL adherence)
-* **Completeness (Total):** 65% Pass Rate
+The resulting DuckDB instance is validated with the native R
+`DataQualityDashboard` package against OMOP v5.4. DQD JSON files remain local;
+the repository versions the executable check configuration and a human-reviewed
+acceptance policy instead of committing one favorable report. The Python gate
+requires zero DQD execution errors, rejects unknown or stale allowances, and
+enforces per-check row and percentage caps. The runner preserves all 55 DQD
+future-date evaluations while normalizing their threshold expression to native
+DuckDB SQL. It executes `plausibleValueHigh` in an isolated R process to avoid
+driver memory accumulation, verifies that the two check sets are disjoint, and
+merges them into one standard 1,983-check JSON without excluding or weakening
+any check. The final approved run completed 1,983 unique checks: 1,981 passed,
+2 reviewed exceptions, 0 execution errors (99.9% without failure). Conformance
+passed 1,060/1,060 checks, Completeness 110/110, and Plausibility 811/813.
 
 ### 3. Unit Mapping Contract
 
 FHIR `valueQuantity` units use three explicit outcomes: a known UCUM unit maps
-to its Standard OMOP `Unit` Concept; a supplied but unsupported unit maps to
-concept ID `0`; and a genuinely absent unit remains `NULL`. Reviewed UCUM
-aliases are centralized in `src/utils/unit_mapping.py`. The current synthetic
-cohort maps 11,766 of 13,692 measurements (85.9%); the remaining 1,926 values
-are annotation-like units such as `{score}` and are preserved verbatim with
-concept ID `0` rather than assigned a misleading clinical unit.
+to its Standard OMOP `Unit` Concept; a supplied but unsupported annotation maps
+to concept ID `0`; and a genuinely absent unit remains `NULL`. Reviewed UCUM
+aliases are centralized in `src/utils/unit_mapping.py`; for example, FHIR
+`{score}` maps deterministically to Standard OMOP `[score]` (44777566).
+Semantically incompatible code/unit pairs are retained in a traceable ETL
+quarantine rather than converted or silently published.
 
 ## 🛠️ Setup & Execution
 
@@ -95,7 +104,7 @@ Any external FHIR bundle can be checked before ETL with
 * Ensure [Ollama](https://ollama.ai/) is installed and running locally with the target model: `ollama pull qwen2.5-coder:7b`
 
 **3. Run the Full Orchestrator**
-Executes the 16-step pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ Tests ➔ Analytics). 
+Executes the full pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ Era Derivation ➔ Tests ➔ Analytics).
 *(To test AI accuracy, inject LIS noise by setting `SIMULATE_LIS_NOISE="true"`).*
 ```bash
 python main.py

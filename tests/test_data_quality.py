@@ -61,6 +61,17 @@ def test_no_future_dates_in_conditions(db_connection):
     
     assert result == 0, f"Found {result} condition records with future dates!"
 
+
+def test_cdm_release_date_is_not_in_the_future(db_connection):
+    """Compensates for one DQD 2.8.9/DuckDB SQL preparation incompatibility."""
+    invalid = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM cdm_source
+        WHERE cdm_release_date IS NULL
+           OR cdm_release_date > CURRENT_DATE + INTERVAL 1 DAY
+    """).fetchone()[0]
+    assert invalid == 0
+
 def test_person_source_value_is_unique(db_connection):
     """
     Data Quality: Ensure no duplicate patients exist in the PERSON table based on source value.
@@ -190,3 +201,34 @@ def test_procedure_person_fk(db_connection):
         WHERE p.person_id IS NULL
     """).fetchone()[0]
     assert result == 0, f"Found {result} procedures linked to non-existent persons."
+
+
+def test_mapped_conditions_are_covered_by_condition_eras(db_connection):
+    uncovered = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM condition_occurrence occurrence
+        WHERE occurrence.condition_concept_id <> 0
+          AND NOT EXISTS (
+              SELECT 1 FROM condition_era era
+              WHERE era.person_id = occurrence.person_id
+                AND era.condition_concept_id = occurrence.condition_concept_id
+                AND occurrence.condition_start_date >= era.condition_era_start_date
+                AND COALESCE(occurrence.condition_end_date, occurrence.condition_start_date)
+                    <= era.condition_era_end_date
+          )
+    """).fetchone()[0]
+    assert uncovered == 0
+
+
+def test_drug_eras_use_standard_ingredient_concepts(db_connection):
+    invalid = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM drug_era era
+        LEFT JOIN concept ingredient ON ingredient.concept_id = era.drug_concept_id
+        WHERE ingredient.concept_id IS NULL
+           OR ingredient.domain_id <> 'Drug'
+           OR ingredient.concept_class_id <> 'Ingredient'
+           OR ingredient.standard_concept <> 'S'
+           OR ingredient.invalid_reason IS NOT NULL
+    """).fetchone()[0]
+    assert invalid == 0

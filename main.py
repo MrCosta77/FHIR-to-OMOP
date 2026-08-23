@@ -35,6 +35,7 @@ PIPELINE_STEPS = [
         
     # --- PHASE 5: Apply AI Mappings ---
     {"name": "15. Apply STCM Mappings", "script": "src/etl/apply_stcm.py"},
+    {"name": "15b. Build Condition and Drug Eras", "script": "src/etl/eras.py"},
         
     # --- PHASE 6: Validation & Analytics ---
     {"name": "16. Run Quality Gate (Tests)", "script": "tests/test_data_quality.py", "is_pytest": True},

@@ -20,6 +20,8 @@ TABLE_KEYS = {
     "observation": "observation_id",
     "procedure_occurrence": "procedure_occurrence_id",
     "device_exposure": "device_exposure_id",
+    "condition_era": "condition_era_id",
+    "drug_era": "drug_era_id",
 }
 
 EVENTS = {
@@ -44,6 +46,8 @@ CONCEPT_FIELDS = {
     ("observation", "observation_concept_id"): "Observation",
     ("procedure_occurrence", "procedure_concept_id"): "Procedure",
     ("device_exposure", "device_concept_id"): "Device",
+    ("condition_era", "condition_concept_id"): "Condition",
+    ("drug_era", "drug_concept_id"): "Drug",
 }
 
 
@@ -182,3 +186,36 @@ def test_cross_domain_targets_are_not_left_as_concept_zero(con):
         WHERE p.procedure_concept_id = 0
     """).fetchone()[0]
     assert misplaced_procedures == 0
+
+
+def test_era_ranges_and_counts_are_valid(con):
+    invalid_conditions = con.execute("""
+        SELECT COUNT(*) FROM condition_era
+        WHERE condition_era_end_date < condition_era_start_date
+           OR condition_occurrence_count IS NULL
+           OR condition_occurrence_count < 1
+    """).fetchone()[0]
+    invalid_drugs = con.execute("""
+        SELECT COUNT(*) FROM drug_era
+        WHERE drug_era_end_date < drug_era_start_date
+           OR drug_exposure_count IS NULL
+           OR drug_exposure_count < 1
+           OR gap_days IS NULL
+           OR gap_days < 0
+    """).fetchone()[0]
+    assert invalid_conditions == 0
+    assert invalid_drugs == 0
+
+
+def test_drug_era_concepts_are_standard_ingredients(con):
+    invalid = con.execute("""
+        SELECT COUNT(*)
+        FROM drug_era era
+        LEFT JOIN concept ingredient ON ingredient.concept_id = era.drug_concept_id
+        WHERE ingredient.concept_id IS NULL
+           OR ingredient.domain_id <> 'Drug'
+           OR ingredient.concept_class_id <> 'Ingredient'
+           OR ingredient.standard_concept <> 'S'
+           OR ingredient.invalid_reason IS NOT NULL
+    """).fetchone()[0]
+    assert invalid == 0
