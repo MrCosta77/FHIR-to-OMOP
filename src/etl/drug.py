@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.omop.cdm54 import ensure_table_columns
 
 def generate_drug_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -144,6 +145,7 @@ def run_drug_etl():
                 dose_unit_source_value VARCHAR
             )
         """)
+        ensure_table_columns(con, "drug_exposure")
         
         con.execute("DROP TABLE IF EXISTS stg_drug")
         con.execute("""

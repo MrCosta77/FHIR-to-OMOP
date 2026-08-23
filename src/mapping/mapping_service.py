@@ -191,6 +191,37 @@ def get_few_shot_prompt(con, target_table, label, limit=3):
     return "\n".join(lines) + "\n"
 
 
+def reconcile_resolved_proposals(con, target_table):
+    """Retire pending LLM rows whose concrete event now maps deterministically."""
+    config = TARGETS[target_table]
+    count = con.execute(f"""
+        SELECT COUNT(*)
+        FROM mapping_provenance p
+        JOIN {target_table} event
+          ON event.{config['id_column']} = p.target_id
+        WHERE p.target_table = ?
+          AND p.mapping_method = 'llm_rag_few_shot'
+          AND p.reviewed_by IN (
+              'Pending_Human_Review', 'Below_Confidence_Threshold'
+          )
+          AND event.{config['concept_column']} <> 0
+    """, [target_table]).fetchone()[0]
+    if count:
+        con.execute(f"""
+            UPDATE mapping_provenance p
+            SET reviewed_by = 'Superseded_By_Deterministic_Mapping'
+            FROM {target_table} event
+            WHERE event.{config['id_column']} = p.target_id
+              AND p.target_table = ?
+              AND p.mapping_method = 'llm_rag_few_shot'
+              AND p.reviewed_by IN (
+                  'Pending_Human_Review', 'Below_Confidence_Threshold'
+              )
+              AND event.{config['concept_column']} <> 0
+        """, [target_table])
+    return count
+
+
 def selected_candidate(search_results, answer, distance_metric="cosine"):
     """Parse one exact candidate ID and return its name, distance and score."""
     numbers = re.findall(r"\d+", str(answer))

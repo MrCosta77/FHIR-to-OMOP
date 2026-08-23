@@ -24,6 +24,10 @@ synthea/
 # Evaluation and Output Results
 dqd_results/
 
+# Local R/RStudio session state
+.RData
+.Rhistory
+
 # OS Generated Files
 .DS_Store
 Thumbs.db

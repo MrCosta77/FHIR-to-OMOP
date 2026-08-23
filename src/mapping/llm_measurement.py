@@ -15,6 +15,7 @@ from src.utils.config import DB_PATH, MODEL_NAME
 from src.mapping.mapping_service import (
     get_few_shot_prompt,
     get_versioned_collection,
+    reconcile_resolved_proposals,
     record_mapping_proposal,
     selected_candidate,
 )
@@ -43,6 +44,9 @@ def run_measurement_ai_mapping():
     print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
+        retired = reconcile_resolved_proposals(con, "measurement")
+        if retired:
+            print(f"♻️ Retired {retired} proposals resolved deterministically.")
         collection = setup_vector_store(con)
         if collection.count() == 0:
             print("❌ Vector store is empty. Skipping RAG mapping.")

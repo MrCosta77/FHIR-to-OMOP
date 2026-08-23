@@ -4,6 +4,7 @@ from src.etl.apply_stcm import apply_stcm_mappings
 from src.mapping.mapping_service import (
     get_few_shot_prompt,
     get_versioned_collection,
+    reconcile_resolved_proposals,
     record_mapping_proposal,
     selected_candidate,
 )
@@ -169,6 +170,34 @@ def test_proposal_is_event_level_and_threshold_controls_stcm():
             (2, "Pending_Human_Review"),
             (3, "Below_Confidence_Threshold"),
         ]
+
+
+def test_deterministic_mapping_supersedes_pending_event_proposal():
+    with duckdb.connect(":memory:") as con:
+        _create_provenance(con)
+        con.execute("""
+            CREATE TABLE measurement (
+                measurement_id BIGINT, measurement_concept_id INTEGER,
+                measurement_source_value VARCHAR
+            )
+        """)
+        con.execute("INSERT INTO measurement VALUES (1, 300, 'Legacy')")
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value,
+                assigned_concept_id, mapping_method, reviewed_by
+            ) VALUES (
+                'measurement', 1, 'Legacy', 301,
+                'llm_rag_few_shot', 'Pending_Human_Review'
+            )
+        """)
+
+        retired = reconcile_resolved_proposals(con, "measurement")
+
+        assert retired == 1
+        assert con.execute("""
+            SELECT reviewed_by FROM mapping_provenance
+        """).fetchone()[0] == "Superseded_By_Deterministic_Mapping"
 
 
 def test_stcm_application_requires_human_approval(tmp_path):

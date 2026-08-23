@@ -1,0 +1,1 @@
+"""Pinned OMOP CDM contracts."""

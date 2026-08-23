@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH
+from src.omop.cdm54 import ensure_table_columns
 
 def run_observation_period_etl():
     print("⚙️ STARTING ETL PIPELINE (OMOP DERIVED -> OBSERVATION_PERIOD) [PRODUCTION]")
@@ -28,6 +29,7 @@ def run_observation_period_etl():
                 period_type_concept_id INTEGER
             )
         """)
+        ensure_table_columns(con, "observation_period")
         
         # A Magia Analítica: Encontrar o primeiro e último evento de cada doente 
         # juntando todas as tabelas clínicas que já construímos!
@@ -50,6 +52,12 @@ def run_observation_period_etl():
                 SELECT person_id, measurement_date, measurement_date FROM measurement
                 UNION ALL
                 SELECT person_id, observation_date, observation_date FROM observation
+                UNION ALL
+                SELECT person_id, procedure_date, procedure_date FROM procedure_occurrence
+                UNION ALL
+                SELECT person_id, device_exposure_start_date,
+                       COALESCE(device_exposure_end_date, device_exposure_start_date)
+                FROM device_exposure
             ) combined_events
             WHERE start_date IS NOT NULL
             GROUP BY person_id

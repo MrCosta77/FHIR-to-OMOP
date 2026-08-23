@@ -1,0 +1,35 @@
+{
+  "schema_version": 3,
+  "status": "proposed",
+  "reviewed_by": null,
+  "reviewed_on": null,
+  "max_errors": 0,
+  "max_failed_checks": 5,
+  "allowed_failure_ids": {
+    "table_measurepersoncompleteness_drug_era": {
+      "reason": "DRUG_ERA is a derived analytical table and era construction is outside this FHIR event-level ETL scope. No synthetic era rows are fabricated.",
+      "max_violated_rows": 58,
+      "max_pct_violated_rows": 1.0
+    },
+    "table_measurepersoncompleteness_condition_era": {
+      "reason": "CONDITION_ERA is a derived analytical table and era construction is outside this FHIR event-level ETL scope. No synthetic era rows are fabricated.",
+      "max_violated_rows": 58,
+      "max_pct_violated_rows": 1.0
+    },
+    "table_measureconditioneracompleteness_condition_era": {
+      "reason": "Condition occurrences are loaded, but CONDITION_ERA derivation is intentionally not implemented in this pipeline release.",
+      "max_violated_rows": 56,
+      "max_pct_violated_rows": 1.0
+    },
+    "field_plausiblevaluelow_observation_period_observation_period_start_date": {
+      "reason": "One synthetic person born in 1932 has a valid ambulatory visit in 1934. The event is post-birth and internally consistent; 1950 is a generic DQD threshold.",
+      "max_violated_rows": 1,
+      "max_pct_violated_rows": 0.0172
+    },
+    "concept_plausibleunitconceptids_measurement_measurement_concept_id_43055141": {
+      "reason": "FHIR UCUM {score} is deterministically normalized to the valid Standard Unit concept 44777566 [score]. DQD 2.8.9 nevertheless permits only no unit (-1) for measurement concept 43055141, whose own name identifies it as a [SCORE]. The semantic Standard mapping is retained.",
+      "max_violated_rows": 788,
+      "max_pct_violated_rows": 1.0
+    }
+  }
+}

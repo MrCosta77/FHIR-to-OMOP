@@ -14,6 +14,7 @@ from src.utils.config import DB_PATH, MODEL_NAME
 from src.mapping.mapping_service import (
     get_few_shot_prompt,
     get_versioned_collection,
+    reconcile_resolved_proposals,
     record_mapping_proposal,
     selected_candidate,
 )
@@ -48,6 +49,9 @@ def run_condition_ai_mapping():
 
     with duckdb.connect(DB_PATH) as con:
         print("🔌 Connecting to DuckDB...")
+        retired = reconcile_resolved_proposals(con, "condition_occurrence")
+        if retired:
+            print(f"♻️ Retired {retired} proposals resolved deterministically.")
         
         # 1. Setup Vector Store
         collection = setup_vector_store(con)

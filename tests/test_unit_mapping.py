@@ -9,6 +9,7 @@ def test_exact_ucum_code_is_preserved():
 def test_reviewed_fhir_alias_is_normalized():
     assert canonical_ucum_code(UCUM_SYSTEM, "U/L") == "[U]/L"
     assert canonical_ucum_code(UCUM_SYSTEM, "ng/dl") == "ng/dL"
+    assert canonical_ucum_code(UCUM_SYSTEM, "{score}") == "[score]"
 
 
 def test_non_ucum_or_missing_code_is_not_guessed():

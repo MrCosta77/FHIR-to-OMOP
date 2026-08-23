@@ -3,6 +3,8 @@ import pytest
 import os
 from pathlib import Path
 
+pytestmark = pytest.mark.integration
+
 # Setup paths (pointing to the root data folder)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
@@ -10,7 +12,9 @@ DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
 @pytest.fixture(scope="module")
 def db_connection():
     """Establishes a connection to DuckDB for all tests to use."""
-    con = duckdb.connect(DB_PATH)
+    if not Path(DB_PATH).is_file():
+        pytest.skip("Integration database is not present; run the pipeline first.")
+    con = duckdb.connect(DB_PATH, read_only=True)
     yield con
     con.close()
 
@@ -91,7 +95,7 @@ def test_measurement_person_fk(db_connection):
 
 
 def test_measurement_units_have_explicit_mapping_outcome(db_connection):
-    """A provided unit must resolve to a Standard Unit or explicit concept 0."""
+    """Every provided unit has an explicit Standard/0 mapping outcome."""
     missing_outcome = db_connection.execute("""
         SELECT COUNT(*)
         FROM measurement
@@ -99,6 +103,20 @@ def test_measurement_units_have_explicit_mapping_outcome(db_connection):
           AND unit_concept_id IS NULL
     """).fetchone()[0]
     assert missing_outcome == 0
+
+
+def test_pain_severity_uses_standard_score_unit(db_connection):
+    """FHIR {score} is published with the reviewed Standard OMOP [score] unit."""
+    invalid = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM measurement
+        WHERE measurement_concept_id = 43055141
+          AND (
+              unit_source_value <> '{score}'
+              OR unit_concept_id <> 44777566
+          )
+    """).fetchone()[0]
+    assert invalid == 0
 
 
 def test_nonzero_measurement_units_are_valid_standard_units(db_connection):
@@ -112,6 +130,31 @@ def test_nonzero_measurement_units_are_valid_standard_units(db_connection):
               OR c.domain_id <> 'Unit'
               OR c.standard_concept <> 'S'
               OR c.invalid_reason IS NOT NULL
+          )
+    """).fetchone()[0]
+    assert invalid == 0
+
+
+def test_quarantined_measurements_are_not_published(db_connection):
+    published_rejects = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM etl_quarantine q
+        JOIN measurement m ON m.measurement_id = q.target_id
+        WHERE q.target_table = 'measurement'
+          AND q.active = TRUE
+    """).fetchone()[0]
+    assert published_rejects == 0
+
+
+def test_active_quarantine_rows_have_a_traceable_reason(db_connection):
+    invalid = db_connection.execute("""
+        SELECT COUNT(*)
+        FROM etl_quarantine
+        WHERE active = TRUE
+          AND (
+              source_event_key IS NULL OR TRIM(source_event_key) = ''
+              OR reason_code IS NULL OR TRIM(reason_code) = ''
+              OR reason_detail IS NULL OR TRIM(reason_detail) = ''
           )
     """).fetchone()[0]
     assert invalid == 0

@@ -12,6 +12,8 @@ sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 from src.utils.unit_mapping import canonical_ucum_code
+from src.utils.quarantine import ensure_quarantine_table
+from src.omop.cdm54 import ensure_table_columns
 
 def generate_measurement_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -76,9 +78,13 @@ def extract_measurements(file_path):
                 full_url = entry.get('fullUrl', '')
                 if full_url:
                     base_string = full_url
+                    source_event_key = full_url
                 else:
                     # Fallback de segurança: transformar o JSON do lab resource numa string
                     base_string = json.dumps(resource, sort_keys=True)
+                    source_event_key = (
+                        f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                    )
                     
                 measurement_id = generate_measurement_id(base_string)
                 
@@ -92,7 +98,8 @@ def extract_measurements(file_path):
                     unit_system,
                     unit_code,
                     canonical_unit_code,
-                    date
+                    date,
+                    source_event_key,
                 ))
     return records
 
@@ -111,6 +118,8 @@ def run_measurement_etl():
     print("🔌 Connecting to DuckDB for standardized insertion...")
     
     with duckdb.connect(DB_PATH) as con:
+        con.execute("BEGIN TRANSACTION")
+        ensure_quarantine_table(con)
         con.execute("DROP TABLE IF EXISTS measurement")
         
         con.execute("""
@@ -138,6 +147,7 @@ def run_measurement_etl():
                 value_source_value VARCHAR
             )
         """)
+        ensure_table_columns(con, "measurement")
         
         con.execute("DROP TABLE IF EXISTS stg_measurement")
         con.execute("""
@@ -151,14 +161,74 @@ def run_measurement_etl():
                 unit_system VARCHAR,
                 unit_code VARCHAR,
                 canonical_unit_code VARCHAR,
-                date DATE
+                date DATE,
+                source_event_key VARCHAR
             )
         """)
         
         con.executemany(
-            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
         )
+
+        # LOINC 788-0 is RDW expressed as a ratio/percent. Synthea also emits
+        # it with fL (RDW-SD semantics). Preserve those records in quarantine
+        # instead of changing the unit or publishing a false OMOP combination.
+        con.execute("""
+            UPDATE etl_quarantine
+            SET active = FALSE, last_seen_at = CURRENT_TIMESTAMP
+            WHERE target_table = 'measurement'
+              AND reason_code = 'LOINC_UNIT_SEMANTIC_MISMATCH'
+        """)
+        con.execute("""
+            INSERT INTO etl_quarantine (
+                target_table, target_id, source_event_key, source_code,
+                source_value, unit_source_value, reason_code, reason_detail,
+                active
+            )
+            SELECT 'measurement', measurement_id, source_event_key,
+                   loinc_code, display_text, unit,
+                   'LOINC_UNIT_SEMANTIC_MISMATCH',
+                   'LOINC 788-0 represents RDW ratio/percent; source unit fL represents incompatible RDW-SD semantics.',
+                   TRUE
+            FROM stg_measurement
+            WHERE loinc_code = '788-0'
+              AND canonical_unit_code IS DISTINCT FROM '%'
+            ON CONFLICT (target_table, target_id, reason_code) DO UPDATE SET
+                source_event_key = EXCLUDED.source_event_key,
+                source_code = EXCLUDED.source_code,
+                source_value = EXCLUDED.source_value,
+                unit_source_value = EXCLUDED.unit_source_value,
+                reason_detail = EXCLUDED.reason_detail,
+                active = TRUE,
+                last_seen_at = now()
+        """)
+
+        ambiguous = con.execute("""
+            SELECT COUNT(*)
+            FROM (
+                SELECT stg.measurement_id
+                FROM stg_measurement stg
+                JOIN concept c_src
+                  ON stg.loinc_code = c_src.concept_code
+                 AND c_src.vocabulary_id = 'LOINC'
+                JOIN concept_relationship cr
+                  ON c_src.concept_id = cr.concept_id_1
+                 AND cr.relationship_id = 'Maps to'
+                 AND cr.invalid_reason IS NULL
+                JOIN concept c_std
+                  ON cr.concept_id_2 = c_std.concept_id
+                 AND c_std.standard_concept = 'S'
+                 AND c_std.invalid_reason IS NULL
+                GROUP BY stg.measurement_id
+                HAVING COUNT(DISTINCT c_std.concept_id) > 1
+            ) ambiguous_sources
+        """).fetchone()[0]
+        if ambiguous:
+            raise ValueError(
+                f"Measurement routing found {ambiguous} events with "
+                "multiple Standard Maps to targets; explicit review is required."
+            )
         
         con.execute("""
             INSERT INTO measurement (
@@ -196,7 +266,6 @@ def run_measurement_etl():
             LEFT JOIN concept c_src 
                 ON stg.loinc_code = c_src.concept_code 
                 AND c_src.vocabulary_id = 'LOINC'
-                AND c_src.invalid_reason IS NULL
             LEFT JOIN concept_relationship cr 
                 ON c_src.concept_id = cr.concept_id_1 
                 AND cr.relationship_id = 'Maps to'
@@ -216,6 +285,18 @@ def run_measurement_etl():
                 AND c_unit_std.domain_id = 'Unit'
                 AND c_unit_std.standard_concept = 'S'
                 AND c_unit_std.invalid_reason IS NULL
+            -- Numeric FHIR Observations with a Standard target in another
+            -- OMOP domain are routed by that domain's ETL, not retained here
+            -- as artificial concept_id 0 measurements. Truly unresolved
+            -- numeric observations remain in MEASUREMENT for human review.
+            WHERE (
+                    c_std.domain_id = 'Measurement'
+                    OR c_std.concept_id IS NULL
+                  )
+              AND NOT (
+                    stg.loinc_code = '788-0'
+                    AND stg.canonical_unit_code IS DISTINCT FROM '%'
+                  )
             -- O escudo contra o 'merge-inflation' garantindo apenas 1 conceito por registo
             QUALIFY ROW_NUMBER() OVER (
                 PARTITION BY stg.measurement_id
@@ -251,6 +332,7 @@ def run_measurement_etl():
 
         mapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]
+        con.execute("COMMIT")
         
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (Clean Data): {mapped_count} records")

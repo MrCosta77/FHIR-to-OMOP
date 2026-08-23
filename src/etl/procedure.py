@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.omop.cdm54 import ensure_table_columns
 
 def generate_procedure_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -80,6 +81,9 @@ def run_procedure_etl():
     print("🔌 Connecting to DuckDB for standardized insertion...")
     
     with duckdb.connect(DB_PATH) as con:
+        # Every native and cross-domain publication below is atomic. Closing
+        # the connection after an exception rolls the active transaction back.
+        con.execute("BEGIN TRANSACTION")
         con.execute("DROP TABLE IF EXISTS procedure_occurrence")
         
         # OMOP 5.4 Procedure Occurrence Table
@@ -101,6 +105,7 @@ def run_procedure_etl():
                 modifier_source_value VARCHAR
             )
         """)
+        ensure_table_columns(con, "procedure_occurrence")
         
         con.execute("DROP TABLE IF EXISTS stg_procedure")
         con.execute("""
@@ -114,6 +119,54 @@ def run_procedure_etl():
         """)
         
         con.executemany("INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?)", all_records)
+
+        ambiguous = con.execute("""
+            SELECT COUNT(*)
+            FROM (
+                SELECT stg.procedure_occurrence_id
+                FROM stg_procedure stg
+                JOIN concept c_src
+                  ON stg.code = c_src.concept_code
+                 AND c_src.vocabulary_id = 'SNOMED'
+                JOIN concept_relationship cr
+                  ON c_src.concept_id = cr.concept_id_1
+                 AND cr.relationship_id = 'Maps to'
+                 AND cr.invalid_reason IS NULL
+                JOIN concept c_std
+                  ON cr.concept_id_2 = c_std.concept_id
+                 AND c_std.standard_concept = 'S'
+                 AND c_std.invalid_reason IS NULL
+                GROUP BY stg.procedure_occurrence_id
+                HAVING COUNT(DISTINCT c_std.concept_id) > 1
+            ) ambiguous_sources
+        """).fetchone()[0]
+        if ambiguous:
+            raise ValueError(
+                f"Procedure routing found {ambiguous} events with multiple "
+                "Standard Maps to targets; explicit review is required."
+            )
+
+        con.execute("DROP TABLE IF EXISTS stg_procedure_routed")
+        con.execute("""
+            CREATE TEMPORARY TABLE stg_procedure_routed AS
+            SELECT
+                stg.*,
+                COALESCE(c_src.concept_id::INTEGER, 0) AS source_concept_id,
+                c_std.concept_id::INTEGER AS target_concept_id,
+                c_std.domain_id AS target_domain
+            FROM stg_procedure stg
+            LEFT JOIN concept c_src
+              ON stg.code = c_src.concept_code
+             AND c_src.vocabulary_id = 'SNOMED'
+            LEFT JOIN concept_relationship cr
+              ON c_src.concept_id = cr.concept_id_1
+             AND cr.relationship_id = 'Maps to'
+             AND cr.invalid_reason IS NULL
+            LEFT JOIN concept c_std
+              ON cr.concept_id_2 = c_std.concept_id
+             AND c_std.standard_concept = 'S'
+             AND c_std.invalid_reason IS NULL
+        """)
         
         # DOMAIN ROUTING ESTRITO
         con.execute("""
@@ -126,29 +179,114 @@ def run_procedure_etl():
             SELECT 
                 stg.procedure_occurrence_id,
                 stg.person_id,
-                CASE 
-                    WHEN c_std.domain_id = 'Procedure' THEN COALESCE(c_std.concept_id::INTEGER, 0)
-                    ELSE 0 
-                END AS procedure_concept_id,
+                COALESCE(stg.target_concept_id, 0) AS procedure_concept_id,
                 stg.date,
                 stg.date::TIMESTAMP,
                 32817 AS procedure_type_concept_id,
                 stg.display_text AS procedure_source_value,
-                COALESCE(c_src.concept_id::INTEGER, 0) AS procedure_source_concept_id
-            FROM stg_procedure stg
-            LEFT JOIN concept c_src 
-                ON stg.code = c_src.concept_code 
-                AND c_src.vocabulary_id = 'SNOMED'
-                AND c_src.invalid_reason IS NULL
-            LEFT JOIN concept_relationship cr 
-                ON c_src.concept_id = cr.concept_id_1 
-                AND cr.relationship_id = 'Maps to'
-                AND cr.invalid_reason IS NULL
-            LEFT JOIN concept c_std 
-                ON cr.concept_id_2 = c_std.concept_id 
-                AND c_std.standard_concept = 'S'
-                AND c_std.invalid_reason IS NULL
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.procedure_occurrence_id ORDER BY c_std.concept_id DESC) = 1
+                stg.source_concept_id AS procedure_source_concept_id
+            FROM stg_procedure_routed stg
+            WHERE stg.target_domain = 'Procedure'
+               OR stg.target_concept_id IS NULL
+        """)
+
+        ensure_table_columns(con, "measurement")
+        ensure_table_columns(con, "observation")
+        ensure_table_columns(con, "device_exposure")
+
+        route_targets = (
+            ('measurement', 'measurement_id', 'Measurement'),
+            ('observation', 'observation_id', 'Observation'),
+            ('device_exposure', 'device_exposure_id', 'Device'),
+        )
+        for table, id_column, domain in route_targets:
+            collisions = con.execute(f"""
+                SELECT COUNT(*)
+                FROM {table} event
+                JOIN stg_procedure_routed stg
+                  ON event.{id_column} = stg.procedure_occurrence_id
+                WHERE stg.target_domain = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM mapping_provenance p
+                      WHERE p.target_table = ?
+                        AND p.target_id = event.{id_column}
+                        AND p.mapping_method = 'deterministic_maps_to_domain_routed'
+                  )
+            """, [domain, table]).fetchone()[0]
+            if collisions:
+                raise ValueError(
+                    f"Refusing to overwrite {collisions} unrelated {table} "
+                    "rows whose IDs collide with routed Procedure resources."
+                )
+
+        con.execute("""
+            INSERT INTO measurement (
+                measurement_id, person_id, measurement_concept_id,
+                measurement_date, measurement_datetime,
+                measurement_type_concept_id, measurement_source_value,
+                measurement_source_concept_id
+            )
+            SELECT procedure_occurrence_id, person_id, target_concept_id,
+                   date, date::TIMESTAMP, 32817, display_text,
+                   source_concept_id
+            FROM stg_procedure_routed
+            WHERE target_domain = 'Measurement'
+            ON CONFLICT (measurement_id) DO UPDATE SET
+                person_id = EXCLUDED.person_id,
+                measurement_concept_id = EXCLUDED.measurement_concept_id,
+                measurement_date = EXCLUDED.measurement_date,
+                measurement_datetime = EXCLUDED.measurement_datetime,
+                measurement_type_concept_id = EXCLUDED.measurement_type_concept_id,
+                measurement_source_value = EXCLUDED.measurement_source_value,
+                measurement_source_concept_id = EXCLUDED.measurement_source_concept_id
+        """)
+
+        con.execute("""
+            INSERT INTO observation (
+                observation_id, person_id, observation_concept_id,
+                observation_date, observation_datetime,
+                observation_type_concept_id, observation_source_value,
+                observation_source_concept_id
+            )
+            SELECT procedure_occurrence_id, person_id, target_concept_id,
+                   date, date::TIMESTAMP, 32817, display_text,
+                   source_concept_id
+            FROM stg_procedure_routed
+            WHERE target_domain = 'Observation'
+            ON CONFLICT (observation_id) DO UPDATE SET
+                person_id = EXCLUDED.person_id,
+                observation_concept_id = EXCLUDED.observation_concept_id,
+                observation_date = EXCLUDED.observation_date,
+                observation_datetime = EXCLUDED.observation_datetime,
+                observation_type_concept_id = EXCLUDED.observation_type_concept_id,
+                observation_source_value = EXCLUDED.observation_source_value,
+                observation_source_concept_id = EXCLUDED.observation_source_concept_id
+        """)
+
+        con.execute("""
+            INSERT INTO device_exposure (
+                device_exposure_id, person_id, device_concept_id,
+                device_exposure_start_date, device_exposure_start_datetime,
+                device_exposure_end_date, device_exposure_end_datetime,
+                device_type_concept_id, device_source_value,
+                device_source_concept_id
+            )
+            SELECT procedure_occurrence_id, person_id, target_concept_id,
+                   date, date::TIMESTAMP, date, date::TIMESTAMP,
+                   32817, display_text, source_concept_id
+            FROM stg_procedure_routed
+            WHERE target_domain = 'Device'
+            ON CONFLICT (device_exposure_id) DO UPDATE SET
+                person_id = EXCLUDED.person_id,
+                device_concept_id = EXCLUDED.device_concept_id,
+                device_exposure_start_date = EXCLUDED.device_exposure_start_date,
+                device_exposure_start_datetime = EXCLUDED.device_exposure_start_datetime,
+                device_exposure_end_date = EXCLUDED.device_exposure_end_date,
+                device_exposure_end_datetime = EXCLUDED.device_exposure_end_datetime,
+                device_type_concept_id = EXCLUDED.device_type_concept_id,
+                device_source_value = EXCLUDED.device_source_value,
+                device_source_concept_id = EXCLUDED.device_source_concept_id
         """)
         
         # Registar na Auditoria
@@ -175,13 +313,49 @@ def run_procedure_etl():
                 SELECT target_id FROM mapping_provenance WHERE target_table = 'procedure_occurrence'
             )
         """)
+
+        routed_provenance = (
+            ('measurement', 'measurement_id', 'measurement_concept_id', 'Measurement'),
+            ('observation', 'observation_id', 'observation_concept_id', 'Observation'),
+            ('device_exposure', 'device_exposure_id', 'device_concept_id', 'Device'),
+        )
+        for target_table, id_column, concept_column, domain in routed_provenance:
+            con.execute(f"""
+                INSERT INTO mapping_provenance (
+                    target_table, target_id, source_value, normalized_value,
+                    assigned_concept_id, mapping_method, score, model_name,
+                    vocabulary_version, reviewed_by
+                )
+                SELECT ?, event.{id_column}, stg.display_text,
+                       stg.display_text, event.{concept_column},
+                       'deterministic_maps_to_domain_routed', 1.0, 'N/A',
+                       'Athena_v5.4', 'System'
+                FROM {target_table} event
+                JOIN stg_procedure_routed stg
+                  ON event.{id_column} = stg.procedure_occurrence_id
+                WHERE stg.target_domain = ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM mapping_provenance p
+                      WHERE p.target_table = ?
+                        AND p.target_id = event.{id_column}
+                        AND p.assigned_concept_id = event.{concept_column}
+                        AND p.mapping_method = 'deterministic_maps_to_domain_routed'
+                  )
+            """, [target_table, domain, target_table])
         
         mapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0").fetchone()[0]
+        routed_measurements = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Measurement'").fetchone()[0]
+        routed_observations = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Observation'").fetchone()[0]
+        routed_devices = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Device'").fetchone()[0]
+        con.execute("COMMIT")
         
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (OMOP Standard): {mapped_count} procedures")
-    print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} procedures")
+    print(f" - Routed to OMOP Measurement: {routed_measurements}")
+    print(f" - Routed to OMOP Observation: {routed_observations}")
+    print(f" - Routed to OMOP Device Exposure: {routed_devices}")
+    print(f" - Sent to Human Mapping Queue (ID 0): {unmapped_count} procedures")
 
 if __name__ == "__main__":
     run_procedure_etl()

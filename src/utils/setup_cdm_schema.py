@@ -8,12 +8,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH
+from src.omop.cdm54 import (
+    CDM_RELEASE,
+    CDM_VERSION,
+    ensure_complete_cdm_schema,
+    record_schema_manifest,
+)
 
 def create_omop_skeleton():
-    print("⚙️ STARTING OMOP V5.4 SKELETON BUILD")
+    print(f"⚙️ INSTALLING OMOP CDM {CDM_VERSION} SCHEMA ({CDM_RELEASE})")
     print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
+        ensure_complete_cdm_schema(con)
+        record_schema_manifest(con)
         # 1. Tabelas Clínicas Adicionais (vazias, mas obrigatórias para o DQD)
         con.execute("""
             CREATE TABLE IF NOT EXISTS death (
@@ -156,8 +164,7 @@ def create_omop_skeleton():
         # O DQD exige que as chaves estrangeiras estejam estritamente definidas
         con.execute("CREATE SEQUENCE IF NOT EXISTS seq_location_id START 1")
         
-        print("✅ OMOP v5.4 Skeleton successfully deployed!")
-        print("✅ Tables initialized: DEATH, DEVICE_EXPOSURE, NOTE, SPECIMEN, COST, LOCATION, PROVIDER")
+        print("✅ The non-destructive 39-table OMOP CDM contract is installed.")
 
 if __name__ == "__main__":
     create_omop_skeleton()

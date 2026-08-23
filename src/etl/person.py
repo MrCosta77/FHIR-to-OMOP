@@ -12,6 +12,7 @@ sys.path.append(str(PROJECT_ROOT))
 # Importa a config global, como sugerido pela revisão
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.omop.cdm54 import ensure_table_columns
 
 def extract_persons(file_path):
     records = []
@@ -110,6 +111,7 @@ def run_person_etl():
                 ethnicity_source_concept_id INTEGER
             )
         """)
+        ensure_table_columns(con, "person")
         
         con.execute("DROP TABLE IF EXISTS stg_person")
         con.execute("""

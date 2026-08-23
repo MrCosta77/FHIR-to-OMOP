@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.omop.cdm54 import ensure_table_columns
 
 def generate_condition_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -118,6 +119,7 @@ def run_condition_etl():
                 condition_status_concept_id INTEGER
             )
         """)
+        ensure_table_columns(con, "condition_occurrence")
         
         # Temporary staging table
         con.execute("DROP TABLE IF EXISTS stg_condition")

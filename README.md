@@ -76,6 +76,19 @@ source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+The repository includes a small versioned FHIR golden bundle. Contract and
+unit tests run in GitHub Actions without Athena, Ollama, or a local database:
+```bash
+python -m pytest -m "not integration" -v
+```
+After building the local DuckDB, run the complete suite (including OMOP
+integration checks):
+```bash
+python -m pytest -v
+```
+Any external FHIR bundle can be checked before ETL with
+`python -m src.quality.validate_fhir <bundle-or-directory>`.
+
 **2. Prerequisites**
 * Download the **OMOP Vocabularies** (v5.4) from [Athena](https://athena.ohdsi.org/) and place the CSV files in `data/omop_vocab/`.
 * Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `data/fhir_raw/`.
@@ -100,3 +113,10 @@ streamlit run src/app/review_portal.py
 
 **5. Run OHDSI Clinical Validation (RStudio)**
 Launch `src/analytics/view_dqd_dashboard.R` to view the interactive quality report.
+After generating a new DQD JSON report, apply the versioned acceptance budget:
+```bash
+python -m src.quality.validate_dqd dqd_results/<new-report>.json
+```
+The gate permits no DQD execution errors. Failed checks are capped and accepted
+only when their check type has an explicit reason in `quality/dqd_policy.json`.
+Historical reports predate this gate and are not evidence of current acceptance.

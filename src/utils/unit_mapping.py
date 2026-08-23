@@ -10,6 +10,7 @@ UCUM_ALIASES = {
     "m[IU]/L": "10*-3.[iU]/L",
     "mL/min/{1.73_m2}": "mL/min/(173.10*-2.m2)",
     "ng/dl": "ng/dL",
+    "{score}": "[score]",
 }
 
 

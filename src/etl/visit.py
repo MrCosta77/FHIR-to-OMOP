@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+from src.omop.cdm54 import ensure_table_columns
 
 # OMOP Standard Visit Concepts
 # FHIR Encounter class codes mapped to OMOP Concept IDs
@@ -19,7 +20,9 @@ VISIT_MAPPING = {
     "WELL": 9202,   # Outpatient Visit (Wellness is mapped to Outpatient)
     "IMP": 9201,    # Inpatient Visit
     "EMER": 9203,   # Emergency Room Visit
-    "URGENT": 9203  # Emergency Room Visit
+    "URGENT": 9203, # Emergency Room Visit
+    "HH": 581476,   # Home Visit
+    "VR": 722455,   # Telehealth
 }
 
 DEFAULT_VISIT_CONCEPT_ID = 0  # Unmapped visit
@@ -116,6 +119,7 @@ def run_visit_etl():
                 visit_source_concept_id INTEGER
             )
         """)
+        ensure_table_columns(con, "visit_occurrence")
         
         # Clear existing data to maintain idempotency
         con.execute("DELETE FROM visit_occurrence")
