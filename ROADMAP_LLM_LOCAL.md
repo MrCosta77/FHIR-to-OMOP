@@ -169,6 +169,15 @@ para afinar o sistema.
 Critério de saída: desempenho, segurança e workflow humano adequados a um piloto
 hospitalar controlado.
 
+Estado técnico em 2026-08-27: marco 6A concluído. O caminho de aprovação única
+foi desativado. Duas revisões independentes e cegas, com rationale obrigatório,
+são necessárias antes de uma terceira pessoa distinta poder adjudicar. Nem a
+concordância entre revisores publica automaticamente. O portal separa filas de
+revisão e adjudicação sem expor identidades, votos ou rationales prévios e mede
+acordo bruto e kappa de Cohen global e por domínio. A execução por profissionais
+clínicos, os controlos de PHI, a calibração em development e os testes de escala
+continuam pendentes; as etiquetas permanecem `PROVISIONAL_TECHNICAL`.
+
 ### Fase 7 — produto e portabilidade
 
 - Adicionar CI, `renv.lock`, licença, changelog e releases.

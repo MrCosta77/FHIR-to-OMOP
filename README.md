@@ -18,7 +18,7 @@ Standard OMOP vocabularies handle the majority of clinical data, but real-world 
 
 1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies (e.g., LOINC) to retrieve the top 5 clinically valid candidates.
 2. **LLM Adjudication:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed.
-3. **Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Curators record their name and optional rationale when approving or rejecting. Rejections become active policy and suppress identical future proposals.
+3. **Blinded Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Two distinct reviewers submit mandatory rationales without seeing peer votes; only a third, distinct adjudicator can publish or reject the mapping. Rejections become active policy and suppress identical future proposals.
 4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
 The retrieval layer is reproducible: the configured Chroma collections for

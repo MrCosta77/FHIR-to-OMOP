@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections import Counter, defaultdict
 
 
 TARGET_GOVERNANCE = {
@@ -139,6 +140,29 @@ def ensure_governance_tables(con):
             approved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             active BOOLEAN NOT NULL DEFAULT TRUE,
             PRIMARY KEY (target_table, source_value)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS clinical_mapping_review (
+            review_id VARCHAR PRIMARY KEY,
+            mapping_decision_id VARCHAR NOT NULL,
+            reviewer VARCHAR NOT NULL,
+            verdict VARCHAR NOT NULL,
+            rationale VARCHAR NOT NULL,
+            submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (mapping_decision_id, reviewer)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS clinical_mapping_adjudication (
+            adjudication_id VARCHAR PRIMARY KEY,
+            mapping_decision_id VARCHAR NOT NULL UNIQUE,
+            adjudicator VARCHAR NOT NULL,
+            final_action VARCHAR NOT NULL,
+            rationale VARCHAR NOT NULL,
+            reviewer_count INTEGER NOT NULL,
+            unanimous BOOLEAN NOT NULL,
+            adjudicated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
     _migrate_legacy_decisions(con)
@@ -299,8 +323,242 @@ def register_decision(
     return decision_id
 
 
-def review_mapping_decision(con, decision_id, action, reviewer, reason=None):
-    """Approve/reject one proposal and atomically update publication policy."""
+def submit_blinded_review(con, decision_id, action, reviewer, rationale):
+    """Record one independent review without exposing or publishing peer votes."""
+    action = action.strip().upper()
+    if action not in {"APPROVE", "REJECT"}:
+        raise ValueError("action must be APPROVE or REJECT")
+    reviewer = reviewer.strip()
+    if not reviewer:
+        raise ValueError("A reviewer name is required.")
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise ValueError("A clinical rationale is required.")
+    ensure_governance_tables(con)
+    row = con.execute("""
+        SELECT status FROM mapping_decision
+        WHERE mapping_decision_id = ?
+    """, [decision_id]).fetchone()
+    if not row:
+        raise ValueError(f"Unknown mapping decision: {decision_id}")
+    if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
+        raise ValueError(f"Decision is not independently reviewable: {row[0]}")
+    existing = con.execute("""
+        SELECT COUNT(*) FROM clinical_mapping_review
+        WHERE mapping_decision_id = ?
+    """, [decision_id]).fetchone()[0]
+    if existing >= 2:
+        raise ValueError("Two independent reviews already exist; adjudication is required.")
+    duplicate = con.execute("""
+        SELECT COUNT(*) FROM clinical_mapping_review
+        WHERE mapping_decision_id = ? AND LOWER(TRIM(reviewer)) = LOWER(TRIM(?))
+    """, [decision_id, reviewer]).fetchone()[0]
+    if duplicate:
+        raise ValueError("The same reviewer cannot review a decision twice.")
+    con.execute("""
+        INSERT INTO clinical_mapping_review (
+            review_id, mapping_decision_id, reviewer, verdict, rationale
+        ) VALUES (?, ?, ?, ?, ?)
+    """, [str(uuid.uuid4()), decision_id, reviewer, action, rationale])
+    count = existing + 1
+    return {
+        "mapping_decision_id": decision_id,
+        "review_count": count,
+        "ready_for_adjudication": count == 2,
+    }
+
+
+def blinded_review_queue(con, reviewer):
+    """Return proposals not yet reviewed by this reviewer, without peer votes."""
+    reviewer = (reviewer or "").strip()
+    if not reviewer:
+        raise ValueError("A reviewer name is required.")
+    ensure_governance_tables(con)
+    columns = [
+        "mapping_decision_id", "run_id", "target_table", "source_value",
+        "normalized_value", "assigned_concept_id", "mapping_method", "score",
+        "model_name", "affected_events",
+    ]
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.run_id, d.target_table,
+               d.source_value, d.normalized_value, d.assigned_concept_id,
+               d.mapping_method, d.score, d.model_name,
+               COUNT(DISTINCT p.target_id) AS affected_events
+        FROM mapping_decision d
+        LEFT JOIN mapping_provenance p
+          ON p.mapping_decision_id = d.mapping_decision_id
+        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_review r
+              WHERE r.mapping_decision_id = d.mapping_decision_id
+                AND LOWER(TRIM(r.reviewer)) = LOWER(TRIM(?))
+          )
+          AND (
+              SELECT COUNT(*) FROM clinical_mapping_review r
+              WHERE r.mapping_decision_id = d.mapping_decision_id
+          ) < 2
+        GROUP BY ALL
+        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
+    """, [reviewer]).fetchall()
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
+def blinded_adjudication_queue(con, adjudicator):
+    """Return two-review cases without exposing reviewer identities or votes."""
+    adjudicator = (adjudicator or "").strip()
+    if not adjudicator:
+        raise ValueError("An adjudicator name is required.")
+    ensure_governance_tables(con)
+    columns = [
+        "mapping_decision_id", "run_id", "target_table", "source_value",
+        "normalized_value", "assigned_concept_id", "mapping_method", "score",
+        "model_name", "affected_events", "review_count",
+    ]
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.run_id, d.target_table,
+               d.source_value, d.normalized_value, d.assigned_concept_id,
+               d.mapping_method, d.score, d.model_name,
+               COUNT(DISTINCT p.target_id) AS affected_events,
+               COUNT(DISTINCT r.review_id) AS review_count
+        FROM mapping_decision d
+        JOIN clinical_mapping_review r
+          ON r.mapping_decision_id = d.mapping_decision_id
+        LEFT JOIN mapping_provenance p
+          ON p.mapping_decision_id = d.mapping_decision_id
+        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_adjudication a
+              WHERE a.mapping_decision_id = d.mapping_decision_id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_review own
+              WHERE own.mapping_decision_id = d.mapping_decision_id
+                AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
+          )
+        GROUP BY ALL
+        HAVING COUNT(DISTINCT r.review_id) >= 2
+        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
+    """, [adjudicator]).fetchall()
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
+def adjudicate_mapping_decision(
+    con, decision_id, action, adjudicator, rationale
+):
+    """Finalize a proposal only after two reviews by distinct other people."""
+    action = action.strip().upper()
+    if action not in {"APPROVE", "REJECT"}:
+        raise ValueError("action must be APPROVE or REJECT")
+    adjudicator = adjudicator.strip()
+    if not adjudicator:
+        raise ValueError("An adjudicator name is required.")
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise ValueError("An adjudication rationale is required.")
+    ensure_governance_tables(con)
+    reviews = con.execute("""
+        SELECT reviewer, verdict FROM clinical_mapping_review
+        WHERE mapping_decision_id = ?
+        ORDER BY submitted_at, review_id
+    """, [decision_id]).fetchall()
+    if len(reviews) != 2:
+        raise ValueError("Exactly two independent reviews are required before adjudication.")
+    reviewer_keys = {reviewer.strip().casefold() for reviewer, _ in reviews}
+    if len(reviewer_keys) != 2:
+        raise ValueError("Clinical reviews must come from two distinct reviewers.")
+    if adjudicator.casefold() in reviewer_keys:
+        raise ValueError("The adjudicator must be distinct from both reviewers.")
+    unanimous = reviews[0][1] == reviews[1][1]
+
+    con.execute("BEGIN TRANSACTION")
+    try:
+        status = _finalize_mapping_decision(
+            con, decision_id, action, adjudicator, rationale,
+            manage_transaction=False,
+        )
+        con.execute("""
+            INSERT INTO clinical_mapping_adjudication (
+                adjudication_id, mapping_decision_id, adjudicator,
+                final_action, rationale, reviewer_count, unanimous
+            ) VALUES (?, ?, ?, ?, ?, 2, ?)
+        """, [
+            str(uuid.uuid4()), decision_id, adjudicator, action, rationale,
+            unanimous,
+        ])
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return status
+
+
+def clinical_review_agreement(con):
+    """Measure raw agreement and Cohen's kappa for completed review pairs."""
+    ensure_governance_tables(con)
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.target_table, r.verdict
+        FROM mapping_decision d
+        JOIN clinical_mapping_review r
+          ON r.mapping_decision_id = d.mapping_decision_id
+        ORDER BY d.mapping_decision_id, r.submitted_at, r.review_id
+    """).fetchall()
+    grouped = defaultdict(list)
+    domains = {}
+    for decision_id, target_table, verdict in rows:
+        grouped[decision_id].append(verdict)
+        domains[decision_id] = TARGET_GOVERNANCE[target_table][2]
+
+    def metrics(pairs):
+        if not pairs:
+            return {
+                "pair_count": 0, "raw_agreement": None,
+                "cohens_kappa": None, "approve_votes": 0, "reject_votes": 0,
+            }
+        votes = Counter(value for pair in pairs for value in pair)
+        left_votes = Counter(pair[0] for pair in pairs)
+        right_votes = Counter(pair[1] for pair in pairs)
+        observed = sum(left == right for left, right in pairs) / len(pairs)
+        total_votes = 2 * len(pairs)
+        expected = sum(
+            (left_votes[verdict] / len(pairs))
+            * (right_votes[verdict] / len(pairs))
+            for verdict in ("APPROVE", "REJECT")
+        )
+        kappa = None if expected == 1.0 else (observed - expected) / (1.0 - expected)
+        return {
+            "pair_count": len(pairs), "raw_agreement": observed,
+            "cohens_kappa": kappa, "approve_votes": votes["APPROVE"],
+            "reject_votes": votes["REJECT"],
+        }
+
+    complete = {
+        decision_id: verdicts[:2]
+        for decision_id, verdicts in grouped.items() if len(verdicts) >= 2
+    }
+    by_domain = {}
+    for domain in sorted(set(domains.values())):
+        pairs = [
+            pair for decision_id, pair in complete.items()
+            if domains[decision_id] == domain
+        ]
+        by_domain[domain] = metrics(pairs)
+    return {
+        "overall": metrics(list(complete.values())),
+        "by_domain": by_domain,
+    }
+
+
+def review_mapping_decision(*_args, **_kwargs):
+    """Block the retired single-review publication path."""
+    raise ValueError(
+        "Direct publication is disabled; use two blinded reviews and adjudication."
+    )
+
+
+def _finalize_mapping_decision(
+    con, decision_id, action, reviewer, reason=None, *, manage_transaction=True
+):
+    """Apply an adjudicated decision and atomically update publication policy."""
     action = action.strip().upper()
     if action not in {"APPROVE", "REJECT"}:
         raise ValueError("action must be APPROVE or REJECT")
@@ -336,7 +594,8 @@ def review_mapping_decision(con, decision_id, action, reviewer, reason=None):
             )
         target_vocabulary = valid[0]
 
-    con.execute("BEGIN TRANSACTION")
+    if manage_transaction:
+        con.execute("BEGIN TRANSACTION")
     try:
         con.execute("""
             UPDATE mapping_decision
@@ -414,8 +673,10 @@ def review_mapping_decision(con, decision_id, action, reviewer, reason=None):
                 WHERE source_code = ? AND source_vocabulary_id = ?
                   AND target_concept_id = ?
             """, [source_value, source_vocabulary, int(concept_id)])
-        con.execute("COMMIT")
+        if manage_transaction:
+            con.execute("COMMIT")
     except Exception:
-        con.execute("ROLLBACK")
+        if manage_transaction:
+            con.execute("ROLLBACK")
         raise
     return new_status

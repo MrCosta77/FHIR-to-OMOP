@@ -1,136 +1,196 @@
-import streamlit as st
-import duckdb
-import pandas as pd
+"""Blinded two-review and adjudication portal for governed OMOP mappings."""
+
 import sys
 from pathlib import Path
 
-# Setup paths dynamically
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(PROJECT_ROOT))
+import duckdb
+import pandas as pd
+import streamlit as st
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.mapping.governance import (
+    adjudicate_mapping_decision,
+    blinded_adjudication_queue,
+    blinded_review_queue,
+    clinical_review_agreement,
+    ensure_governance_tables,
+    submit_blinded_review,
+)
 from src.utils.config import DB_PATH
-from src.mapping.governance import review_mapping_decision
 
-# Web page configuration
-st.set_page_config(page_title="CMF - Human-in-the-Loop", page_icon="👩‍⚕️", layout="wide")
 
-def get_pending_reviews():
-    """Fetches all pending AI mappings from the database."""
+st.set_page_config(
+    page_title="CMF - Blinded Clinical Review", page_icon="👩‍⚕️", layout="wide"
+)
+
+
+def get_review_queue(reviewer):
     with duckdb.connect(DB_PATH) as con:
-        query = """
-            SELECT d.mapping_decision_id, d.run_id, d.target_table,
-                   d.source_value, d.normalized_value, d.assigned_concept_id,
-                   d.mapping_method, d.score, d.model_name,
-                   COUNT(DISTINCT p.target_id) AS affected_events
-            FROM mapping_decision d
-            LEFT JOIN mapping_provenance p
-              ON p.mapping_decision_id = d.mapping_decision_id
-            WHERE d.status = 'PENDING'
-            GROUP BY ALL
-            ORDER BY d.proposed_at DESC, d.mapping_decision_id
-        """
-        return con.execute(query).df()
+        return pd.DataFrame(blinded_review_queue(con, reviewer))
 
-def get_metrics():
-    """Quick metrics for the Dashboard."""
+
+def get_adjudication_queue(adjudicator):
     with duckdb.connect(DB_PATH) as con:
-        def mapping_count(status):
-            return con.execute("""
-                SELECT COUNT(*) FROM (
-                    SELECT 1 FROM mapping_provenance
-                    WHERE reviewed_by = ?
-                    GROUP BY target_table, source_value, assigned_concept_id
+        return pd.DataFrame(blinded_adjudication_queue(con, adjudicator))
+
+
+def get_dashboard_metrics():
+    with duckdb.connect(DB_PATH) as con:
+        ensure_governance_tables(con)
+        pending = con.execute("""
+            SELECT COUNT(*) FROM mapping_decision
+            WHERE status IN ('PENDING', 'LOW_CONFIDENCE')
+        """).fetchone()[0]
+        ready = con.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT d.mapping_decision_id
+                FROM mapping_decision d
+                JOIN clinical_mapping_review r USING (mapping_decision_id)
+                WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+                GROUP BY d.mapping_decision_id
+                HAVING COUNT(DISTINCT r.review_id) = 2
+            )
+        """).fetchone()[0]
+        approved = con.execute(
+            "SELECT COUNT(*) FROM mapping_decision WHERE status = 'APPROVED'"
+        ).fetchone()[0]
+        rejected = con.execute(
+            "SELECT COUNT(*) FROM mapping_decision WHERE status = 'REJECTED'"
+        ).fetchone()[0]
+        agreement = clinical_review_agreement(con)
+    return pending, ready, approved, rejected, agreement
+
+
+def submit_review(decision_id, action, reviewer, rationale):
+    with duckdb.connect(DB_PATH) as con:
+        result = submit_blinded_review(
+            con, decision_id, action, reviewer, rationale
+        )
+    state = "ready for adjudication" if result["ready_for_adjudication"] else "review 1 of 2"
+    st.toast(f"Independent review recorded: {state}")
+
+
+def submit_adjudication(decision_id, action, adjudicator, rationale):
+    with duckdb.connect(DB_PATH) as con:
+        status = adjudicate_mapping_decision(
+            con, decision_id, action, adjudicator, rationale
+        )
+    st.toast(f"Adjudication recorded: {status}")
+
+
+def render_mapping(row, identity, mode):
+    columns = st.columns([1, 2, 2, 1.2, 1, 2.2])
+    domain = row["target_table"].replace("_occurrence", "").capitalize()
+    columns[0].write(f"`{domain}`")
+    columns[1].write(row["source_value"])
+    columns[2].write(f"✨ {row['normalized_value']}")
+    columns[3].write(row["assigned_concept_id"])
+    score = float(row["score"] or 0.0)
+    columns[4].write(f"{score * 100:.1f}%")
+    rationale = columns[5].text_input(
+        "Required clinical rationale",
+        key=f"{mode}_reason_{row['mapping_decision_id']}",
+        label_visibility="collapsed",
+        placeholder="Required clinical rationale",
+    )
+    approve, reject = columns[5].columns(2)
+    if approve.button(
+        "✅ Approve", key=f"{mode}_approve_{row['mapping_decision_id']}",
+        use_container_width=True,
+    ):
+        try:
+            if mode == "review":
+                submit_review(row["mapping_decision_id"], "APPROVE", identity, rationale)
+            else:
+                submit_adjudication(
+                    row["mapping_decision_id"], "APPROVE", identity, rationale
                 )
-            """, [status]).fetchone()[0]
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+    if reject.button(
+        "❌ Reject", key=f"{mode}_reject_{row['mapping_decision_id']}",
+        use_container_width=True,
+    ):
+        try:
+            if mode == "review":
+                submit_review(row["mapping_decision_id"], "REJECT", identity, rationale)
+            else:
+                submit_adjudication(
+                    row["mapping_decision_id"], "REJECT", identity, rationale
+                )
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
 
-        pending = mapping_count("Pending_Human_Review")
-        approved = mapping_count("Approved_by_Human")
-        rejected = mapping_count("Rejected_by_Human")
-        return pending, approved, rejected
 
-def process_review(decision_id, action, reviewer, reason):
-    """Updates the database based on the human curator's decision."""
-    with duckdb.connect(DB_PATH) as con:
-        status = review_mapping_decision(
-            con, decision_id, action, reviewer, reason or None
-        )
-        st.toast(f"Decision recorded: {status}")
+st.title("👩‍⚕️ Blinded Clinical Mapping Review")
+st.caption(
+    "Two independent reviews are required. Reviewers never see peer votes; "
+    "a distinct adjudicator is the only person who can publish or reject a mapping."
+)
+identity = st.text_input("Named reviewer/adjudicator", placeholder="Full professional name")
 
-# --- USER INTERFACE (UI) ---
+pending, ready, approved, rejected, agreement = get_dashboard_metrics()
+metric_columns = st.columns(5)
+metric_columns[0].metric("Pending decisions", pending)
+metric_columns[1].metric("Ready to adjudicate", ready)
+metric_columns[2].metric("Approved", approved)
+metric_columns[3].metric("Rejected", rejected)
+kappa = agreement["overall"]["cohens_kappa"]
+metric_columns[4].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
 
-st.title("👩‍⚕️ Clinical Mapping - Human-in-the-Loop")
-st.markdown("Clinical Data Governance Platform. Review decisions made by the Artificial Intelligence Engine.")
-reviewer = st.text_input("Reviewer", placeholder="Full name")
+review_tab, adjudication_tab, agreement_tab = st.tabs(
+    ["Independent review", "Blinded adjudication", "Agreement"]
+)
 
-# Metrics Dashboard
-pending, approved, rejected = get_metrics()
-col1, col2, col3 = st.columns(3)
-col1.metric("⏳ Pending Review", pending)
-col2.metric("✅ Approved", approved)
-col3.metric("❌ Rejected", rejected)
+with review_tab:
+    if not identity.strip():
+        st.info("Enter your full professional name to receive a blinded queue.")
+    else:
+        queue = get_review_queue(identity)
+        if queue.empty:
+            st.success("No independently reviewable mappings remain for this reviewer.")
+        else:
+            st.subheader(f"Independent queue ({len(queue)} decisions)")
+            st.caption("Peer identities, votes, and rationales are intentionally hidden.")
+            for _, mapping in queue.head(50).iterrows():
+                render_mapping(mapping, identity, "review")
+                st.divider()
 
-st.divider()
-
-# Validation Table
-df_pending = get_pending_reviews()
-
-if df_pending.empty:
-    st.success("🎉 No pending mappings! The database is fully governed.")
-else:
-    # --- OTIMIZAÇÃO AQUI ---
-    # Limita a vista a 50 linhas para o browser não bloquear
-    display_limit = 50
-    st.subheader(f"Mappings Awaiting Approval (Showing {min(display_limit, len(df_pending))} of {len(df_pending)})")
-    
-    df_display = df_pending.head(display_limit)
-    
-    # Table Header
-    hcol1, hcol2, hcol3, hcol4, hcol5, hcol6 = st.columns([1, 2, 2, 1.5, 1, 2])
-    hcol1.markdown("**Domain**")
-    hcol2.markdown("**Raw Term (Legacy)**")
-    hcol3.markdown("**AI Translation (OMOP)**")
-    hcol4.markdown("**Concept ID**")
-    hcol5.markdown("**Confidence**")
-    hcol6.markdown("**Action**")
-    
-    st.markdown("---")
-
-    # Interactive Rows (agora usa o df_display em vez do df_pending)
-    for index, row in df_display.iterrows():
-        col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 2, 1.5, 1, 2])
-        
-        # Format table visually
-        domain = row['target_table'].replace('_occurrence', '').replace('source_to_concept_map', 'STCM Dictionary').capitalize()
-        
-        col1.write(f"`{domain}`")
-        col2.write(row['source_value'])
-        col3.write(f"✨ {row['normalized_value']}")
-        col4.write(row['assigned_concept_id'])
-        
-        # Color code confidence score
-        score = float(row['score'])
-        color = "green" if score > 0.9 else "orange"
-        col5.markdown(f":{color}[{score*100:.1f}%]")
-        
-        # Action Buttons
-        btn_col1, btn_col2 = col6.columns(2)
-        reason = st.text_input(
-            "Review reason (optional)",
-            key=f"reason_{row['mapping_decision_id']}",
-            label_visibility="collapsed",
-            placeholder="Reason / clinical rationale",
-        )
-        if btn_col1.button("✅ Approve", key=f"app_{row['mapping_decision_id']}", use_container_width=True):
-            process_review(
-                row['mapping_decision_id'], "approve", reviewer, reason
+with adjudication_tab:
+    if not identity.strip():
+        st.info("Enter your full professional name to receive an adjudication queue.")
+    else:
+        queue = get_adjudication_queue(identity)
+        if queue.empty:
+            st.success("No decisions are ready for this adjudicator.")
+        else:
+            st.subheader(f"Adjudication queue ({len(queue)} decisions)")
+            st.caption(
+                "Two reviews are complete. Their identities, votes, and rationales "
+                "remain hidden while you make an independent final decision."
             )
-            st.rerun() # Refresh page automatically
-            
-        if btn_col2.button("❌ Reject", key=f"rej_{row['mapping_decision_id']}", type="primary", use_container_width=True):
-            process_review(
-                row['mapping_decision_id'], "reject", reviewer, reason
-            )
-            st.rerun() # Refresh page automatically
+            for _, mapping in queue.head(50).iterrows():
+                render_mapping(mapping, identity, "adjudicate")
+                st.divider()
 
-    st.markdown("---")
-    st.caption(f"🤖 Mapping Engine: {df_pending.iloc[0]['model_name'] if not df_pending.empty else ''}")
+with agreement_tab:
+    overall = agreement["overall"]
+    st.write({
+        "completed_pairs": overall["pair_count"],
+        "raw_agreement": overall["raw_agreement"],
+        "cohens_kappa": overall["cohens_kappa"],
+    })
+    if agreement["by_domain"]:
+        st.dataframe(
+            pd.DataFrame.from_dict(agreement["by_domain"], orient="index"),
+            use_container_width=True,
+        )
+    st.caption(
+        "Agreement is descriptive until enough clinically reviewed pairs exist; "
+        "no minimum κ is claimed from synthetic or technically curated labels."
+    )
