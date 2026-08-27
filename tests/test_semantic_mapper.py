@@ -105,7 +105,9 @@ class _FakeOllama:
 
     def chat(self, **kwargs):
         assert kwargs["format"]["additionalProperties"] is False
-        assert kwargs["options"] == {"temperature": 0.0, "seed": 0}
+        assert kwargs["options"] == {
+            "temperature": 0.0, "seed": 0, "num_predict": 512,
+        }
         return {"message": {"content": self.content}}
 
 
@@ -122,7 +124,7 @@ def _procedure_database(path):
                 procedure_source_value VARCHAR
             )
         """)
-        con.execute("INSERT INTO procedure_occurrence VALUES (1, 0, 0, 'legacy appendectomy')")
+        con.execute("INSERT INTO procedure_occurrence VALUES (1, 0, 9001, 'legacy appendectomy')")
 
 
 def test_procedure_adapter_persists_governed_proposal_without_publishing(monkeypatch, tmp_path):

@@ -23,7 +23,8 @@ from src.utils.config import DB_PATH, MODEL_NAME
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CHROMA_PATH = PROJECT_ROOT / "data" / "chroma_db"
 PROMPT_VERSION = "mapping-json-v2"
-GENERATION_PARAMETERS = {"temperature": 0.0, "seed": 0}
+GENERATION_PARAMETERS = {"temperature": 0.0, "seed": 0, "num_predict": 512}
+OLLAMA_TIMEOUT_SECONDS = 120.0
 DECISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -35,11 +36,11 @@ DECISION_SCHEMA = {
         "decision": {"type": "string", "enum": ["SELECT", "ABSTAIN"]},
         "selected_concept_id": {"type": ["integer", "null"]},
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "reason": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 300},
         "clinical_signals": {
             "type": "array",
-            "maxItems": 12,
-            "items": {"type": "string", "minLength": 1},
+            "maxItems": 6,
+            "items": {"type": "string", "minLength": 1, "maxLength": 100},
         },
     },
 }
@@ -90,10 +91,15 @@ def parse_llm_decision(content: str, candidate_ids) -> dict:
     reason = payload["reason"]
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("LLM reason must be non-empty")
+    if len(reason) > 300:
+        raise ValueError("LLM reason exceeds the schema limit")
     signals = payload["clinical_signals"]
     if (
-        not isinstance(signals, list) or len(signals) > 12
-        or any(not isinstance(item, str) or not item.strip() for item in signals)
+        not isinstance(signals, list) or len(signals) > 6
+        or any(
+            not isinstance(item, str) or not item.strip() or len(item) > 100
+            for item in signals
+        )
     ):
         raise ValueError("LLM clinical_signals must be a list of non-empty strings")
 
@@ -122,6 +128,7 @@ def build_prompt(target_table: str, source_value: str, candidates: list[dict], f
         f"{prompt['guidance']}\n"
         "You may select only a concept_id from the supplied candidates. "
         "If no candidate is clinically safe, use ABSTAIN. Never invent an ID.\n"
+        "Keep reason under 300 characters and provide at most 6 concise clinical signals.\n"
         f"{few_shot}"
         f"Source value: {json.dumps(source_value, ensure_ascii=False)}\n"
         f"Candidates: {json.dumps(candidates, ensure_ascii=False)}\n"
@@ -162,7 +169,6 @@ def _unmapped_terms(con, target_table: str) -> list[str]:
             SELECT DISTINCT {config['source_column']}
             FROM {target_table}
             WHERE {config['concept_column']} = 0
-              AND {config['source_concept_column']} = 0
               AND {config['source_column']} IS NOT NULL
             ORDER BY LOWER(TRIM({config['source_column']}))
         """).fetchall()
@@ -174,11 +180,12 @@ def run_semantic_mapping(
     *,
     db_path=DB_PATH,
     chroma_path=CHROMA_PATH,
-    client=ollama,
+    client=None,
 ) -> dict:
     """Run one governed domain adapter without publishing any mapping."""
     if target_table not in DOMAIN_PROMPTS:
         raise ValueError(f"Unsupported semantic mapping target: {target_table}")
+    client = client or ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
     config = TARGETS[target_table]
     result = {"target_table": target_table, "terms": 0, "proposals": 0, "abstentions": 0}
     print(f"STARTING GOVERNED LOCAL-LLM MAPPING: {target_table}")
