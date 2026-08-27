@@ -12,7 +12,7 @@ sys.path.append(str(PROJECT_ROOT))
 # Importa a config global, como sugerido pela revisão
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
 
 def extract_persons(file_path):
     records = []
@@ -89,29 +89,7 @@ def run_person_etl():
         # A CAUSA DO ERRO: Faltava o DROP TABLE para garantir idempotência!
         con.execute("DROP TABLE IF EXISTS person")
         
-        con.execute("""
-            CREATE TABLE person (
-                person_id BIGINT PRIMARY KEY,
-                gender_concept_id INTEGER,
-                year_of_birth INTEGER,
-                month_of_birth INTEGER,
-                day_of_birth INTEGER,
-                birth_datetime TIMESTAMP,
-                race_concept_id INTEGER,
-                ethnicity_concept_id INTEGER,
-                location_id BIGINT,
-                provider_id BIGINT,
-                care_site_id BIGINT,
-                person_source_value VARCHAR,
-                gender_source_value VARCHAR,
-                gender_source_concept_id INTEGER,
-                race_source_value VARCHAR,
-                race_source_concept_id INTEGER,
-                ethnicity_source_value VARCHAR,
-                ethnicity_source_concept_id INTEGER
-            )
-        """)
-        ensure_table_columns(con, "person")
+        con.execute(create_table_sql("person"))
         
         con.execute("DROP TABLE IF EXISTS stg_person")
         con.execute("""

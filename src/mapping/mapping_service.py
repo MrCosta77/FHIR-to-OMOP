@@ -7,6 +7,11 @@ import re
 import chromadb
 
 from src.utils.config import MODEL_NAME, SIMILARITY_THRESHOLD
+from src.mapping.governance import (
+    current_run_id,
+    register_decision,
+    rejection_policy_exists,
+)
 
 
 INDEX_SCHEMA_VERSION = "omop-rag-index-v1"
@@ -43,8 +48,8 @@ TARGETS = {
 
 def _valid_date(field):
     return (
-        f"COALESCE(TRY_STRPTIME({field}, '%Y%m%d')::DATE, "
-        f"TRY_CAST({field} AS DATE))"
+        f"COALESCE(TRY_CAST({field} AS DATE), "
+        f"TRY_STRPTIME(CAST({field} AS VARCHAR), '%Y%m%d')::DATE)"
     )
 
 
@@ -242,7 +247,7 @@ def selected_candidate(search_results, answer, distance_metric="cosine"):
 
 
 def record_mapping_proposal(con, target_table, source_value, match):
-    """Persist a candidate by event; publish to STCM only above the threshold."""
+    """Persist an event-level candidate without publishing it before review."""
     if not match:
         return "UNRESOLVED", 0
     concept_id, concept_name, _distance, score = match
@@ -268,6 +273,20 @@ def record_mapping_proposal(con, target_table, source_value, match):
     """).fetchone()
     vocabulary_version = vocabulary_version[0] if vocabulary_version else "Unknown"
 
+    if rejection_policy_exists(con, target_table, source_value, concept_id):
+        review_status = "REJECTED_BY_POLICY"
+
+    decision_status = {
+        "Pending_Human_Review": "PENDING",
+        "Below_Confidence_Threshold": "LOW_CONFIDENCE",
+        "REJECTED_BY_POLICY": "REJECTED_BY_POLICY",
+    }[review_status]
+    decision_id = register_decision(
+        con, target_table, source_value, concept_id, concept_name,
+        "llm_rag_few_shot", score, MODEL_NAME, vocabulary_version,
+        decision_status,
+    )
+
     # Remove the legacy term-level placeholder now that every affected event
     # receives its own provenance row.
     con.execute("""
@@ -278,42 +297,24 @@ def record_mapping_proposal(con, target_table, source_value, match):
           AND reviewed_by = 'Pending_Human_Review'
     """, [target_table, source_value])
 
-    if review_status == "Pending_Human_Review":
-        con.execute("""
-            DELETE FROM source_to_concept_map
-            WHERE source_code = ? AND source_vocabulary_id = ?
-        """, [source_value, config["source_vocabulary"]])
-        con.execute("""
-            INSERT INTO source_to_concept_map (
-                source_code, source_concept_id, source_vocabulary_id,
-                source_code_description, target_concept_id,
-                target_vocabulary_id, valid_start_date, valid_end_date,
-                invalid_reason
-            ) VALUES (?, 0, ?, ?, ?, ?, CURRENT_DATE, '2099-12-31', NULL)
-        """, [
-            source_value,
-            config["source_vocabulary"],
-            source_value,
-            concept_id,
-            config["vocabulary"],
-        ])
-
     for target_id in target_ids:
         con.execute("""
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
-            ) SELECT ?, ?, ?, ?, ?, 'llm_rag_few_shot', ?, ?, ?, ?
+                vocabulary_version, reviewed_by, run_id, mapping_decision_id
+            ) SELECT ?, ?, ?, ?, ?, 'llm_rag_few_shot', ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
                 SELECT 1 FROM mapping_provenance
                 WHERE target_table = ? AND target_id = ?
                   AND assigned_concept_id = ?
                   AND mapping_method = 'llm_rag_few_shot'
+                  AND COALESCE(run_id, '') = COALESCE(?, '')
             )
         """, [
             target_table, target_id, source_value, concept_name, concept_id,
             score, MODEL_NAME, vocabulary_version, review_status,
-            target_table, target_id, concept_id,
+            current_run_id(), decision_id,
+            target_table, target_id, concept_id, current_run_id(),
         ])
     return review_status, len(target_ids)

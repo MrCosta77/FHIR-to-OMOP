@@ -2,13 +2,15 @@ library(DatabaseConnector)
 library(DataQualityDashboard)
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 3L || !args[[1]] %in% c("base", "future_high")) {
-  stop("Usage: run_dqd_worker.R <base|future_high> <project-root> <output-folder>")
+if (length(args) < 3L || length(args) > 4L ||
+    !args[[1]] %in% c("base", "field_heavy", "field_measure", "field_high")) {
+  stop("Usage: run_dqd_worker.R <base|field_heavy|field_measure|field_high> <project-root> <output-folder> [CDM_TABLE]")
 }
 
 mode <- args[[1]]
 project_root <- normalizePath(args[[2]], winslash = "/", mustWork = TRUE)
 output_folder <- normalizePath(args[[3]], winslash = "/", mustWork = FALSE)
+included_table <- if (length(args) == 4L) args[[4]] else NULL
 dir.create(output_folder, recursive = TRUE, showWarnings = FALSE)
 
 db_path <- file.path(project_root, "data", "omop_clinical.duckdb")
@@ -52,8 +54,15 @@ if (mode == "base") {
     "CURRENT_DATE + INTERVAL 1 DAY"
   custom_thresholds <- tempfile(fileext = ".csv")
   readr::write_csv(thresholds, custom_thresholds, na = "")
-  common_args$checkNames <- "plausibleValueHigh"
+  common_args$checkNames <- switch(
+    mode,
+    field_measure = "measureValueCompleteness",
+    field_high = "plausibleValueHigh",
+    c("measureValueCompleteness", "plausibleValueHigh")
+  )
   common_args$fieldCheckThresholdLoc <- custom_thresholds
+  all_field_tables <- unique(thresholds$cdmTableName)
+  common_args$tablesToExclude <- setdiff(all_field_tables, included_table)
 }
 
 do.call(executeDqChecks, common_args)

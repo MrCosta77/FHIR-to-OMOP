@@ -11,7 +11,8 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
+from src.mapping.governance import current_run_id
 
 def generate_condition_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -98,28 +99,7 @@ def run_condition_etl():
         # FORÇA A ELIMINAÇÃO DA TABELA ANTIGA PARA ATUALIZAR O SCHEMA
         con.execute("DROP TABLE IF EXISTS condition_occurrence")
         
-        # Create persistent condition_occurrence table
-        con.execute("""
-            CREATE TABLE condition_occurrence (
-                condition_occurrence_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                condition_concept_id INTEGER,
-                condition_start_date DATE,
-                condition_start_datetime TIMESTAMP,
-                condition_end_date DATE,
-                condition_end_datetime TIMESTAMP,
-                condition_type_concept_id INTEGER,
-                stop_reason VARCHAR,
-                provider_id BIGINT,
-                visit_occurrence_id BIGINT,
-                visit_detail_id BIGINT,
-                condition_source_value VARCHAR,
-                condition_source_concept_id INTEGER,
-                condition_status_source_value VARCHAR,
-                condition_status_concept_id INTEGER
-            )
-        """)
-        ensure_table_columns(con, "condition_occurrence")
+        con.execute(create_table_sql("condition_occurrence"))
         
         # Temporary staging table
         con.execute("DROP TABLE IF EXISTS stg_condition")
@@ -189,7 +169,7 @@ def run_condition_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
+                vocabulary_version, reviewed_by, run_id
             )
             SELECT 
                 'condition_occurrence',
@@ -201,14 +181,19 @@ def run_condition_etl():
                 1.0, -- Confiança total
                 'N/A',
                 'Athena_v5.4',
-                'System'
+                'System',
+                ?
             FROM condition_occurrence
             WHERE condition_concept_id != 0
             -- Evita duplicar registos se correres o script várias vezes
-            AND condition_occurrence_id NOT IN (
-                SELECT target_id FROM mapping_provenance WHERE target_table = 'condition_occurrence'
+            AND NOT EXISTS (
+                SELECT 1 FROM mapping_provenance p
+                WHERE p.target_table = 'condition_occurrence'
+                  AND p.target_id = condition_occurrence.condition_occurrence_id
+                  AND p.mapping_method = 'deterministic_maps_to'
+                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
-        """)
+        """, [current_run_id(), current_run_id()])
 
         mapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id = 0").fetchone()[0]

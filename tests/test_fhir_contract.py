@@ -18,7 +18,7 @@ GOLDEN = Path(__file__).parent / "fixtures" / "golden_fhir_bundle.json"
 def test_golden_fhir_bundle_has_stable_resource_contract():
     counts = validate_bundle(GOLDEN)
     assert counts == {
-        "Patient": 1, "Encounter": 1, "Condition": 1, "Observation": 1,
+        "Patient": 1, "Encounter": 1, "Condition": 1, "Observation": 2,
         "Medication": 1, "MedicationRequest": 1, "Procedure": 1,
     }
 
@@ -34,6 +34,17 @@ def _mutated_bundle(tmp_path, mutate):
 def test_unresolved_patient_reference_is_rejected(tmp_path):
     path = _mutated_bundle(tmp_path, lambda p: p["entry"][2]["resource"]["subject"].update(reference="Patient/missing"))
     with pytest.raises(ValueError, match="unresolved subject"):
+        validate_bundle(path)
+
+
+def test_unresolved_encounter_reference_is_rejected(tmp_path):
+    path = _mutated_bundle(
+        tmp_path,
+        lambda p: p["entry"][2]["resource"]["encounter"].update(
+            reference="Encounter/missing"
+        ),
+    )
+    with pytest.raises(ValueError, match="unresolved Encounter reference"):
         validate_bundle(path)
 
 
@@ -59,7 +70,7 @@ def test_golden_bundle_reconciles_to_deterministic_extractor_counts():
         "condition": (extract_conditions, 1),
         "drug": (extract_drugs, 1),
         "measurement": (extract_measurements, 1),
-        "observation_candidate": (extract_observation_candidates, 2),
+        "observation_candidate": (extract_observation_candidates, 3),
         "procedure": (extract_procedures, 1),
     }
     for name, (extractor, expected) in extractors.items():

@@ -59,20 +59,16 @@ def apply_stcm_mappings(db_path=DB_PATH):
                   AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
                   AND CURRENT_DATE BETWEEN
                       COALESCE(
-                          TRY_STRPTIME(c.valid_start_date, '%Y%m%d')::DATE,
-                          TRY_CAST(c.valid_start_date AS DATE)
+                          TRY_CAST(c.valid_start_date AS DATE),
+                          TRY_STRPTIME(CAST(c.valid_start_date AS VARCHAR), '%Y%m%d')::DATE
                       )
                       AND COALESCE(
-                          TRY_STRPTIME(c.valid_end_date, '%Y%m%d')::DATE,
-                          TRY_CAST(c.valid_end_date AS DATE)
+                          TRY_CAST(c.valid_end_date AS DATE),
+                          TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE
                       )
             """
             
-            try:
-                con.execute(query, [table, source_vocabulary])
-            except Exception as e:
-                print(f"❌ Error applying STCM to {table}: {e}")
-                continue
+            con.execute(query, [table, source_vocabulary])
             
             # Para reportar o impacto visualmente no terminal
             after = con.execute(f"""

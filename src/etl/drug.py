@@ -11,7 +11,8 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
+from src.mapping.governance import current_run_id
 
 def generate_drug_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -119,33 +120,7 @@ def run_drug_etl():
     with duckdb.connect(DB_PATH) as con:
         con.execute("DROP TABLE IF EXISTS drug_exposure")
         
-        con.execute("""
-            CREATE TABLE drug_exposure (
-                drug_exposure_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                drug_concept_id INTEGER,
-                drug_exposure_start_date DATE,
-                drug_exposure_start_datetime TIMESTAMP,
-                drug_exposure_end_date DATE,
-                drug_exposure_end_datetime TIMESTAMP,
-                drug_type_concept_id INTEGER,
-                stop_reason VARCHAR,
-                refills INTEGER,
-                quantity DOUBLE,
-                days_supply INTEGER,
-                sig VARCHAR,
-                route_concept_id INTEGER,
-                lot_number VARCHAR,
-                provider_id BIGINT,
-                visit_occurrence_id BIGINT,
-                visit_detail_id BIGINT,
-                drug_source_value VARCHAR,
-                drug_source_concept_id INTEGER,
-                route_source_value VARCHAR,
-                dose_unit_source_value VARCHAR
-            )
-        """)
-        ensure_table_columns(con, "drug_exposure")
+        con.execute(create_table_sql("drug_exposure"))
         
         con.execute("DROP TABLE IF EXISTS stg_drug")
         con.execute("""
@@ -202,7 +177,7 @@ def run_drug_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
+                vocabulary_version, reviewed_by, run_id
             )
             SELECT 
                 'drug_exposure',
@@ -214,13 +189,18 @@ def run_drug_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System'
+                'System',
+                ?
             FROM drug_exposure
             WHERE drug_concept_id != 0
-            AND drug_exposure_id NOT IN (
-                SELECT target_id FROM mapping_provenance WHERE target_table = 'drug_exposure'
+            AND NOT EXISTS (
+                SELECT 1 FROM mapping_provenance p
+                WHERE p.target_table = 'drug_exposure'
+                  AND p.target_id = drug_exposure.drug_exposure_id
+                  AND p.mapping_method = 'deterministic_maps_to'
+                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
-        """)
+        """, [current_run_id(), current_run_id()])
         
         mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]

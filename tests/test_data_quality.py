@@ -1,18 +1,17 @@
 import duckdb
 import pytest
 import os
-from pathlib import Path
+
+from src.utils.config import DB_PATH
 
 pytestmark = pytest.mark.integration
-
-# Setup paths (pointing to the root data folder)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb")
 
 @pytest.fixture(scope="module")
 def db_connection():
     """Establishes a connection to DuckDB for all tests to use."""
-    if not Path(DB_PATH).is_file():
+    if not os.path.isfile(DB_PATH) and os.environ.get("CMF_REQUIRE_INTEGRATION") == "1":
+        pytest.fail(f"Required integration database is missing: {DB_PATH}")
+    if not os.path.isfile(DB_PATH):
         pytest.skip("Integration database is not present; run the pipeline first.")
     con = duckdb.connect(DB_PATH, read_only=True)
     yield con

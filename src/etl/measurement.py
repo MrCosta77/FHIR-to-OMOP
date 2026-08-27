@@ -13,7 +13,8 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 from src.utils.unit_mapping import canonical_ucum_code
 from src.utils.quarantine import ensure_quarantine_table
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
+from src.mapping.governance import current_run_id
 
 def generate_measurement_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -122,32 +123,7 @@ def run_measurement_etl():
         ensure_quarantine_table(con)
         con.execute("DROP TABLE IF EXISTS measurement")
         
-        con.execute("""
-            CREATE TABLE measurement (
-                measurement_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                measurement_concept_id INTEGER,
-                measurement_date DATE,
-                measurement_datetime TIMESTAMP,
-                measurement_time VARCHAR,
-                measurement_type_concept_id INTEGER,
-                operator_concept_id INTEGER,
-                value_as_number DOUBLE,
-                value_as_concept_id INTEGER,
-                unit_concept_id INTEGER,
-                range_low DOUBLE,
-                range_high DOUBLE,
-                provider_id BIGINT,
-                visit_occurrence_id BIGINT,
-                visit_detail_id BIGINT,
-                measurement_source_value VARCHAR,
-                measurement_source_concept_id INTEGER,
-                unit_source_value VARCHAR,
-                unit_source_concept_id INTEGER,
-                value_source_value VARCHAR
-            )
-        """)
-        ensure_table_columns(con, "measurement")
+        con.execute(create_table_sql("measurement"))
         
         con.execute("DROP TABLE IF EXISTS stg_measurement")
         con.execute("""
@@ -310,7 +286,7 @@ def run_measurement_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
+                vocabulary_version, reviewed_by, run_id
             )
             SELECT 
                 'measurement',
@@ -322,13 +298,18 @@ def run_measurement_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System'
+                'System',
+                ?
             FROM measurement
             WHERE measurement_concept_id != 0
-            AND measurement_id NOT IN (
-                SELECT target_id FROM mapping_provenance WHERE target_table = 'measurement'
+            AND NOT EXISTS (
+                SELECT 1 FROM mapping_provenance p
+                WHERE p.target_table = 'measurement'
+                  AND p.target_id = measurement.measurement_id
+                  AND p.mapping_method = 'deterministic_maps_to'
+                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
-        """)
+        """, [current_run_id(), current_run_id()])
 
         mapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]

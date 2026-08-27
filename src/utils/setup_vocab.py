@@ -1,100 +1,102 @@
-import os
+"""Atomically load an Athena vocabulary into typed OMOP CDM 5.4 tables."""
+
+from __future__ import annotations
+
 import sys
-import duckdb
 import time
 from pathlib import Path
 
-# Setup paths
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+import duckdb
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
+from src.omop.cdm54 import create_table_sql, duckdb_type, load_table_specs
 from src.utils.config import DB_PATH, VOCAB_DIR
 
+
+VOCABULARY_FILES = {
+    "concept": "CONCEPT.csv",
+    "concept_relationship": "CONCEPT_RELATIONSHIP.csv",
+    "vocabulary": "VOCABULARY.csv",
+    "domain": "DOMAIN.csv",
+    "concept_class": "CONCEPT_CLASS.csv",
+    "concept_ancestor": "CONCEPT_ANCESTOR.csv",
+}
+
+
+def _source_expression(field):
+    name = f'"{field.name}"'
+    datatype = duckdb_type(field.datatype)
+    if datatype == "BIGINT":
+        return f"CAST({name} AS BIGINT)"
+    if datatype == "DOUBLE":
+        return f"CAST({name} AS DOUBLE)"
+    if datatype == "DATE":
+        return (
+            f"COALESCE(TRY_STRPTIME({name}, '%Y%m%d')::DATE, "
+            f"TRY_CAST({name} AS DATE))"
+        )
+    return name
+
+
+def _load_next_table(con, table, source_path):
+    next_table = f"next_{table}"
+    con.execute(f'DROP TABLE IF EXISTS "{next_table}"')
+    con.execute(create_table_sql(table, physical_name=next_table))
+    fields = load_table_specs()[table]
+    columns = ", ".join(f'"{field.name}"' for field in fields)
+    expressions = ", ".join(_source_expression(field) for field in fields)
+    escaped_path = str(source_path).replace("'", "''")
+    con.execute(f"""
+        INSERT INTO "{next_table}" ({columns})
+        SELECT {expressions}
+        FROM read_csv_auto(
+            '{escaped_path}', delim='\t', header=true, quote='', escape='',
+            nullstr='', all_varchar=true, strict_mode=true
+        )
+    """)
+    count = con.execute(f'SELECT COUNT(*) FROM "{next_table}"').fetchone()[0]
+    if count == 0:
+        raise ValueError(f"Athena table {table} is empty: {source_path}")
+    return count
+
+
 def load_vocabularies():
-    print("⚙️ STARTING VOCABULARY LOAD (OMOP STANDARD)")
+    print("⚙️ STARTING TYPED ATHENA VOCABULARY LOAD (OMOP CDM 5.4)")
     print("-" * 50)
-    
     start_time = time.time()
-    
-    # Caminhos para os ficheiros
-    concept_csv = os.path.join(VOCAB_DIR, "CONCEPT.csv")
-    concept_rel_csv = os.path.join(VOCAB_DIR, "CONCEPT_RELATIONSHIP.csv")
-    vocabulary_csv = os.path.join(VOCAB_DIR, "VOCABULARY.csv")
-    domain_csv = os.path.join(VOCAB_DIR, "DOMAIN.csv")
-    concept_class_csv = os.path.join(VOCAB_DIR, "CONCEPT_CLASS.csv")
-    concept_ancestor_csv = os.path.join(VOCAB_DIR, "CONCEPT_ANCESTOR.csv") # <-- NOVO
-    
-    if not os.path.exists(concept_csv) or not os.path.exists(concept_rel_csv):
-        print("❌ ERROR: CONCEPT.csv or CONCEPT_RELATIONSHIP.csv not found in vocabulary folder.")
-        sys.exit(1)
-        
+    paths = {
+        table: Path(VOCAB_DIR) / filename
+        for table, filename in VOCABULARY_FILES.items()
+    }
+    missing = [str(path) for path in paths.values() if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Required OMOP vocabulary files are missing: " + ", ".join(missing)
+        )
+
+    counts = {}
     with duckdb.connect(DB_PATH) as con:
-        # 1. CONCEPT
-        print("⏳ Loading CONCEPT table (this may take a few seconds)...")
-        con.execute("DROP TABLE IF EXISTS concept")
-        con.execute(f"""
-            CREATE TABLE concept AS 
-            SELECT * FROM read_csv_auto('{concept_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-        """)
-        
-        # 2. CONCEPT_RELATIONSHIP
-        print("⏳ Loading CONCEPT_RELATIONSHIP table (the 'Maps to' bridge)...")
-        con.execute("DROP TABLE IF EXISTS concept_relationship")
-        con.execute(f"""
-            CREATE TABLE concept_relationship AS 
-            SELECT * FROM read_csv_auto('{concept_rel_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-        """)
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for table, source_path in paths.items():
+                print(f"⏳ Loading typed {table.upper()} from {source_path.name}...")
+                counts[table] = _load_next_table(con, table, source_path)
+            for table in paths:
+                con.execute(f'DROP TABLE IF EXISTS "{table}"')
+                con.execute(f'ALTER TABLE "next_{table}" RENAME TO "{table}"')
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
 
-        # 3. VOCABULARY
-        print("⏳ Loading VOCABULARY metadata...")
-        con.execute("DROP TABLE IF EXISTS vocabulary")
-        if os.path.exists(vocabulary_csv):
-            con.execute(f"""
-                CREATE TABLE vocabulary AS 
-                SELECT * FROM read_csv_auto('{vocabulary_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-            """)
-        
-        # 4. DOMAIN
-        print("⏳ Loading DOMAIN metadata...")
-        con.execute("DROP TABLE IF EXISTS domain")
-        if os.path.exists(domain_csv):
-            con.execute(f"""
-                CREATE TABLE domain AS 
-                SELECT * FROM read_csv_auto('{domain_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-            """)
-
-        # 5. CONCEPT_CLASS
-        print("⏳ Loading CONCEPT_CLASS metadata...")
-        con.execute("DROP TABLE IF EXISTS concept_class")
-        if os.path.exists(concept_class_csv):
-            con.execute(f"""
-                CREATE TABLE concept_class AS 
-                SELECT * FROM read_csv_auto('{concept_class_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-            """)
-            
-        # 6. CONCEPT_ANCESTOR (NOVO)
-        print("⏳ Loading CONCEPT_ANCESTOR table (the hierarchy tree)...")
-        con.execute("DROP TABLE IF EXISTS concept_ancestor")
-        ca_count = 0
-        if os.path.exists(concept_ancestor_csv):
-            con.execute(f"""
-                CREATE TABLE concept_ancestor AS 
-                SELECT * FROM read_csv_auto('{concept_ancestor_csv}', delim='\t', quote='', escape='', nullstr='', all_varchar=true)
-            """)
-            ca_count = con.execute("SELECT COUNT(*) FROM concept_ancestor").fetchone()[0]
-        else:
-            print("⚠️ WARNING: CONCEPT_ANCESTOR.csv not found. Skipping hierarchy load.")
-            
-        # Contagens finais
-        c_count = con.execute("SELECT COUNT(*) FROM concept").fetchone()[0]
-        cr_count = con.execute("SELECT COUNT(*) FROM concept_relationship").fetchone()[0]
-        
     elapsed = time.time() - start_time
-    print(f"\n✅ Vocabularies successfully loaded into DuckDB in {elapsed:.1f} seconds!")
-    print(f" - CONCEPT: {c_count:,} rows")
-    print(f" - CONCEPT_RELATIONSHIP: {cr_count:,} rows")
-    if ca_count > 0:
-        print(f" - CONCEPT_ANCESTOR: {ca_count:,} rows")
+    print(f"\n✅ Typed vocabularies loaded atomically in {elapsed:.1f} seconds!")
+    for table, count in counts.items():
+        print(f" - {table.upper()}: {count:,} rows")
+
 
 if __name__ == "__main__":
     load_vocabularies()

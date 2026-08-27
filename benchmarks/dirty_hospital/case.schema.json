@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/fhir-to-omop/dirty-hospital-case.schema.json",
+  "title": "Dirty hospital mapping benchmark case",
+  "type": "object",
+  "required": ["schema_version", "case_id", "family_id", "split", "domain", "variant", "source", "context", "expected", "difficulty_tags", "curation"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "case_id": {"type": "string", "pattern": "^DH-[0-9]{3}$"},
+    "family_id": {"type": "string", "minLength": 1},
+    "split": {"enum": ["development", "held_out"]},
+    "domain": {"enum": ["Condition", "Measurement", "Procedure", "Observation", "Drug"]},
+    "variant": {"enum": ["coded_exact", "dirty_text", "local_code", "ambiguous"]},
+    "source": {
+      "type": "object",
+      "required": ["format", "system", "code", "text"],
+      "properties": {
+        "format": {"enum": ["FHIR", "TEXT", "CSV"]},
+        "system": {"type": ["string", "null"]},
+        "code": {"type": ["string", "null"]},
+        "text": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "context": {"type": "object"},
+    "expected": {
+      "type": "object",
+      "required": ["decision", "concept_id", "concept_name", "domain"],
+      "properties": {
+        "decision": {"enum": ["MAP", "ABSTAIN"]},
+        "concept_id": {"type": ["integer", "null"]},
+        "concept_name": {"type": ["string", "null"]},
+        "domain": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "difficulty_tags": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "curation": {
+      "type": "object",
+      "required": ["status", "reviewer", "rationale"],
+      "properties": {
+        "status": {"enum": ["PROVISIONAL_TECHNICAL", "CLINICALLY_VALIDATED"]},
+        "reviewer": {"type": "string", "minLength": 1},
+        "rationale": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -9,11 +9,14 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .pytest_cache/
+.pytest-tmp-*/
 
 # Databases and Vector Stores (Too large for Git)
 *.duckdb
 *.duckdb.wal
 data/chroma_db/
+data/runs/
+data/run_manifests/
 
 # Raw & Temporary Data (Synthetic data and vocabularies)
 data/synthea_output/
@@ -23,6 +26,7 @@ synthea/
 
 # Evaluation and Output Results
 dqd_results/
+benchmark_results/
 
 # Local R/RStudio session state
 .RData

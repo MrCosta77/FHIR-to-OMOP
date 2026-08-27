@@ -1,20 +1,33 @@
+"""Fail-closed, run-identified and atomically published ETL orchestrator."""
+
+from __future__ import annotations
+
+import hashlib
+import json
 import os
+import shutil
+import subprocess
 import sys
 import time
-import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure the script runs from the project root
-PROJECT_ROOT = Path(__file__).resolve().parent
 
-# Exact execution order of the pipeline dependencies
+PROJECT_ROOT = Path(__file__).resolve().parent
+PUBLISHED_DB = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
+RUNS_DIR = PROJECT_ROOT / "data" / "runs"
+MANIFESTS_DIR = PROJECT_ROOT / "data" / "run_manifests"
+
 PIPELINE_STEPS = [
-    # --- PHASE 1: Initialization & Vocabularies ---
+    {"name": "0. Validate External Prerequisites", "script": "src/quality/preflight.py"},
     {"name": "1. Setup Vocabularies", "script": "src/utils/setup_vocab.py"},
     {"name": "2. Setup Audit/Provenance", "script": "src/utils/setup_audit.py"},
     {"name": "2b. Build OMOP DDL Skeleton", "script": "src/utils/setup_cdm_schema.py"},
-    
-    # --- PHASE 2: Base Extraction (FHIR -> OMOP) ---
+    {
+        "name": "2c. Validate FHIR Input Contract",
+        "script": "src/quality/validate_fhir.py",
+        "args": ["synthea/output/fhir"],
+    },
     {"name": "3. Extract Persons", "script": "src/etl/person.py"},
     {"name": "4. Extract Visits", "script": "src/etl/visit.py"},
     {"name": "5. Extract Conditions", "script": "src/etl/condition.py"},
@@ -22,84 +35,204 @@ PIPELINE_STEPS = [
     {"name": "7. Extract Measurements", "script": "src/etl/measurement.py"},
     {"name": "8. Extract Observations", "script": "src/etl/observation.py"},
     {"name": "9. Extract Procedures", "script": "src/etl/procedure.py"},
-    
-    # --- PHASE 3: Derived Tables, Linkage & Simulation ---
-    {"name": "10. Build Observation Periods", "script": "src/etl/observation_period.py"},
-    {"name": "11. Link Events to Visits", "script": "src/etl/link_visits.py"},
+    {"name": "10. Link Events to Visits", "script": "src/etl/link_visits.py"},
+    {"name": "11. Build Observation Periods", "script": "src/etl/observation_period.py"},
     {"name": "11b. Inject Legacy LIS Noise", "script": "src/simulation/inject_lis_noise.py"},
-
-    # --- PHASE 4: AI Semantic Mapping ---
     {"name": "12. AI Semantic Mapping (Conditions)", "script": "src/mapping/llm_condition.py"},
     {"name": "13. AI Semantic Mapping (Drugs)", "script": "src/mapping/llm_drug.py"},
     {"name": "14. AI Semantic Mapping (Measurements)", "script": "src/mapping/llm_measurement.py"},
-        
-    # --- PHASE 5: Apply AI Mappings ---
-    {"name": "15. Apply STCM Mappings", "script": "src/etl/apply_stcm.py"},
+    {"name": "15. Apply Approved Mappings", "script": "src/etl/apply_stcm.py"},
     {"name": "15b. Build Condition and Drug Eras", "script": "src/etl/eras.py"},
-        
-    # --- PHASE 6: Validation & Analytics ---
-    {"name": "16. Run Quality Gate (Tests)", "script": "tests/test_data_quality.py", "is_pytest": True},
-    {"name": "17. Generate RWE Analytics Report", "script": "src/analytics/rwe_cohort_discovery.py"}
-] # <-- THE MISSING BRACKET WAS HERE!
+    {
+        "name": "16. Run Complete Quality Gate",
+        "script": "tests",
+        "is_pytest": True,
+    },
+    {"name": "17. Generate RWE Analytics Report", "script": "src/analytics/rwe_cohort_discovery.py"},
+]
 
-def run_step(step):
-    """Executes a Python script individually and measures execution time."""
-    step_name = step["name"]
-    script_path = step["script"]
-    
-    print(f"\n{'='*70}")
-    print(f"🚀 RUNNING: {step_name}")
-    print(f"📄 Script:  {script_path}")
-    print(f"{'='*70}\n")
-    
-    start_time = time.time()
-    
-    # Check if the file exists before attempting to run it
-    full_path = os.path.join(PROJECT_ROOT, script_path)
-    if not os.path.exists(full_path):
-        print(f"❌ ERROR: File not found -> {full_path}")
-        print("⏭️ Skipping this step (check your filenames if this was unexpected).")
-        return False 
-        
-    try:
-        # sys.executable ensures we use the isolated .venv Python, not the global system one
-        if step.get("is_pytest"):
-            subprocess.run([sys.executable, "-X", "utf8", "-m", "pytest", script_path, "-v", "--disable-warnings"], cwd=PROJECT_ROOT, check=True)
-        else:
-            subprocess.run([sys.executable, "-X", "utf8", script_path], cwd=PROJECT_ROOT, check=True)
-        
-        elapsed = time.time() - start_time
-        print(f"\n✅ SUCCESS: '{step_name}' completed in {elapsed:.1f} seconds.")
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        print(f"\n❌ CRITICAL ERROR: Pipeline failed at '{step_name}' (Exit Code: {e.returncode}).")
-        return False
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def new_run_id():
+    return utc_now().strftime("RUN-%Y%m%dT%H%M%SZ-") + os.urandom(4).hex()
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def input_manifest():
+    roots = [
+        PROJECT_ROOT / "synthea" / "output" / "fhir",
+        PROJECT_ROOT / "data" / "omop_vocab",
+    ]
+    files = []
+    for root in roots:
+        if root.is_dir():
+            for path in sorted(item for item in root.iterdir() if item.is_file()):
+                files.append({
+                    "path": str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    "size": path.stat().st_size,
+                    "sha256": sha256_file(path),
+                })
+    return files
+
+
+def git_commit():
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
+def write_manifest(path, manifest):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    # OneDrive/antivirus can briefly hold a newly written file on Windows.
+    # Preserve atomic replacement while tolerating only transient lock errors.
+    for attempt in range(10):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
+def persist_run(database_path, manifest):
+    import duckdb
+
+    from src.mapping.governance import ensure_governance_tables
+
+    with duckdb.connect(str(database_path)) as con:
+        ensure_governance_tables(con)
+        con.execute("""
+            INSERT INTO etl_run (
+                run_id, status, started_at, completed_at, git_commit,
+                input_manifest, configuration_manifest, step_manifest,
+                error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (run_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                completed_at = EXCLUDED.completed_at,
+                step_manifest = EXCLUDED.step_manifest,
+                error_message = EXCLUDED.error_message
+        """, [
+            manifest["run_id"], manifest["status"], manifest["started_at"],
+            manifest.get("completed_at"), manifest["git_commit"],
+            json.dumps(manifest["inputs"], sort_keys=True),
+            json.dumps(manifest["configuration"], sort_keys=True),
+            json.dumps(manifest["steps"], sort_keys=True),
+            manifest.get("error_message"),
+        ])
+
+
+def prepare_staging_database(run_id):
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    staging = RUNS_DIR / f"{run_id}.staging.duckdb"
+    if staging.exists():
+        raise FileExistsError(f"Staging database already exists: {staging}")
+    if PUBLISHED_DB.exists():
+        shutil.copy2(PUBLISHED_DB, staging)
+    return staging
+
+
+def run_step(step, environment):
+    script_path = PROJECT_ROOT / step["script"]
+    if not script_path.exists():
+        raise FileNotFoundError(f"Required pipeline step not found: {script_path}")
+    command = [sys.executable, "-X", "utf8"]
+    if step.get("is_pytest"):
+        run_id = environment.get("CMF_RUN_ID", "untracked")
+        pytest_temp = RUNS_DIR / f"{run_id}.pytest"
+        command.extend([
+            "-m", "pytest", str(script_path), "-v", "--disable-warnings",
+            f"--basetemp={pytest_temp}",
+        ])
+    else:
+        command.append(str(script_path))
+    command.extend(step.get("args", []))
+    started = time.monotonic()
+    subprocess.run(command, cwd=PROJECT_ROOT, env=environment, check=True)
+    return round(time.monotonic() - started, 3)
+
 
 def main():
-    print("\n" + "🏥"*30)
-    print("      CLINICAL MAPPING FRAMEWORK - FULL ORCHESTRATOR")
-    print("🏥"*30 + "\n")
-    
-    total_start_time = time.time()
-    
-    for step in PIPELINE_STEPS:
-        success = run_step(step)
-        if not success:
-            print("\n🛑 PIPELINE HALTED due to errors. Please fix the issue and run again.")
-            sys.exit(1)
-            
-    total_elapsed = time.time() - total_start_time
-    minutes = int(total_elapsed // 60)
-    seconds = int(total_elapsed % 60)
-    
-    print(f"\n{'='*70}")
-    print(f"🎉 PIPELINE FULLY COMPLETED IN {minutes}m {seconds}s! 🎉")
-    print(
-        "Database is clean, linked, domain-routed, and tested; "
-        "LLM candidates remain gated until human approval."
-    )
-    print(f"{'='*70}\n")
+    run_id = new_run_id()
+    staging_db = prepare_staging_database(run_id)
+    manifest_path = MANIFESTS_DIR / f"{run_id}.json"
+    started = utc_now()
+    manifest = {
+        "run_id": run_id,
+        "status": "RUNNING",
+        "started_at": started.isoformat(),
+        "git_commit": git_commit(),
+        "inputs": input_manifest(),
+        "configuration": {
+            "database_publish_path": str(PUBLISHED_DB),
+            "python": sys.version,
+            "similarity_threshold": os.environ.get("CMF_SIMILARITY_THRESHOLD", "0.90"),
+        },
+        "steps": [],
+    }
+    environment = os.environ.copy()
+    environment["CMF_RUN_ID"] = run_id
+    environment["CMF_DB_PATH"] = str(staging_db)
+    environment["CMF_REQUIRE_INTEGRATION"] = "1"
+    write_manifest(manifest_path, manifest)
+    persist_run(staging_db, manifest)
+
+    try:
+        for step in PIPELINE_STEPS:
+            step_record = {"name": step["name"], "script": step["script"], "status": "RUNNING"}
+            manifest["steps"].append(step_record)
+            write_manifest(manifest_path, manifest)
+            try:
+                step_record["duration_seconds"] = run_step(step, environment)
+                step_record["status"] = "SUCCESS"
+            except Exception as exc:
+                step_record["status"] = "FAILED"
+                step_record["error"] = str(exc)
+                raise
+            finally:
+                write_manifest(manifest_path, manifest)
+
+        manifest["status"] = "SUCCESS"
+        manifest["completed_at"] = utc_now().isoformat()
+        persist_run(staging_db, manifest)
+        PUBLISHED_DB.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staging_db, PUBLISHED_DB)
+        write_manifest(manifest_path, manifest)
+        elapsed = (utc_now() - started).total_seconds()
+        print(f"Pipeline {run_id} published atomically in {elapsed:.1f}s")
+    except Exception as exc:
+        manifest["status"] = "FAILED"
+        manifest["completed_at"] = utc_now().isoformat()
+        manifest["error_message"] = str(exc)
+        try:
+            persist_run(staging_db, manifest)
+        finally:
+            write_manifest(manifest_path, manifest)
+        print(
+            f"Pipeline {run_id} failed. The published database was not changed. "
+            f"Forensic staging data: {staging_db}",
+            file=sys.stderr,
+        )
+        raise
+
 
 if __name__ == "__main__":
     main()

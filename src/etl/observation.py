@@ -12,7 +12,8 @@ sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 from src.utils.unit_mapping import canonical_ucum_code
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
+from src.mapping.governance import current_run_id
 
 def generate_observation_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -140,32 +141,7 @@ def run_observation_etl():
         con.execute("BEGIN TRANSACTION")
         con.execute("DROP TABLE IF EXISTS observation")
         
-        con.execute("""
-            CREATE TABLE observation (
-                observation_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                observation_concept_id INTEGER,
-                observation_date DATE,
-                observation_datetime TIMESTAMP,
-                observation_type_concept_id INTEGER,
-                value_as_number DOUBLE,
-                value_as_string VARCHAR,
-                value_as_concept_id INTEGER,
-                qualifier_concept_id INTEGER,
-                unit_concept_id INTEGER,
-                provider_id BIGINT,
-                visit_occurrence_id BIGINT,
-                visit_detail_id BIGINT,
-                observation_source_value VARCHAR,
-                observation_source_concept_id INTEGER,
-                unit_source_value VARCHAR,
-                qualifier_source_value VARCHAR,
-                value_source_value VARCHAR,
-                observation_event_id BIGINT,
-                obs_event_field_concept_id INTEGER
-            )
-        """)
-        ensure_table_columns(con, "observation")
+        con.execute(create_table_sql("observation"))
         
         con.execute("DROP TABLE IF EXISTS stg_observation")
         con.execute("""
@@ -270,7 +246,7 @@ def run_observation_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
+                vocabulary_version, reviewed_by, run_id
             )
             SELECT 
                 'observation',
@@ -282,13 +258,18 @@ def run_observation_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System'
+                'System',
+                ?
             FROM observation
             WHERE observation_concept_id != 0
-            AND observation_id NOT IN (
-                SELECT target_id FROM mapping_provenance WHERE target_table = 'observation'
+            AND NOT EXISTS (
+                SELECT 1 FROM mapping_provenance p
+                WHERE p.target_table = 'observation'
+                  AND p.target_id = observation.observation_id
+                  AND p.mapping_method = 'deterministic_maps_to'
+                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
-        """)
+        """, [current_run_id(), current_run_id()])
         
         mapped_count = con.execute("SELECT COUNT(*) FROM observation").fetchone()[0]
         con.execute("COMMIT")

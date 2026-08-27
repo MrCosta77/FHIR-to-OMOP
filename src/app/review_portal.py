@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH
+from src.mapping.governance import review_mapping_decision
 
 # Web page configuration
 st.set_page_config(page_title="CMF - Human-in-the-Loop", page_icon="👩‍⚕️", layout="wide")
@@ -17,15 +18,16 @@ def get_pending_reviews():
     """Fetches all pending AI mappings from the database."""
     with duckdb.connect(DB_PATH) as con:
         query = """
-            SELECT MIN(provenance_id) AS provenance_id, target_table,
-                   source_value, normalized_value, assigned_concept_id,
-                   mapping_method, score, model_name,
-                   COUNT(DISTINCT target_id) AS affected_events
-            FROM mapping_provenance
-            WHERE reviewed_by = 'Pending_Human_Review'
-            GROUP BY target_table, source_value, normalized_value,
-                     assigned_concept_id, mapping_method, score, model_name
-            ORDER BY provenance_id DESC
+            SELECT d.mapping_decision_id, d.run_id, d.target_table,
+                   d.source_value, d.normalized_value, d.assigned_concept_id,
+                   d.mapping_method, d.score, d.model_name,
+                   COUNT(DISTINCT p.target_id) AS affected_events
+            FROM mapping_decision d
+            LEFT JOIN mapping_provenance p
+              ON p.mapping_decision_id = d.mapping_decision_id
+            WHERE d.status = 'PENDING'
+            GROUP BY ALL
+            ORDER BY d.proposed_at DESC, d.mapping_decision_id
         """
         return con.execute(query).df()
 
@@ -46,37 +48,19 @@ def get_metrics():
         rejected = mapping_count("Rejected_by_Human")
         return pending, approved, rejected
 
-def process_review(target_table, source_value, concept_id, action):
+def process_review(decision_id, action, reviewer, reason):
     """Updates the database based on the human curator's decision."""
     with duckdb.connect(DB_PATH) as con:
-        if action == "approve":
-            # UPDATE seguro sem f-strings
-            con.execute(
-                """UPDATE mapping_provenance
-                   SET reviewed_by = 'Approved_by_Human'
-                   WHERE target_table = ? AND source_value = ?
-                     AND assigned_concept_id = ?
-                     AND reviewed_by = 'Pending_Human_Review'""",
-                (target_table, source_value, int(concept_id))
-            )
-            st.toast(f"✅ Mapping '{source_value}' approved!")
-            
-        elif action == "reject":
-            # UPDATE seguro sem f-strings
-            con.execute(
-                """UPDATE mapping_provenance
-                   SET reviewed_by = 'Rejected_by_Human'
-                   WHERE target_table = ? AND source_value = ?
-                     AND assigned_concept_id = ?
-                     AND reviewed_by = 'Pending_Human_Review'""",
-                (target_table, source_value, int(concept_id))
-            )
-            st.toast(f"❌ Mapping '{source_value}' rejected.")
+        status = review_mapping_decision(
+            con, decision_id, action, reviewer, reason or None
+        )
+        st.toast(f"Decision recorded: {status}")
 
 # --- USER INTERFACE (UI) ---
 
 st.title("👩‍⚕️ Clinical Mapping - Human-in-the-Loop")
 st.markdown("Clinical Data Governance Platform. Review decisions made by the Artificial Intelligence Engine.")
+reviewer = st.text_input("Reviewer", placeholder="Full name")
 
 # Metrics Dashboard
 pending, approved, rejected = get_metrics()
@@ -130,17 +114,21 @@ else:
         
         # Action Buttons
         btn_col1, btn_col2 = col6.columns(2)
-        if btn_col1.button("✅ Approve", key=f"app_{row['provenance_id']}", use_container_width=True):
+        reason = st.text_input(
+            "Review reason (optional)",
+            key=f"reason_{row['mapping_decision_id']}",
+            label_visibility="collapsed",
+            placeholder="Reason / clinical rationale",
+        )
+        if btn_col1.button("✅ Approve", key=f"app_{row['mapping_decision_id']}", use_container_width=True):
             process_review(
-                row['target_table'], row['source_value'],
-                row['assigned_concept_id'], "approve"
+                row['mapping_decision_id'], "approve", reviewer, reason
             )
             st.rerun() # Refresh page automatically
             
-        if btn_col2.button("❌ Reject", key=f"rej_{row['provenance_id']}", type="primary", use_container_width=True):
+        if btn_col2.button("❌ Reject", key=f"rej_{row['mapping_decision_id']}", type="primary", use_container_width=True):
             process_review(
-                row['target_table'], row['source_value'],
-                row['assigned_concept_id'], "reject"
+                row['mapping_decision_id'], "reject", reviewer, reason
             )
             st.rerun() # Refresh page automatically
 

@@ -1,5 +1,6 @@
 """Cross-table OMOP acceptance checks for a locally published database."""
 
+import os
 from pathlib import Path
 
 import duckdb
@@ -54,6 +55,8 @@ CONCEPT_FIELDS = {
 @pytest.fixture(scope="module")
 def con():
     if not Path(DB_PATH).is_file():
+        if os.environ.get("CMF_REQUIRE_INTEGRATION") == "1":
+            pytest.fail(f"Required integration database is missing: {DB_PATH}")
         pytest.skip("Integration database is not present; run the pipeline first.")
     connection = duckdb.connect(DB_PATH, read_only=True)
     yield connection
@@ -118,11 +121,11 @@ def test_nonzero_target_concepts_are_current_standard_and_in_domain(con):
                   OR c.invalid_reason IS NOT NULL
                   OR COALESCE(
                       TRY_CAST(c.valid_end_date AS DATE),
-                      TRY_STRPTIME(c.valid_end_date, '%Y%m%d')::DATE
+                      TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE
                   ) IS NULL
                   OR COALESCE(
                       TRY_CAST(c.valid_end_date AS DATE),
-                      TRY_STRPTIME(c.valid_end_date, '%Y%m%d')::DATE
+                      TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE
                   ) < CURRENT_DATE
               )
         """, [expected_domain]).fetchone()[0]
@@ -153,6 +156,45 @@ def test_visit_links_reference_the_same_person_and_cover_event_date(con):
               )
         """).fetchone()[0]
         assert invalid == 0, f"{table}: {invalid} inconsistent visit links"
+
+
+def test_every_event_has_a_governed_visit_linkage_decision(con):
+    run_id = os.environ.get("CMF_RUN_ID")
+    if not run_id:
+        row = con.execute("""
+            SELECT run_id FROM etl_run
+            WHERE status = 'SUCCESS' ORDER BY completed_at DESC LIMIT 1
+        """).fetchone()
+        assert row, "No successful ETL run is available for linkage acceptance"
+        run_id = row[0]
+    for table, event_date in {
+        "condition_occurrence": "condition_start_date",
+        "drug_exposure": "drug_exposure_start_date",
+        "measurement": "measurement_date",
+        "observation": "observation_date",
+        "procedure_occurrence": "procedure_date",
+        "device_exposure": "device_exposure_start_date",
+    }.items():
+        id_column = TABLE_KEYS[table]
+        missing = con.execute(f"""
+            SELECT COUNT(*) FROM {table} event
+            WHERE NOT EXISTS (
+                SELECT 1 FROM event_visit_linkage audit
+                WHERE audit.target_table = ?
+                  AND audit.target_id = event.{id_column}
+                  AND audit.run_id = ?
+                  AND (
+                    (audit.link_status = 'LINKED'
+                     AND audit.reason_code IS NULL
+                     AND audit.visit_occurrence_id = event.visit_occurrence_id)
+                    OR
+                    (audit.link_status = 'QUARANTINED'
+                     AND audit.reason_code IS NOT NULL
+                     AND event.visit_occurrence_id IS NULL)
+                  )
+            )
+        """, [table, run_id]).fetchone()[0]
+        assert missing == 0, f"{table}: {missing} events lack a governed visit decision"
 
 
 def test_cross_domain_targets_are_not_left_as_concept_zero(con):

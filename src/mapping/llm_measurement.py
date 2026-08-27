@@ -47,15 +47,14 @@ def run_measurement_ai_mapping():
         retired = reconcile_resolved_proposals(con, "measurement")
         if retired:
             print(f"♻️ Retired {retired} proposals resolved deterministically.")
-        collection = setup_vector_store(con)
-        if collection.count() == 0:
-            print("❌ Vector store is empty. Skipping RAG mapping.")
-            return
-
         unmapped = get_unmapped_measurements(con)
         if not unmapped:
             print("✅ No unmapped measurements found. Skipping AI mapping.")
             return
+
+        collection = setup_vector_store(con)
+        if collection.count() == 0:
+            raise ValueError("LOINC vector store is empty.")
             
         print(f"⚠️ Found {len(unmapped)} UNIQUE legacy laboratory terms. Starting RAG pipeline...\n")
         
@@ -66,6 +65,7 @@ def run_measurement_ai_mapping():
         
         proposed_count = 0
         below_threshold_count = 0
+        processing_errors = []
         
         for idx, raw_term in enumerate(unmapped, 1):
             try:
@@ -75,6 +75,7 @@ def run_measurement_ai_mapping():
                 )
             except Exception as e:
                 print(f"[{idx}/{len(unmapped)}] ❌ Vector Search Error on '{raw_term}': {e}")
+                processing_errors.append((raw_term, "vector", str(e)))
                 continue
             
             if not search_results['ids'] or not search_results['ids'][0]:
@@ -136,12 +137,18 @@ def run_measurement_ai_mapping():
                     
             except Exception as e:
                 print(f"[{idx}/{len(unmapped)}] ❌ LLM Error on '{raw_term}': {e}")
+                processing_errors.append((raw_term, "llm", str(e)))
                 
         print(
             f"\n📊 SUMMARY: {proposed_count} proposals awaiting human review; "
             f"{below_threshold_count} candidates below the configured threshold; "
             f"{len(unmapped)} terms evaluated."
         )
+        if processing_errors:
+            raise RuntimeError(
+                f"Measurement mapping failed for {len(processing_errors)} term(s); "
+                "no partial run will be published."
+            )
 
 if __name__ == "__main__":
     run_measurement_ai_mapping()

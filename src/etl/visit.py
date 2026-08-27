@@ -11,7 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql
 
 # OMOP Standard Visit Concepts
 # FHIR Encounter class codes mapped to OMOP Concept IDs
@@ -34,9 +34,7 @@ def run_visit_etl():
     
     print("🔍 Extracting encounters from FHIR JSON files...")
     if not os.path.exists(FHIR_DIR):
-        print(f"⚠️ Warning: FHIR data directory not found at {FHIR_DIR}")
-        print("Please check your folder structure.")
-        return
+        raise FileNotFoundError(f"FHIR data directory not found: {FHIR_DIR}")
         
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
     
@@ -102,27 +100,8 @@ def run_visit_etl():
     print("🔌 Connecting to DuckDB for standardized insertion...")
     
     with duckdb.connect(DB_PATH) as con:
-        # Create table if it doesn't exist
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS visit_occurrence (
-                visit_occurrence_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                visit_concept_id INTEGER,
-                visit_start_date DATE,
-                visit_start_datetime TIMESTAMP,
-                visit_end_date DATE,
-                visit_end_datetime TIMESTAMP,
-                visit_type_concept_id INTEGER,
-                provider_id BIGINT,
-                care_site_id BIGINT,
-                visit_source_value VARCHAR,
-                visit_source_concept_id INTEGER
-            )
-        """)
-        ensure_table_columns(con, "visit_occurrence")
-        
-        # Clear existing data to maintain idempotency
-        con.execute("DELETE FROM visit_occurrence")
+        con.execute("DROP TABLE IF EXISTS visit_occurrence")
+        con.execute(create_table_sql("visit_occurrence"))
         
         # Bulk Insert
         if visit_records:

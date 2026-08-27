@@ -56,5 +56,25 @@ def test_dqd_runner_explicitly_uses_cdm_54_checks():
     worker = (analytics / "run_dqd_worker.R").read_text(encoding="utf-8")
     assert worker.count('cdmVersion = "5.4"') == 2
     assert 'run_worker("base"' in runner
-    assert 'run_worker("future_high"' in runner
+    assert 'run_worker("field_heavy"' in runner
+    assert '"measureValueCompleteness", "plausibleValueHigh"' in worker
+    assert "tablesToExclude" in worker
     assert "src.quality.merge_dqd_results" in runner
+
+
+def test_clinical_etls_create_tables_from_the_pinned_specification():
+    project = SPEC_PATH.parents[2]
+    modules = {
+        "person": "src/etl/person.py",
+        "visit_occurrence": "src/etl/visit.py",
+        "condition_occurrence": "src/etl/condition.py",
+        "drug_exposure": "src/etl/drug.py",
+        "measurement": "src/etl/measurement.py",
+        "observation": "src/etl/observation.py",
+        "procedure_occurrence": "src/etl/procedure.py",
+        "observation_period": "src/etl/observation_period.py",
+    }
+    for table, relative_path in modules.items():
+        source = (project / relative_path).read_text(encoding="utf-8")
+        assert f'create_table_sql("{table}")' in source
+        assert f"CREATE TABLE {table} (" not in source

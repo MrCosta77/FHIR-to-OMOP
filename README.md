@@ -6,7 +6,7 @@ An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. Th
 
 This project was built with strict adherence to clinical data management standards, focusing on determinism, auditability, and OHDSI conventions:
 
-1. **OMOP-Canonical Mapping (STCM):** AI-derived mappings are not forced directly into clinical event tables. Instead, they are written to the `source_to_concept_map` (STCM) dictionary. This isolates mapping decisions from clinical data, allowing for versioning, retraction, and human review.
+1. **OMOP-Canonical Mapping (STCM):** AI candidates are stored as proposals, not mappings. Only a named human approval publishes a candidate to `approved_mapping_set` and `source_to_concept_map`; pending and rejected candidates never enter the active mapping set.
 2. **Deterministic Tie-Breaking:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the official `Maps To` relationship and Domain routing.
 3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
 4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
@@ -18,7 +18,7 @@ Standard OMOP vocabularies handle the majority of clinical data, but real-world 
 
 1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies (e.g., LOINC) to retrieve the top 5 clinically valid candidates.
 2. **LLM Adjudication:** A local LLM evaluates the 5 candidates and selects the exact match or explicitly refuses (Returns 0), eliminating free-text hallucination.
-3. **Human-in-the-Loop (Streamlit):** Mappings are flagged as `Pending_Human_Review` in a `mapping_provenance` audit table. Curators use a Streamlit portal to Approve or Reject mappings.
+3. **Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model/prompt/vocabulary version, score and status. Curators record their name and optional rationale when approving or rejecting. Rejections become active policy and suppress identical future proposals.
 4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
 The retrieval layer is reproducible: the three active Chroma collections carry
@@ -29,22 +29,29 @@ embeddings. Few-shot examples use a stable order, candidate IDs are parsed by
 exact membership, and `SIMILARITY_THRESHOLD` is enforced before a proposal can
 enter the review queue.
 
-LLM candidates are recorded once per affected clinical event. They are never
-applied merely because they exist in STCM: `apply_stcm.py` requires matching
+LLM candidates are recorded once per affected clinical event. Approval validates
+that the target is a current Standard Concept in the required OMOP domain and
+then publishes the term to STCM. `apply_stcm.py` independently requires matching
 human-approved provenance, the correct domain-specific source vocabulary, a
-current Standard Concept, and valid STCM dates. Legacy `target_id=0` proposals
-are retained as superseded history rather than treated as active decisions.
+current Standard Concept, and valid STCM dates. Legacy proposals are migrated to
+decision records; pending legacy STCM rows are withdrawn, while historical
+`target_id=0` placeholders remain preserved as superseded audit data.
+
+Each orchestrated execution receives a `RUN-...` identifier and records the Git
+commit, SHA-256 input manifest, configuration, step status and error details in
+both `etl_run` and a local JSON manifest. Work happens against an isolated
+staging DuckDB. The published database is replaced only after every mandatory
+step and quality gate succeeds; failed staging databases are retained for
+forensic inspection and do not alter the last successful publication.
 
 ## 📊 Results & Validation
 
 ### 1. Mapping Accuracy (against seeded synthetic LIS noise)
-The architecture is explicitly designed to handle unstructured, legacy clinical text. To prove the efficacy of the RAG tier, the pipeline deliberately corrupts 10% of standard lab measurements into "Legacy LIS" formats (e.g., converting "Glucose [Mass/volume] in Blood" to "GLUCOSE RANDOM (LEGACY)"), maps them via AI, and evaluates against a strictly held ground-truth table.
-
-| Metric | Score | Description |
-| :--- | :--- | :--- |
-| **Coverage** | 97.11% | Proportion of dirty terms the AI successfully found a candidate for. |
-| **Precision** | 77.01% | Proportion of AI mappings that were exactly correct. |
-| **Recall** | 74.78% | Overall recovery rate of the corrupted dataset. |
+The optional benchmark corrupts a deterministic 10% slice of mapped laboratory
+measurements and stores the expected concepts in `lis_noise_ground_truth`.
+Coverage, precision and recall must be generated for a specific `run_id` with
+`src/analytics/evaluate_mapping_accuracy.py`; the repository does not present
+mutable, run-independent percentages as current evidence.
 
 ### 2. OHDSI Data Quality Dashboard (DQD)
 The resulting DuckDB instance is validated with the native R
@@ -52,14 +59,14 @@ The resulting DuckDB instance is validated with the native R
 the repository versions the executable check configuration and a human-reviewed
 acceptance policy instead of committing one favorable report. The Python gate
 requires zero DQD execution errors, rejects unknown or stale allowances, and
-enforces per-check row and percentage caps. The runner preserves all 55 DQD
+enforces per-check row and percentage caps. The runner preserves all DQD
 future-date evaluations while normalizing their threshold expression to native
-DuckDB SQL. It executes `plausibleValueHigh` in an isolated R process to avoid
-driver memory accumulation, verifies that the two check sets are disjoint, and
-merges them into one standard 1,983-check JSON without excluding or weakening
-any check. The final approved run completed 1,983 unique checks: 1,981 passed,
-2 reviewed exceptions, 0 execution errors (99.9% without failure). Conformance
-passed 1,060/1,060 checks, Completeness 110/110, and Plausibility 811/813.
+DuckDB SQL. It executes `plausibleValueHigh` and `measureValueCompleteness` in
+per-table isolated R processes to avoid driver memory accumulation, verifies
+that every shard is disjoint, and merges them without excluding or weakening
+any check. The repository does not commit local result JSON, so a fresh clone
+must generate a run-linked DQD report before making a quality claim about its
+published database.
 
 ### 3. Unit Mapping Contract
 
@@ -71,13 +78,45 @@ aliases are centralized in `src/utils/unit_mapping.py`; for example, FHIR
 Semantically incompatible code/unit pairs are retained in a traceable ETL
 quarantine rather than converted or silently published.
 
+### 4. Dirty Hospital Data Benchmark
+
+`benchmarks/dirty_hospital/` contains a versioned 100-case benchmark spanning
+Condition, Measurement, Procedure, Observation, and Drug. Its 60 development
+and 40 held-out cases have disjoint target concepts, and include coded input,
+Portuguese/mixed-language dirty text, local hospital codes, and explicit safe
+`ABSTAIN` cases. Labels are currently technical provisional curation and must
+not be represented as clinically validated until human review is recorded.
+
+Run the deterministic code-only baseline after building the Athena-backed DB:
+```bash
+python -m src.benchmark.evaluate_dirty_hospital --database data/omop_clinical.duckdb
+```
+The report records full provenance and separates accepted precision, mappable
+recall, false mappings, abstain accuracy, coverage, and overall accuracy. Local
+reports are written under ignored `benchmark_results/`.
+
+### 5. FHIR Encounter and Observation-Period Contract
+
+Clinical events use an explicit FHIR `Encounter/{id}` reference before any
+date-based matching. The reference must resolve to a visit for the same person
+and the event date must fall inside that visit. Temporal fallback is allowed
+only when no reference was supplied and exactly one visit covers the event;
+zero or multiple candidates remain unlinked and are written to
+`etl_quarantine`. Every outcome is recorded in `event_visit_linkage` as
+`FHIR_REFERENCE`, `TEMPORAL_FALLBACK`, or `UNRESOLVED` with its run ID.
+
+`OBSERVATION_PERIOD` uses encounter coverage when available and extends it only
+when clinical-event evidence falls outside that range. If no encounter exists,
+the event envelope is an explicit fallback. `observation_period_provenance`
+records the evidence bounds and derivation method for every run.
+
 ## 🛠️ Setup & Execution
 
 **1. Environment Setup**
 ```bash
 # Clone the repository
-git clone [https://github.com/your-username/Clinical-Mapping-Framework.git](https://github.com/your-username/Clinical-Mapping-Framework.git)
-cd Clinical-Mapping-Framework
+git clone https://github.com/MrCosta77/FHIR-to-OMOP.git
+cd FHIR-to-OMOP
 
 # Set up Python virtual environment
 python -m venv .venv
@@ -99,9 +138,15 @@ Any external FHIR bundle can be checked before ETL with
 `python -m src.quality.validate_fhir <bundle-or-directory>`.
 
 **2. Prerequisites**
-* Download the **OMOP Vocabularies** (v5.4) from [Athena](https://athena.ohdsi.org/) and place the CSV files in `data/omop_vocab/`.
-* Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `data/fhir_raw/`.
+* Download the **OMOP Vocabularies** from [Athena](https://athena.ohdsi.org/) and place `CONCEPT.csv`, `CONCEPT_RELATIONSHIP.csv`, `VOCABULARY.csv`, `DOMAIN.csv`, `CONCEPT_CLASS.csv` and `CONCEPT_ANCESTOR.csv` in `data/omop_vocab/`. Missing required files fail the run.
+* Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `synthea/output/fhir/`. Every bundle is contract-validated before clinical tables are rebuilt.
 * Ensure [Ollama](https://ollama.ai/) is installed and running locally with the target model: `ollama pull qwen2.5-coder:7b`
+
+Check all mandatory pipeline inputs and services before starting a run:
+```bash
+python -m src.quality.preflight
+```
+Add `--include-dqd` to also require `Rscript` for the official OHDSI DQD.
 
 **3. Run the Full Orchestrator**
 Executes the full pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ Era Derivation ➔ Tests ➔ Analytics).
@@ -109,6 +154,10 @@ Executes the full pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ E
 ```bash
 python main.py
 ```
+
+Successful publications are written to `data/omop_clinical.duckdb`. Run
+manifests are retained under `data/run_manifests/`; failed working databases are
+kept under `data/runs/` and can be removed after investigation.
 
 The first run after a vocabulary change can take considerably longer while
 active vector indexes are rebuilt. Progress is printed per 5,000 concepts and

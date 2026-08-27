@@ -9,30 +9,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH
+from src.mapping.governance import ensure_governance_tables
 
 def setup_audit_tables():
     print("⚙️ STARTING AUDIT & METADATA SETUP")
     print("-" * 50)
     
     with duckdb.connect(DB_PATH) as con:
-        # 1. Tabela de Proveniência
-        con.execute("CREATE SEQUENCE IF NOT EXISTS seq_provenance_id")
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS mapping_provenance (
-                provenance_id BIGINT DEFAULT nextval('seq_provenance_id') PRIMARY KEY,
-                target_table VARCHAR NOT NULL,
-                target_id BIGINT,
-                source_value VARCHAR NOT NULL,
-                normalized_value VARCHAR,
-                assigned_concept_id INTEGER,
-                mapping_method VARCHAR,
-                score DOUBLE,
-                model_name VARCHAR,
-                vocabulary_version VARCHAR,
-                reviewed_by VARCHAR DEFAULT 'Pending_Human_Review',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        # 1. Proveniência, execuções e decisões humanas
+        ensure_governance_tables(con)
         con.execute("""
             UPDATE mapping_provenance
             SET reviewed_by = 'Superseded_Legacy_Placeholder'
@@ -42,9 +27,8 @@ def setup_audit_tables():
         print("✅ 'mapping_provenance' table verified/created successfully!")
 
         # 3. TABELA CDM_SOURCE (Obrigatória para o OHDSI Data Quality Dashboard)
-        con.execute("DROP TABLE IF EXISTS cdm_source")
         con.execute("""
-            CREATE TABLE cdm_source (
+            CREATE TABLE IF NOT EXISTS cdm_source (
                 cdm_source_name VARCHAR(255) NOT NULL,
                 cdm_source_abbreviation VARCHAR(25) NOT NULL,
                 cdm_holder VARCHAR(255) NOT NULL,
@@ -69,6 +53,7 @@ def setup_audit_tables():
             pass # Ignora se a tabela vocabulary ainda não existir
 
         current_date = datetime.now().strftime('%Y-%m-%d')
+        con.execute("DELETE FROM cdm_source")
         
         con.execute("""
             INSERT INTO cdm_source (
@@ -82,7 +67,7 @@ def setup_audit_tables():
                 'Mario Costa',
                 'Synthetic patient records generated via Synthea and transformed into OMOP CDM.',
                 'https://github.com/synthetichealth/synthea',
-                'https://github.com/MarioCosta/Clinical-Mapping-Framework',
+                'https://github.com/MrCosta77/FHIR-to-OMOP',
                 ?, ?, '5.4', 756265, ?
             )
         """, (current_date, current_date, vocab_version))

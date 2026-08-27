@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
+from src.utils.helpers import normalise_fhir_reference
 
 
 CLINICAL_TYPES = {
@@ -28,6 +34,11 @@ def validate_bundle(path: Path) -> Counter:
     patients = {resource.get("id") for resource in resources if resource.get("resourceType") == "Patient"}
     patients.discard(None)
     _require(bool(patients), f"{path}: bundle has no Patient")
+    encounters = {
+        resource.get("id") for resource in resources
+        if resource.get("resourceType") == "Encounter"
+    }
+    encounters.discard(None)
 
     identities: set[tuple[str, str]] = set()
     counts: Counter = Counter()
@@ -44,6 +55,14 @@ def validate_bundle(path: Path) -> Counter:
             reference = resource.get("subject", {}).get("reference", "")
             subject_id = reference.rsplit("/", 1)[-1].replace("urn:uuid:", "")
             _require(subject_id in patients, f"{path}: unresolved subject reference {reference!r}")
+
+        encounter_reference = resource.get("encounter", {}).get("reference")
+        if encounter_reference:
+            encounter_id = normalise_fhir_reference(encounter_reference)
+            _require(
+                encounter_id in encounters,
+                f"{path}: unresolved Encounter reference {encounter_reference!r}",
+            )
 
         if resource_type in {"Condition", "Observation", "Procedure"}:
             codings = resource.get("code", {}).get("coding", [])

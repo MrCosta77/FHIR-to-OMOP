@@ -11,7 +11,8 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import ensure_table_columns
+from src.omop.cdm54 import create_table_sql, ensure_table_columns
+from src.mapping.governance import current_run_id
 
 def generate_procedure_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -86,26 +87,7 @@ def run_procedure_etl():
         con.execute("BEGIN TRANSACTION")
         con.execute("DROP TABLE IF EXISTS procedure_occurrence")
         
-        # OMOP 5.4 Procedure Occurrence Table
-        con.execute("""
-            CREATE TABLE procedure_occurrence (
-                procedure_occurrence_id BIGINT PRIMARY KEY,
-                person_id BIGINT,
-                procedure_concept_id INTEGER,
-                procedure_date DATE,
-                procedure_datetime TIMESTAMP,
-                procedure_type_concept_id INTEGER,
-                modifier_concept_id INTEGER,
-                quantity INTEGER,
-                provider_id BIGINT,
-                visit_occurrence_id BIGINT,
-                visit_detail_id BIGINT,
-                procedure_source_value VARCHAR,
-                procedure_source_concept_id INTEGER,
-                modifier_source_value VARCHAR
-            )
-        """)
-        ensure_table_columns(con, "procedure_occurrence")
+        con.execute(create_table_sql("procedure_occurrence"))
         
         con.execute("DROP TABLE IF EXISTS stg_procedure")
         con.execute("""
@@ -294,7 +276,7 @@ def run_procedure_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by
+                vocabulary_version, reviewed_by, run_id
             )
             SELECT 
                 'procedure_occurrence',
@@ -306,13 +288,18 @@ def run_procedure_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System'
+                'System',
+                ?
             FROM procedure_occurrence
             WHERE procedure_concept_id != 0
-            AND procedure_occurrence_id NOT IN (
-                SELECT target_id FROM mapping_provenance WHERE target_table = 'procedure_occurrence'
+            AND NOT EXISTS (
+                SELECT 1 FROM mapping_provenance p
+                WHERE p.target_table = 'procedure_occurrence'
+                  AND p.target_id = procedure_occurrence.procedure_occurrence_id
+                  AND p.mapping_method = 'deterministic_maps_to'
+                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
-        """)
+        """, [current_run_id(), current_run_id()])
 
         routed_provenance = (
             ('measurement', 'measurement_id', 'measurement_concept_id', 'Measurement'),
@@ -324,12 +311,12 @@ def run_procedure_etl():
                 INSERT INTO mapping_provenance (
                     target_table, target_id, source_value, normalized_value,
                     assigned_concept_id, mapping_method, score, model_name,
-                    vocabulary_version, reviewed_by
+                    vocabulary_version, reviewed_by, run_id
                 )
                 SELECT ?, event.{id_column}, stg.display_text,
                        stg.display_text, event.{concept_column},
                        'deterministic_maps_to_domain_routed', 1.0, 'N/A',
-                       'Athena_v5.4', 'System'
+                       'Athena_v5.4', 'System', ?
                 FROM {target_table} event
                 JOIN stg_procedure_routed stg
                   ON event.{id_column} = stg.procedure_occurrence_id
@@ -340,8 +327,9 @@ def run_procedure_etl():
                         AND p.target_id = event.{id_column}
                         AND p.assigned_concept_id = event.{concept_column}
                         AND p.mapping_method = 'deterministic_maps_to_domain_routed'
+                        AND COALESCE(p.run_id, '') = COALESCE(?, '')
                   )
-            """, [target_table, domain, target_table])
+            """, [target_table, current_run_id(), domain, target_table, current_run_id()])
         
         mapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0").fetchone()[0]

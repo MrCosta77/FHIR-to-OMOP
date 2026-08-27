@@ -53,14 +53,14 @@ def run_condition_ai_mapping():
         if retired:
             print(f"♻️ Retired {retired} proposals resolved deterministically.")
         
-        # 1. Setup Vector Store
-        collection = setup_vector_store(con)
-        
-        # 2. Get orphan terms
+        # Avoid building a large vector index when deterministic mapping has
+        # already resolved every source term.
         unique_terms = get_unmapped_conditions(con)
         if not unique_terms:
             print("✅ No unmapped conditions found! Database is fully normalized.")
             return
+
+        collection = setup_vector_store(con)
             
         total_terms = len(unique_terms)
         print(f"⚠️ Found {total_terms} UNIQUE unmapped terms. Starting RAG pipeline...\n")
@@ -72,6 +72,7 @@ def run_condition_ai_mapping():
         
         proposed_count = 0
         below_threshold_count = 0
+        processing_errors = []
         
         for idx, raw_term in enumerate(unique_terms, 1):
             try:
@@ -81,6 +82,7 @@ def run_condition_ai_mapping():
                 )
             except Exception as e:
                 print(f"[{idx}/{total_terms}] ❌ Vector Search Error on '{raw_term}': {e}")
+                processing_errors.append((raw_term, "vector", str(e)))
                 continue
             
             if not search_results['ids'] or not search_results['ids'][0]:
@@ -137,12 +139,18 @@ def run_condition_ai_mapping():
                     
             except Exception as e:
                 print(f"[{idx}/{total_terms}] ❌ LLM Error on '{raw_term}': {e}")
+                processing_errors.append((raw_term, "llm", str(e)))
                 
         print(
             f"\n📊 SUMMARY: {proposed_count} proposals awaiting human review; "
             f"{below_threshold_count} candidates below the configured threshold; "
             f"{total_terms} terms evaluated."
         )
+        if processing_errors:
+            raise RuntimeError(
+                f"Condition mapping failed for {len(processing_errors)} term(s); "
+                "no partial run will be published."
+            )
 
 if __name__ == "__main__":
     run_condition_ai_mapping()

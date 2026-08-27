@@ -157,10 +157,7 @@ def test_proposal_is_event_level_and_threshold_controls_stcm():
 
         assert (status, count) == ("Pending_Human_Review", 2)
         assert weak_status == "Below_Confidence_Threshold"
-        assert con.execute("""
-            SELECT source_vocabulary_id, target_concept_id
-            FROM source_to_concept_map
-        """).fetchall() == [("CMF_SYNTHEA_MEASUREMENT", 300)]
+        assert con.execute("SELECT COUNT(*) FROM source_to_concept_map").fetchone()[0] == 0
         assert con.execute("""
             SELECT target_id, reviewed_by FROM mapping_provenance
             ORDER BY target_id
@@ -170,6 +167,10 @@ def test_proposal_is_event_level_and_threshold_controls_stcm():
             (2, "Pending_Human_Review"),
             (3, "Below_Confidence_Threshold"),
         ]
+        assert con.execute("""
+            SELECT status FROM mapping_decision
+            WHERE target_table = 'measurement' AND source_value = 'Legacy'
+        """).fetchone()[0] == "PENDING"
 
 
 def test_deterministic_mapping_supersedes_pending_event_proposal():

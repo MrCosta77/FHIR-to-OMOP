@@ -1,0 +1,26 @@
+{
+  "benchmark": "dirty-hospital-to-omop",
+  "case_count": 100,
+  "clinical_validation_required": true,
+  "curation_status": "PROVISIONAL_TECHNICAL",
+  "decision_counts": {
+    "ABSTAIN": 25,
+    "MAP": 75
+  },
+  "domain_counts": {
+    "Condition": 20,
+    "Drug": 20,
+    "Measurement": 20,
+    "Observation": 20,
+    "Procedure": 20
+  },
+  "fixture": "cases.jsonl",
+  "fixture_sha256": "295cc7eaeed6a011e48e8d98b5ae4a5ea116437da452f2cb785e61362f1b5d9e",
+  "leakage_policy": "No family_id or expected concept_id may occur in both splits.",
+  "release_date": "2026-08-26",
+  "schema_version": "1.0.0",
+  "split_counts": {
+    "development": 60,
+    "held_out": 40
+  }
+}

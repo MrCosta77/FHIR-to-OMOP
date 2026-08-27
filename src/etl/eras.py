@@ -102,7 +102,8 @@ def _drug_era_sql() -> str:
                         exposure.drug_exposure_end_date,
                         CASE
                             WHEN exposure.days_supply > 0
-                            THEN exposure.drug_exposure_start_date + exposure.days_supply
+                            THEN exposure.drug_exposure_start_date
+                                 + CAST(exposure.days_supply AS INTEGER)
                             ELSE exposure.drug_exposure_start_date
                         END
                     ),
@@ -250,7 +251,8 @@ def _validate_staged_eras(con) -> None:
                         exposure.drug_exposure_end_date,
                         CASE
                             WHEN exposure.days_supply > 0
-                            THEN exposure.drug_exposure_start_date + exposure.days_supply
+                            THEN exposure.drug_exposure_start_date
+                                 + CAST(exposure.days_supply AS INTEGER)
                             ELSE exposure.drug_exposure_start_date
                         END
                     ),
