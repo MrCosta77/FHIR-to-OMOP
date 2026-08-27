@@ -54,3 +54,8 @@ python -m src.benchmark.evaluate_phase5 \
 The detailed local report retains per-case results for audit. A public summary
 may be generated with `--summary-output`; it excludes labels and local database
 paths. Held-out results must not be used to tune this protocol.
+
+Index preparation records the ONNX Runtime version and available execution
+providers. On Windows with a supported NVIDIA GPU, the optional
+`onnxruntime-gpu` package can accelerate the same Chroma default embedding model
+without changing the frozen semantic protocol.

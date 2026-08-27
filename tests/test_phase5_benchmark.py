@@ -110,7 +110,10 @@ def test_public_summary_drops_case_labels_and_local_database_path():
             "policy": {"held_out_adjustment_forbidden": True},
         },
         "selection": {"split": "held_out", "case_count": 1},
-        "provenance": {"database": "private-path", "git_commit": "abc"},
+        "provenance": {
+            "database": "private-path", "git_commit": "abc",
+            "onnxruntime": "1.28.0", "onnx_providers": ["CUDAExecutionProvider"],
+        },
         "index_preparation": {},
         "arms": {
             "arm": {
@@ -121,6 +124,7 @@ def test_public_summary_drops_case_labels_and_local_database_path():
     }
     summary = public_summary(report)
     assert "database" not in summary["provenance"]
+    assert summary["provenance"]["onnx_providers"] == ["CUDAExecutionProvider"]
     assert "cases" not in summary["arms"]["arm"]
     assert summary["clinical_validation_required"] is True
 

@@ -16,6 +16,7 @@ from typing import Callable
 
 import duckdb
 import ollama
+import onnxruntime
 
 from src.benchmark.evaluate_dirty_hospital import (
     deterministic_prediction,
@@ -564,6 +565,8 @@ def evaluate_phase5(
             "git_commit": _git_commit(),
             "python": platform.python_version(),
             "duckdb": duckdb.__version__,
+            "onnxruntime": onnxruntime.__version__,
+            "onnx_providers": onnxruntime.get_available_providers(),
             "prompt_version": PROMPT_VERSION,
             "generation_parameters": GENERATION_PARAMETERS,
             "ollama_timeout_seconds": OLLAMA_TIMEOUT_SECONDS,
