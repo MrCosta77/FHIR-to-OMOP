@@ -184,6 +184,12 @@ detetáveis por padrões continuam a exigir minimização/DLP upstream; o portal
 standalone não é autenticação. A calibração em development e os testes de escala
 continuam pendentes; as etiquetas permanecem `PROVISIONAL_TECHNICAL`.
 
+O marco 6C tem protocolo e runner development-only implementados: thresholds
+por domínio maximizam recall sob restrições pré-fixadas de pelo menos 95% de
+precisão aceite e zero false maps. O runner recusa split ou hash diferentes,
+mantém `deployment_authorized=false` e não altera a configuração de produção.
+Falta executar e registar esta calibração antes do teste de escala.
+
 ### Fase 7 — produto e portabilidade
 
 - Adicionar CI, `renv.lock`, licença, changelog e releases.

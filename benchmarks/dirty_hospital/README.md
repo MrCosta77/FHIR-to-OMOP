@@ -86,3 +86,17 @@ detailed report has SHA-256
 `737852f34c64bd6121d16d5ee9029e1e5f94fa9b62514877bbc2f7934ab3b797`;
 the generated public summary has SHA-256
 `e30082e546506ec826a831482e6182e645b794448a68f5444cffca686b4120de`.
+
+## Phase 6 development calibration
+
+`phase6_development_protocol.json` is restricted to the 60 development cases.
+It evaluates the research candidate `llama3.1:latest` and selects a provisional
+threshold separately for each domain by maximizing recall while requiring at
+least 95% accepted precision and zero false maps. The held-out split is never
+loaded into calibration, and selected values are not deployed without clinical
+validation.
+
+```bash
+python -m src.benchmark.calibrate_development \
+  --output benchmark_results/phase6_development.json
+```
