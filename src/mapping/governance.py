@@ -103,7 +103,17 @@ def ensure_governance_tables(con):
             review_reason VARCHAR
         )
     """)
-    _add_column(con, "mapping_decision", "prompt_version", "VARCHAR")
+    for name, datatype in (
+        ("prompt_version", "VARCHAR"),
+        ("llm_decision", "VARCHAR"),
+        ("llm_confidence", "DOUBLE"),
+        ("llm_reason", "VARCHAR"),
+        ("clinical_signals", "VARCHAR"),
+        ("model_digest", "VARCHAR"),
+        ("generation_parameters", "VARCHAR"),
+        ("index_signature", "VARCHAR"),
+    ):
+        _add_column(con, "mapping_decision", name, datatype)
     con.execute("""
         CREATE TABLE IF NOT EXISTS mapping_rejection_policy (
             target_table VARCHAR NOT NULL,
@@ -243,6 +253,13 @@ def register_decision(
     status,
     run_id=None,
     prompt_version="mapping-prompt-v1",
+    llm_decision=None,
+    llm_confidence=None,
+    llm_reason=None,
+    clinical_signals=None,
+    model_digest=None,
+    generation_parameters=None,
+    index_signature=None,
 ):
     ensure_governance_tables(con)
     run_id = run_id or current_run_id()
@@ -251,21 +268,32 @@ def register_decision(
         INSERT INTO mapping_decision (
             mapping_decision_id, run_id, target_table, source_value,
             normalized_value, assigned_concept_id, mapping_method, score,
-            model_name, prompt_version, vocabulary_version, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_name, prompt_version, vocabulary_version, status,
+            llm_decision, llm_confidence, llm_reason, clinical_signals,
+            model_digest, generation_parameters, index_signature
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (mapping_decision_id) DO UPDATE SET
             normalized_value = EXCLUDED.normalized_value,
             score = EXCLUDED.score,
             model_name = EXCLUDED.model_name,
             prompt_version = EXCLUDED.prompt_version,
             vocabulary_version = EXCLUDED.vocabulary_version,
+            llm_decision = EXCLUDED.llm_decision,
+            llm_confidence = EXCLUDED.llm_confidence,
+            llm_reason = EXCLUDED.llm_reason,
+            clinical_signals = EXCLUDED.clinical_signals,
+            model_digest = EXCLUDED.model_digest,
+            generation_parameters = EXCLUDED.generation_parameters,
+            index_signature = EXCLUDED.index_signature,
             status = CASE
                 WHEN mapping_decision.status IN ('APPROVED', 'REJECTED')
                 THEN mapping_decision.status ELSE EXCLUDED.status END
     """, [
         decision_id, run_id, target_table, source_value, normalized_value,
         int(concept_id), mapping_method, score, model_name,
-        prompt_version, vocabulary_version, status,
+        prompt_version, vocabulary_version, status, llm_decision,
+        llm_confidence, llm_reason, clinical_signals, model_digest,
+        generation_parameters, index_signature,
     ])
     return decision_id
 

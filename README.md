@@ -17,17 +17,23 @@ This project was built with strict adherence to clinical data management standar
 Standard OMOP vocabularies handle the majority of clinical data, but real-world data (like legacy LIS lab results) is messy. This framework uses a progressive retrieval-adjudication system:
 
 1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies (e.g., LOINC) to retrieve the top 5 clinically valid candidates.
-2. **LLM Adjudication:** A local LLM evaluates the 5 candidates and selects the exact match or explicitly refuses (Returns 0), eliminating free-text hallucination.
-3. **Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model/prompt/vocabulary version, score and status. Curators record their name and optional rationale when approving or rejecting. Rejections become active policy and suppress identical future proposals.
+2. **LLM Adjudication:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed.
+3. **Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Curators record their name and optional rationale when approving or rejecting. Rejections become active policy and suppress identical future proposals.
 4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
-The retrieval layer is reproducible: the three active Chroma collections carry
+The retrieval layer is reproducible: the configured Chroma collections for
+Condition, Drug, Measurement, and Procedure carry
 a fingerprint of the valid vocabulary/domain slice, index schema version,
 distance metric, and `build_complete` marker. Changed vocabularies trigger a
 resumable rebuild; matching legacy collections are adopted without recomputing
 embeddings. Few-shot examples use a stable order, candidate IDs are parsed by
 exact membership, and `SIMILARITY_THRESHOLD` is enforced before a proposal can
 enter the review queue.
+
+The four domain adapters share one governed semantic-mapping engine. Procedure
+fallback is restricted to current Standard SNOMED Procedure concepts; its LLM
+output is recorded only as an event-level proposal or abstention and never
+changes `PROCEDURE_OCCURRENCE` before named human approval.
 
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and

@@ -23,6 +23,7 @@ TARGETS = {
         "source_vocabulary": "CMF_SYNTHEA_CONDITION",
         "id_column": "condition_occurrence_id",
         "concept_column": "condition_concept_id",
+        "source_concept_column": "condition_source_concept_id",
         "source_column": "condition_source_value",
     },
     "drug_exposure": {
@@ -32,6 +33,7 @@ TARGETS = {
         "source_vocabulary": "CMF_SYNTHEA_DRUG",
         "id_column": "drug_exposure_id",
         "concept_column": "drug_concept_id",
+        "source_concept_column": "drug_source_concept_id",
         "source_column": "drug_source_value",
     },
     "measurement": {
@@ -41,7 +43,18 @@ TARGETS = {
         "source_vocabulary": "CMF_SYNTHEA_MEASUREMENT",
         "id_column": "measurement_id",
         "concept_column": "measurement_concept_id",
+        "source_concept_column": "measurement_source_concept_id",
         "source_column": "measurement_source_value",
+    },
+    "procedure_occurrence": {
+        "collection": "snomed_procedures",
+        "vocabulary": "SNOMED",
+        "domain": "Procedure",
+        "source_vocabulary": "CMF_SYNTHEA_PROCEDURE",
+        "id_column": "procedure_occurrence_id",
+        "concept_column": "procedure_concept_id",
+        "source_concept_column": "procedure_source_concept_id",
+        "source_column": "procedure_source_value",
     },
 }
 
@@ -205,7 +218,7 @@ def reconcile_resolved_proposals(con, target_table):
         JOIN {target_table} event
           ON event.{config['id_column']} = p.target_id
         WHERE p.target_table = ?
-          AND p.mapping_method = 'llm_rag_few_shot'
+          AND p.mapping_method IN ('llm_rag_few_shot', 'llm_rag_json')
           AND p.reviewed_by IN (
               'Pending_Human_Review', 'Below_Confidence_Threshold'
           )
@@ -218,7 +231,7 @@ def reconcile_resolved_proposals(con, target_table):
             FROM {target_table} event
             WHERE event.{config['id_column']} = p.target_id
               AND p.target_table = ?
-              AND p.mapping_method = 'llm_rag_few_shot'
+              AND p.mapping_method IN ('llm_rag_few_shot', 'llm_rag_json')
               AND p.reviewed_by IN (
                   'Pending_Human_Review', 'Below_Confidence_Threshold'
               )
@@ -246,12 +259,29 @@ def selected_candidate(search_results, answer, distance_metric="cosine"):
     return None
 
 
-def record_mapping_proposal(con, target_table, source_value, match):
+def _decision_metadata_kwargs(decision_metadata):
+    metadata = decision_metadata or {}
+    signals = metadata.get("clinical_signals")
+    parameters = metadata.get("generation_parameters")
+    return {
+        "prompt_version": metadata.get("prompt_version", "mapping-prompt-v1"),
+        "llm_decision": metadata.get("decision"),
+        "llm_confidence": metadata.get("confidence"),
+        "llm_reason": metadata.get("reason"),
+        "clinical_signals": json.dumps(signals, ensure_ascii=False) if signals is not None else None,
+        "model_digest": metadata.get("model_digest"),
+        "generation_parameters": json.dumps(parameters, sort_keys=True) if parameters is not None else None,
+        "index_signature": metadata.get("index_signature"),
+    }
+
+
+def record_mapping_proposal(con, target_table, source_value, match, decision_metadata=None):
     """Persist an event-level candidate without publishing it before review."""
     if not match:
         return "UNRESOLVED", 0
     concept_id, concept_name, _distance, score = match
     config = TARGETS[target_table]
+    mapping_method = "llm_rag_json" if decision_metadata else "llm_rag_few_shot"
     target_ids = [
         int(row[0])
         for row in con.execute(f"""
@@ -283,8 +313,9 @@ def record_mapping_proposal(con, target_table, source_value, match):
     }[review_status]
     decision_id = register_decision(
         con, target_table, source_value, concept_id, concept_name,
-        "llm_rag_few_shot", score, MODEL_NAME, vocabulary_version,
+        mapping_method, score, MODEL_NAME, vocabulary_version,
         decision_status,
+        **_decision_metadata_kwargs(decision_metadata),
     )
 
     # Remove the legacy term-level placeholder now that every affected event
@@ -293,9 +324,9 @@ def record_mapping_proposal(con, target_table, source_value, match):
         UPDATE mapping_provenance
         SET reviewed_by = 'Superseded_Legacy_Placeholder'
         WHERE target_table = ? AND source_value = ? AND target_id = 0
-          AND mapping_method = 'llm_rag_few_shot'
+          AND mapping_method = ?
           AND reviewed_by = 'Pending_Human_Review'
-    """, [target_table, source_value])
+    """, [target_table, source_value, mapping_method])
 
     for target_id in target_ids:
         con.execute("""
@@ -303,18 +334,64 @@ def record_mapping_proposal(con, target_table, source_value, match):
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
                 vocabulary_version, reviewed_by, run_id, mapping_decision_id
-            ) SELECT ?, ?, ?, ?, ?, 'llm_rag_few_shot', ?, ?, ?, ?, ?, ?
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
                 SELECT 1 FROM mapping_provenance
                 WHERE target_table = ? AND target_id = ?
                   AND assigned_concept_id = ?
-                  AND mapping_method = 'llm_rag_few_shot'
+                  AND mapping_method = ?
                   AND COALESCE(run_id, '') = COALESCE(?, '')
             )
         """, [
             target_table, target_id, source_value, concept_name, concept_id,
-            score, MODEL_NAME, vocabulary_version, review_status,
+            mapping_method, score, MODEL_NAME, vocabulary_version, review_status,
             current_run_id(), decision_id,
-            target_table, target_id, concept_id, current_run_id(),
+            target_table, target_id, concept_id, mapping_method, current_run_id(),
         ])
     return review_status, len(target_ids)
+
+
+def record_mapping_abstention(con, target_table, source_value, decision_metadata):
+    """Persist an event-level, non-publishable LLM abstention."""
+    config = TARGETS[target_table]
+    target_ids = [
+        int(row[0])
+        for row in con.execute(f"""
+            SELECT {config['id_column']}
+            FROM {target_table}
+            WHERE {config['concept_column']} = 0
+              AND {config['source_column']} = ?
+            ORDER BY {config['id_column']}
+        """, [source_value]).fetchall()
+    ]
+    vocabulary_version = con.execute("""
+        SELECT vocabulary_version FROM vocabulary
+        WHERE vocabulary_id = 'None' LIMIT 1
+    """).fetchone()
+    vocabulary_version = vocabulary_version[0] if vocabulary_version else "Unknown"
+    confidence = float(decision_metadata.get("confidence", 0.0))
+    decision_id = register_decision(
+        con, target_table, source_value, 0, None,
+        "llm_rag_json", confidence, MODEL_NAME, vocabulary_version,
+        "ABSTAINED", **_decision_metadata_kwargs(decision_metadata),
+    )
+    for target_id in target_ids:
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value, normalized_value,
+                assigned_concept_id, mapping_method, score, model_name,
+                vocabulary_version, reviewed_by, run_id, mapping_decision_id
+            ) SELECT ?, ?, ?, NULL, 0, 'llm_rag_json', ?, ?, ?,
+                     'LLM_ABSTAIN', ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM mapping_provenance
+                WHERE target_table = ? AND target_id = ?
+                  AND mapping_method = 'llm_rag_json'
+                  AND COALESCE(run_id, '') = COALESCE(?, '')
+            )
+        """, [
+            target_table, target_id, source_value, confidence, MODEL_NAME,
+            vocabulary_version, current_run_id(), decision_id,
+            target_table, target_id, current_run_id(),
+        ])
+    return "ABSTAINED", len(target_ids)
