@@ -184,11 +184,15 @@ detetáveis por padrões continuam a exigir minimização/DLP upstream; o portal
 standalone não é autenticação. A calibração em development e os testes de escala
 continuam pendentes; as etiquetas permanecem `PROVISIONAL_TECHNICAL`.
 
-O marco 6C tem protocolo e runner development-only implementados: thresholds
+O marco 6C está tecnicamente concluído: thresholds
 por domínio maximizam recall sob restrições pré-fixadas de pelo menos 95% de
 precisão aceite e zero false maps. O runner recusa split ou hash diferentes,
 mantém `deployment_authorized=false` e não altera a configuração de produção.
-Falta executar e registar esta calibração antes do teste de escala.
+A execução com Llama teve zero falhas de contrato, mas o top-5 recall foi apenas
+20% nos 30 fallbacks mapeáveis. O threshold provisório foi 0,70 para Condition e
+1,00 para Drug, Measurement, Observation e Procedure; estes quatro resultados
+não autorizam qualquer fallback semântico. Nenhum valor foi promovido. Falta o
+teste de escala para concluir os marcos técnicos internos da fase.
 
 ### Fase 7 — produto e portabilidade
 

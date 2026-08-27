@@ -100,3 +100,12 @@ validation.
 python -m src.benchmark.calibrate_development \
   --output benchmark_results/phase6_development.json
 ```
+
+The reproducible run from commit `37d0a97` processed 45 LLM fallbacks with zero
+contract failures. Retrieval found the expected concept in the top-5 for only
+6/30 mappable fallback cases (20%). The provisional safe thresholds were 0.70
+for Condition and 1.00 for Drug, Measurement, Observation and Procedure. The
+latter four therefore authorize no semantic fallback beyond deterministic exact
+mapping. These values are diagnostic and are not deployed. The local report
+SHA-256 is
+`0710b9b677e53b558421d16a5e4f4e8f468659fc640e4d6e7bdb1722ffddb314`.
