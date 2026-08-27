@@ -42,6 +42,8 @@ PIPELINE_STEPS = [
     {"name": "13. AI Semantic Mapping (Drugs)", "script": "src/mapping/llm_drug.py"},
     {"name": "14. AI Semantic Mapping (Measurements)", "script": "src/mapping/llm_measurement.py"},
     {"name": "14b. AI Semantic Mapping (Procedures)", "script": "src/mapping/llm_procedure.py"},
+    {"name": "14c. AI Semantic Mapping (Observations)", "script": "src/mapping/llm_observation.py"},
+    {"name": "14d. AI Semantic Mapping (Devices)", "script": "src/mapping/llm_device.py"},
     {"name": "15. Apply Approved Mappings", "script": "src/etl/apply_stcm.py"},
     {"name": "15b. Build Condition and Drug Eras", "script": "src/etl/eras.py"},
     {

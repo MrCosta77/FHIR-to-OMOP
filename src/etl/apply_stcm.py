@@ -14,7 +14,8 @@ TARGET_MAPPINGS = {
     'drug_exposure': ('drug_concept_id', 'drug_source_value', 'Drug', 'CMF_SYNTHEA_DRUG'),
     'measurement': ('measurement_concept_id', 'measurement_source_value', 'Measurement', 'CMF_SYNTHEA_MEASUREMENT'),
     'observation': ('observation_concept_id', 'observation_source_value', 'Observation', 'CMF_SYNTHEA_OBSERVATION'),
-    'procedure_occurrence': ('procedure_concept_id', 'procedure_source_value', 'Procedure', 'CMF_SYNTHEA_PROCEDURE')
+    'procedure_occurrence': ('procedure_concept_id', 'procedure_source_value', 'Procedure', 'CMF_SYNTHEA_PROCEDURE'),
+    'device_exposure': ('device_concept_id', 'device_source_value', 'Device', 'CMF_SYNTHEA_DEVICE')
 }
 
 def apply_stcm_mappings(db_path=DB_PATH):

@@ -95,10 +95,12 @@ Encounter, envelope de eventos e a combinação de ambos.
 Critério de saída: todos os domínios suportados usam o mesmo contrato de decisão
 e nenhuma mensagem promete um fallback inexistente.
 
-Estado técnico em 2026-08-27: o motor comum suporta Condition, Drug,
-Measurement e Procedure. Procedure usa retrieval limitado a conceitos SNOMED
-Standard do domínio correto e regista propostas por evento sem publicação
-automática. Observation e Device continuam pendentes para completar a fase.
+Estado técnico em 2026-08-27: concluído. O motor comum suporta Condition, Drug,
+Measurement, Procedure, Observation e Device. Procedure e Device usam retrieval
+SNOMED limitado ao domínio correto; Observation combina apenas conceitos
+Standard válidos de SNOMED e LOINC. Todas as propostas são registadas por evento
+sem publicação automática, e a aprovação humana preserva o vocabulário real do
+conceito selecionado.
 
 ### Fase 4 — contrato do LLM local
 
@@ -112,13 +114,12 @@ automática. Observation e Device continuam pendentes para completar a fase.
 
 Critério de saída: nenhuma resposta livre consegue alterar um mapping ou o CDM.
 
-Estado técnico em 2026-08-27: o contrato JSON `mapping-json-v2` está ativo nos
-quatro adaptadores configurados. IDs fora do top-k, campos adicionais, JSON
+Estado técnico em 2026-08-27: concluído. O contrato JSON `mapping-json-v2` está
+ativo nos seis adaptadores. IDs fora do top-k, campos adicionais, JSON
 inválido e combinações SELECT/ABSTAIN incoerentes falham fechadas. Confiança,
 motivo, sinais clínicos, digest do modelo, parâmetros de geração, versão do
-prompt e assinatura do índice ficam associados à decisão. A conclusão da fase
-depende de aplicar o mesmo contrato aos futuros adaptadores Observation e
-Device e de o validar experimentalmente no benchmark.
+prompt e assinatura do índice ficam associados à decisão. Timeout e limites de
+geração impedem bloqueio indefinido ou JSON truncado sem validação.
 
 ### Fase 5 — comparação experimental
 
@@ -179,6 +180,6 @@ prompts nem thresholds até existir esta medição independente.
 - Contrato, geração determinística, leakage e baseline cobertos por testes.
 
 As etiquetas permanecem `PROVISIONAL_TECHNICAL`; a revisão clínica documentada
-continua obrigatória antes de chamar ao conjunto “gold standard”. A Fase 2 está
-concluída. O marco atual é completar a Fase 3 com Observation e Device, sem usar
-o held-out para ajustar regras, prompts ou thresholds.
+continua obrigatória antes de chamar ao conjunto “gold standard”. As Fases 2,
+3 e 4 estão tecnicamente concluídas. O próximo marco é a comparação experimental
+da Fase 5, sem usar o held-out para ajustar regras, prompts ou thresholds.

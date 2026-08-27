@@ -12,6 +12,7 @@ TARGET_GOVERNANCE = {
     "measurement": ("CMF_SYNTHEA_MEASUREMENT", "LOINC", "Measurement"),
     "observation": ("CMF_SYNTHEA_OBSERVATION", "SNOMED", "Observation"),
     "procedure_occurrence": ("CMF_SYNTHEA_PROCEDURE", "SNOMED", "Procedure"),
+    "device_exposure": ("CMF_SYNTHEA_DEVICE", "SNOMED", "Device"),
 }
 
 
@@ -319,7 +320,7 @@ def review_mapping_decision(con, decision_id, action, reviewer, reason=None):
 
     if action == "APPROVE":
         valid = con.execute("""
-            SELECT COUNT(*) FROM concept
+            SELECT vocabulary_id FROM concept
             WHERE concept_id = ? AND domain_id = ? AND standard_concept = 'S'
               AND (invalid_reason IS NULL OR invalid_reason = '')
               AND CURRENT_DATE BETWEEN
@@ -327,11 +328,13 @@ def review_mapping_decision(con, decision_id, action, reviewer, reason=None):
                            TRY_STRPTIME(CAST(valid_start_date AS VARCHAR), '%Y%m%d')::DATE)
                   AND COALESCE(TRY_CAST(valid_end_date AS DATE),
                                TRY_STRPTIME(CAST(valid_end_date AS VARCHAR), '%Y%m%d')::DATE)
-        """, [int(concept_id), expected_domain]).fetchone()[0]
+            LIMIT 1
+        """, [int(concept_id), expected_domain]).fetchone()
         if not valid:
             raise ValueError(
                 f"Concept {concept_id} is not a current Standard {expected_domain} concept."
             )
+        target_vocabulary = valid[0]
 
     con.execute("BEGIN TRANSACTION")
     try:

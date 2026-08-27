@@ -30,10 +30,13 @@ embeddings. Few-shot examples use a stable order, candidate IDs are parsed by
 exact membership, and `SIMILARITY_THRESHOLD` is enforced before a proposal can
 enter the review queue.
 
-The four domain adapters share one governed semantic-mapping engine. Procedure
-fallback is restricted to current Standard SNOMED Procedure concepts; its LLM
-output is recorded only as an event-level proposal or abstention and never
-changes `PROCEDURE_OCCURRENCE` before named human approval.
+The six domain adapters share one governed semantic-mapping engine. Procedure
+and Device retrieval is restricted to current Standard SNOMED concepts in the
+required domain; Observation combines only current Standard SNOMED and LOINC
+Observation concepts. LLM output is recorded only as an event-level proposal
+or abstention and never changes a clinical table before named human approval.
+Approval preserves the selected concept's actual vocabulary rather than
+inferring it from the target table.
 
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and

@@ -60,7 +60,9 @@ def test_procedure_prompt_is_domain_locked():
     assert "observations or devices" in prompt
 
 
-@pytest.mark.parametrize("adapter", ["condition", "drug", "measurement", "procedure"])
+@pytest.mark.parametrize(
+    "adapter", ["condition", "drug", "measurement", "procedure", "observation", "device"]
+)
 def test_adapter_can_be_imported_as_a_direct_script_from_any_working_directory(
     adapter, tmp_path,
 ):
@@ -176,3 +178,52 @@ def test_procedure_adapter_persists_abstention_as_non_publishable(monkeypatch, t
         )
         assert con.execute("SELECT reviewed_by FROM mapping_provenance").fetchone()[0] == "LLM_ABSTAIN"
         assert con.execute("SELECT procedure_concept_id FROM procedure_occurrence").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("target_table", "ddl", "insert_sql"),
+    [
+        (
+            "observation",
+            """CREATE TABLE observation (
+                observation_id BIGINT, observation_concept_id INTEGER,
+                observation_source_concept_id INTEGER,
+                observation_source_value VARCHAR
+            )""",
+            "INSERT INTO observation VALUES (1, 0, 9001, 'legacy social observation')",
+        ),
+        (
+            "device_exposure",
+            """CREATE TABLE device_exposure (
+                device_exposure_id BIGINT, device_concept_id INTEGER,
+                device_source_concept_id INTEGER, device_source_value VARCHAR
+            )""",
+            "INSERT INTO device_exposure VALUES (1, 0, 9002, 'legacy implant')",
+        ),
+    ],
+)
+def test_new_domain_adapters_persist_safe_abstention(
+    monkeypatch, tmp_path, target_table, ddl, insert_sql,
+):
+    database = tmp_path / f"{target_table}.duckdb"
+    with duckdb.connect(str(database)) as con:
+        ensure_governance_tables(con)
+        con.execute("CREATE TABLE vocabulary (vocabulary_id VARCHAR, vocabulary_version VARCHAR)")
+        con.execute("INSERT INTO vocabulary VALUES ('None', 'v-test')")
+        con.execute(ddl)
+        con.execute(insert_sql)
+    monkeypatch.setattr(
+        "src.mapping.semantic_mapper.get_versioned_collection",
+        lambda con, path, target: _FakeCollection(),
+    )
+
+    result = run_semantic_mapping(
+        target_table, db_path=database, chroma_path=tmp_path,
+        client=_FakeOllama(_decision("ABSTAIN", None)),
+    )
+
+    assert result["abstentions"] == 1
+    with duckdb.connect(str(database), read_only=True) as con:
+        assert con.execute("SELECT target_table, status FROM mapping_decision").fetchone() == (
+            target_table, "ABSTAINED",
+        )

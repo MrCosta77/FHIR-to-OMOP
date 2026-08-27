@@ -56,6 +56,27 @@ TARGETS = {
         "source_concept_column": "procedure_source_concept_id",
         "source_column": "procedure_source_value",
     },
+    "observation": {
+        "collection": "standard_observations",
+        "vocabulary": "SNOMED+LOINC",
+        "vocabularies": ("SNOMED", "LOINC"),
+        "domain": "Observation",
+        "source_vocabulary": "CMF_SYNTHEA_OBSERVATION",
+        "id_column": "observation_id",
+        "concept_column": "observation_concept_id",
+        "source_concept_column": "observation_source_concept_id",
+        "source_column": "observation_source_value",
+    },
+    "device_exposure": {
+        "collection": "snomed_devices",
+        "vocabulary": "SNOMED",
+        "domain": "Device",
+        "source_vocabulary": "CMF_SYNTHEA_DEVICE",
+        "id_column": "device_exposure_id",
+        "concept_column": "device_concept_id",
+        "source_concept_column": "device_source_concept_id",
+        "source_column": "device_source_value",
+    },
 }
 
 
@@ -68,6 +89,8 @@ def _valid_date(field):
 
 def _vocabulary_stats(con, target_table):
     config = TARGETS[target_table]
+    vocabularies = config.get("vocabularies") or (config["vocabulary"],)
+    placeholders = ", ".join("?" for _ in vocabularies)
     start = _valid_date("valid_start_date")
     end = _valid_date("valid_end_date")
     return con.execute(f"""
@@ -76,19 +99,20 @@ def _vocabulary_stats(con, target_table):
                BIT_XOR(HASH(concept_id, concept_name, valid_start_date,
                             valid_end_date, invalid_reason))
         FROM concept
-        WHERE vocabulary_id = ? AND domain_id = ?
+        WHERE vocabulary_id IN ({placeholders}) AND domain_id = ?
           AND standard_concept = 'S'
           AND (invalid_reason IS NULL OR invalid_reason = '')
           AND CURRENT_DATE BETWEEN {start} AND {end}
-    """, [config["vocabulary"], config["domain"]]).fetchone()
+    """, [*vocabularies, config["domain"]]).fetchone()
 
 
 def vocabulary_signature(con, target_table):
     """Fingerprint the exact concept slice used to build a vector index."""
     config = TARGETS[target_table]
     row = _vocabulary_stats(con, target_table)
+    signature_vocabulary = config.get("vocabularies") or config["vocabulary"]
     payload = json.dumps(
-        [INDEX_SCHEMA_VERSION, config["vocabulary"], config["domain"], *row],
+        [INDEX_SCHEMA_VERSION, signature_vocabulary, config["domain"], *row],
         default=str,
         separators=(",", ":"),
     )
@@ -153,17 +177,19 @@ def get_versioned_collection(con, chroma_path, target_table):
         )
 
     if collection.count() < expected_count:
+        vocabularies = config.get("vocabularies") or (config["vocabulary"],)
+        placeholders = ", ".join("?" for _ in vocabularies)
         start = _valid_date("valid_start_date")
         end = _valid_date("valid_end_date")
         concepts = con.execute(f"""
             SELECT concept_id, concept_name
             FROM concept
-            WHERE vocabulary_id = ? AND domain_id = ?
+            WHERE vocabulary_id IN ({placeholders}) AND domain_id = ?
               AND standard_concept = 'S'
               AND (invalid_reason IS NULL OR invalid_reason = '')
               AND CURRENT_DATE BETWEEN {start} AND {end}
             ORDER BY CAST(concept_id AS BIGINT)
-        """, [config["vocabulary"], config["domain"]]).fetchall()
+        """, [*vocabularies, config["domain"]]).fetchall()
         existing_ids = set()
         if collection.count():
             existing_ids = set(collection.get(include=[])["ids"])

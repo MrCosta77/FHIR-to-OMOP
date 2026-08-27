@@ -66,6 +66,16 @@ DOMAIN_PROMPTS = {
         "role": "clinical procedure terminology specialist",
         "guidance": "Check action, anatomy, approach and intent; do not select observations or devices.",
     },
+    "observation": {
+        "label": "Standard Observation",
+        "role": "clinical observation terminology specialist",
+        "guidance": "Check the observed meaning and value context; do not select measurements, conditions or procedures.",
+    },
+    "device_exposure": {
+        "label": "SNOMED Device",
+        "role": "medical device terminology specialist",
+        "guidance": "Select only a concrete device concept; do not select implantation procedures or device findings.",
+    },
 }
 
 

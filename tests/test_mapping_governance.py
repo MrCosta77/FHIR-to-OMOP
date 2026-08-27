@@ -22,15 +22,18 @@ def _create_stcm(con):
 def _create_concepts(con):
     con.execute("""
         CREATE TABLE concept (
-            concept_id INTEGER, domain_id VARCHAR, standard_concept VARCHAR,
+            concept_id INTEGER, vocabulary_id VARCHAR, domain_id VARCHAR,
+            standard_concept VARCHAR,
             invalid_reason VARCHAR, valid_start_date VARCHAR,
             valid_end_date VARCHAR
         )
     """)
     con.execute("""
         INSERT INTO concept VALUES
-        (300, 'Measurement', 'S', NULL, '20200101', '20991231'),
-        (301, 'Condition', 'S', NULL, '20200101', '20991231')
+        (300, 'LOINC', 'Measurement', 'S', NULL, '20200101', '20991231'),
+        (301, 'SNOMED', 'Condition', 'S', NULL, '20200101', '20991231'),
+        (302, 'SNOMED', 'Device', 'S', NULL, '20200101', '20991231'),
+        (303, 'LOINC', 'Observation', 'S', NULL, '20200101', '20991231')
     """)
 
 
@@ -107,6 +110,52 @@ def test_wrong_domain_cannot_be_approved():
             assert "Standard Measurement" in str(exc)
         else:
             raise AssertionError("Cross-domain approval was accepted")
+
+
+def test_device_approval_publishes_only_to_the_device_source_vocabulary():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _create_stcm(con)
+        _create_concepts(con)
+        decision_id = register_decision(
+            con, "device_exposure", "Legacy implant", 302, "Implant",
+            "llm_rag_json", 0.95, "test-model", "v-test", "PENDING",
+            run_id="RUN-device", prompt_version="mapping-json-v2",
+            llm_decision="SELECT", llm_confidence=0.95,
+        )
+
+        review_mapping_decision(
+            con, decision_id, "APPROVE", "Device reviewer", "Verified device"
+        )
+
+        assert con.execute("""
+            SELECT source_vocabulary_id, target_vocabulary_id,
+                   target_concept_id
+            FROM source_to_concept_map
+        """).fetchone() == ("CMF_SYNTHEA_DEVICE", "SNOMED", 302)
+
+
+def test_observation_approval_preserves_the_concepts_actual_vocabulary():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _create_stcm(con)
+        _create_concepts(con)
+        decision_id = register_decision(
+            con, "observation", "Legacy observation", 303, "Observation",
+            "llm_rag_json", 0.95, "test-model", "v-test", "PENDING",
+            run_id="RUN-observation", prompt_version="mapping-json-v2",
+            llm_decision="SELECT", llm_confidence=0.95,
+        )
+
+        review_mapping_decision(
+            con, decision_id, "APPROVE", "Observation reviewer", "Verified"
+        )
+
+        assert con.execute("""
+            SELECT source_vocabulary_id, target_vocabulary_id,
+                   target_concept_id
+            FROM source_to_concept_map
+        """).fetchone() == ("CMF_SYNTHEA_OBSERVATION", "LOINC", 303)
 
 
 def test_legacy_pending_provenance_is_migrated_and_unpublished():

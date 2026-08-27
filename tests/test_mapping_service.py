@@ -2,6 +2,7 @@ import duckdb
 
 from src.etl.apply_stcm import apply_stcm_mappings
 from src.mapping.mapping_service import (
+    _vocabulary_stats,
     get_few_shot_prompt,
     get_versioned_collection,
     reconcile_resolved_proposals,
@@ -125,6 +126,28 @@ def test_stale_chroma_index_is_rebuilt(monkeypatch, tmp_path):
     assert collection.added == [("300", "Test measurement")]
 
 
+def test_observation_retrieval_combines_only_standard_snomed_and_loinc():
+    with duckdb.connect(":memory:") as con:
+        con.execute("""
+            CREATE TABLE concept (
+                concept_id INTEGER, concept_name VARCHAR, vocabulary_id VARCHAR,
+                domain_id VARCHAR, standard_concept VARCHAR,
+                invalid_reason VARCHAR, valid_start_date VARCHAR,
+                valid_end_date VARCHAR
+            )
+        """)
+        con.executemany("""
+            INSERT INTO concept VALUES (?, ?, ?, ?, ?, NULL, '19700101', '20991231')
+        """, [
+            (1, "SNOMED observation", "SNOMED", "Observation", "S"),
+            (2, "LOINC observation", "LOINC", "Observation", "S"),
+            (3, "Wrong domain", "SNOMED", "Condition", "S"),
+            (4, "Wrong vocabulary", "OMOP Extension", "Observation", "S"),
+        ])
+
+        assert _vocabulary_stats(con, "observation")[0] == 2
+
+
 def test_proposal_is_event_level_and_threshold_controls_stcm():
     with duckdb.connect(":memory:") as con:
         _create_stcm(con)
@@ -241,6 +264,7 @@ def test_stcm_application_requires_human_approval(tmp_path):
             ("measurement", "measurement_id", "measurement_concept_id", "measurement_source_value"),
             ("observation", "observation_id", "observation_concept_id", "observation_source_value"),
             ("procedure_occurrence", "procedure_occurrence_id", "procedure_concept_id", "procedure_source_value"),
+            ("device_exposure", "device_exposure_id", "device_concept_id", "device_source_value"),
         ]:
             con.execute(
                 f"CREATE TABLE {table} ({id_col} BIGINT, {concept_col} INTEGER, {source_col} VARCHAR)"
