@@ -24,6 +24,17 @@ def test_calibration_protocol_is_development_only():
     assert all(case["split"] == "development" for case in cases)
 
 
+def test_calibration_runner_records_reproducibility_provenance():
+    source = (
+        PROJECT_ROOT / "src" / "benchmark" / "calibrate_development.py"
+    ).read_text(encoding="utf-8")
+    for field in (
+        '"git_commit"', '"etl_run_id"', '"prompt_version"',
+        '"generation_parameters"',
+    ):
+        assert field in source
+
+
 def test_domain_threshold_selection_maximizes_recall_under_safety_constraints():
     cases = [
         {"case_id": "1", "split": "development", "domain": "Condition",

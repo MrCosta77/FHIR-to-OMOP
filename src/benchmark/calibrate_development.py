@@ -23,13 +23,18 @@ from src.benchmark.evaluate_phase5 import (
     DEFAULT_DATABASE,
     DEFAULT_FIXTURE,
     DOMAIN_TARGETS,
+    _git_commit,
     _model_digest,
     _target_quality,
     blind_inputs,
     llm_prediction,
 )
 from src.mapping.mapping_service import get_versioned_collection
-from src.mapping.semantic_mapper import OLLAMA_TIMEOUT_SECONDS
+from src.mapping.semantic_mapper import (
+    GENERATION_PARAMETERS,
+    OLLAMA_TIMEOUT_SECONDS,
+    PROMPT_VERSION,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -174,6 +179,10 @@ def calibrate(
         vocabulary_version = connection.execute(
             "SELECT vocabulary_version FROM cdm_source LIMIT 1"
         ).fetchone()
+        etl_run = connection.execute(
+            "SELECT run_id FROM etl_run WHERE status = 'SUCCESS' "
+            "ORDER BY completed_at DESC LIMIT 1"
+        ).fetchone()
 
     thresholds = select_domain_thresholds(
         cases, predictions, protocol["threshold_grid"],
@@ -205,6 +214,10 @@ def calibrate(
             "vocabulary_version": vocabulary_version[0] if vocabulary_version else None,
             "model": model,
             "model_digest": _model_digest(client, model),
+            "git_commit": _git_commit(),
+            "etl_run_id": etl_run[0] if etl_run else None,
+            "prompt_version": PROMPT_VERSION,
+            "generation_parameters": GENERATION_PARAMETERS,
         },
         "retrieval": {
             "fallback_mappable_cases": len(fallback_maps),
