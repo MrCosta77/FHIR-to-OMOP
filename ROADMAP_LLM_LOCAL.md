@@ -145,13 +145,19 @@ Medir por domínio:
 Critério de saída: escolha do modelo e threshold sustentada por resultados
 held-out, não por exemplos demonstrativos.
 
-Estado técnico em 2026-08-27: protocolo `phase5-v1` congelado antes da primeira
-execução held-out. O hash da fixture, os cinco braços, top-5, thresholds,
-parâmetros de geração, ausência de few-shot e proibição de ajuste pós-held-out
-ficam versionados. O runner cega `expected`, curadoria e família, mede métricas
-por domínio, top-k recall, curvas precisão-cobertura, calibração, erros de
-domínio/validade, tempo, memória e telemetria local dos modelos. A execução e a
-escolha experimental permanecem pendentes.
+Estado técnico em 2026-08-27: concluído para o protocolo `phase5-v1`. O runner
+cegou `expected`, curadoria e família e executou os cinco braços no held-out
+congelado. Ao threshold 0,90, baseline, embeddings, Qwen e Llama obtiveram 50%
+de accuracy, 25% de cobertura, 100% de precisão aceite e 33,3% de recall
+mapeável. Fuzzy atingiu 52,5% de accuracy e 30% de cobertura, mas com uma
+proposta errada. O top-5 recall dos embeddings foi 56,7% global e apenas 35%
+nos casos mapeáveis que exigiam fallback. Não houve erros de domínio, conceitos
+inválidos nem violações do contrato JSON. Qwen foi mais rápido (97,1 s contra
+105,9 s), mas absteve-se em todos os fallbacks; Llama mostrou maior utilidade na
+curva diagnóstica. A decisão governada é manter 0,90 e não promover qualquer
+ganho do LLM. Llama fica como candidato para calibração futura exclusivamente em
+development, depois de melhorar o retrieval; o held-out não será reutilizado
+para afinar o sistema.
 
 ### Fase 6 — revisão clínica, escala e privacidade
 
@@ -188,6 +194,6 @@ prompts nem thresholds até existir esta medição independente.
 - Contrato, geração determinística, leakage e baseline cobertos por testes.
 
 As etiquetas permanecem `PROVISIONAL_TECHNICAL`; a revisão clínica documentada
-continua obrigatória antes de chamar ao conjunto “gold standard”. As Fases 2,
-3 e 4 estão tecnicamente concluídas. O próximo marco é a comparação experimental
-da Fase 5, sem usar o held-out para ajustar regras, prompts ou thresholds.
+continua obrigatória antes de chamar ao conjunto “gold standard”. As Fases 2 a
+5 estão tecnicamente concluídas. O próximo marco é a Fase 6: revisão clínica,
+melhoria de retrieval em development, escala e controlos formais de privacidade.

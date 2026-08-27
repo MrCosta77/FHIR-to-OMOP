@@ -118,6 +118,15 @@ python -m src.benchmark.evaluate_phase5 \
 Do not use the held-out report to modify prompts or thresholds. Any future
 calibration belongs to development data and requires a new untouched test set.
 
+The frozen `phase5-v1` held-out run found no improvement over the deterministic
+baseline at the governed 0.90 threshold: baseline, embedding retrieval, Qwen
+and Llama all achieved 50% overall accuracy, 25% coverage and 100% accepted
+precision. Fuzzy matching reached 52.5% accuracy and 30% coverage but made one
+wrong mapping. Retrieval top-5 recall was 56.7% overall and only 35% among the
+20 mappable fallback cases, making retrieval the primary measured bottleneck.
+The versioned public summary retains the complete domain and operating-curve
+metrics; its labels remain `PROVISIONAL_TECHNICAL`.
+
 ### 5. FHIR Encounter and Observation-Period Contract
 
 Clinical events use an explicit FHIR `Encounter/{id}` reference before any

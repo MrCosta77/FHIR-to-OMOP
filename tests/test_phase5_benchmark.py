@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from src.benchmark.evaluate_phase5 import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
 PROTOCOL = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_protocol.json"
+SUMMARY = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_held_out_summary.json"
 
 
 def test_phase5_protocol_is_frozen_to_the_release_fixture():
@@ -134,3 +136,17 @@ def test_protocol_rejects_a_different_fixture(tmp_path):
     changed.write_bytes(FIXTURE.read_bytes() + b"\n")
     with pytest.raises(ValueError, match="Fixture hash"):
         load_protocol(PROTOCOL, changed)
+
+
+def test_versioned_phase5_result_is_case_free_and_matches_frozen_run():
+    text = SUMMARY.read_text(encoding="utf-8")
+    result = json.loads(text)
+    assert '"cases"' not in text
+    assert '"expected"' not in text
+    assert '"database"' not in text
+    assert result["selection"] == {"case_count": 40, "split": "held_out"}
+    assert result["provenance"]["git_commit"].startswith("b59e7c7")
+    assert result["arms"]["deterministic-code-only"]["metrics"]["overall_accuracy"] == 0.5
+    assert result["arms"]["fuzzy-lexical"]["metrics"]["wrong_map"] == 1
+    for name in ("retrieval-llm-qwen", "retrieval-llm-llama"):
+        assert result["arms"][name]["performance"]["contract_failures"] == 0

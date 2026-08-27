@@ -1,0 +1,1337 @@
+{
+  "arms": {
+    "deterministic-code-only": {
+      "by_domain": {
+        "Condition": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Drug": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Measurement": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Observation": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Procedure": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        }
+      },
+      "extended_metrics": {
+        "domain_errors": 0,
+        "expected_maps": 30,
+        "invalid_target_errors": 0,
+        "precision_coverage_curve": [
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.0
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.5
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.6
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.7
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.8
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.85
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.9
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.95
+          }
+        ],
+        "retrieval_by_domain": {
+          "Condition": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": null,
+            "top_k_recall": null
+          },
+          "Drug": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": null,
+            "top_k_recall": null
+          },
+          "Measurement": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": null,
+            "top_k_recall": null
+          },
+          "Observation": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": null,
+            "top_k_recall": null
+          },
+          "Procedure": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": null,
+            "top_k_recall": null
+          }
+        },
+        "score_calibration_bins": [
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.0,
+            "mean_score": null,
+            "upper": 0.6
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.6,
+            "mean_score": null,
+            "upper": 0.7
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.7,
+            "mean_score": null,
+            "upper": 0.8
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.8,
+            "mean_score": null,
+            "upper": 0.9
+          },
+          {
+            "accuracy": 1.0,
+            "count": 10,
+            "lower": 0.9,
+            "mean_score": 1.0,
+            "upper": 1.0
+          }
+        ],
+        "top_k_hits": null,
+        "top_k_recall": null
+      },
+      "metrics": {
+        "abstain_accuracy": 1.0,
+        "accepted": 10,
+        "accepted_precision": 1.0,
+        "correct": 20,
+        "correct_abstain": 10,
+        "correct_map": 10,
+        "coverage": 0.25,
+        "expected_abstain": 10,
+        "expected_map": 30,
+        "false_map": 0,
+        "mappable_recall": 0.3333333333333333,
+        "missed_map": 20,
+        "overall_accuracy": 0.5,
+        "total": 40,
+        "wrong_map": 0
+      },
+      "performance": {
+        "arm": "deterministic-code-only",
+        "elapsed_seconds": 0.4222950000548735,
+        "peak_python_memory_mb": 0.004454612731933594
+      }
+    },
+    "embedding-retrieval": {
+      "by_domain": {
+        "Condition": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Drug": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Measurement": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Observation": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Procedure": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        }
+      },
+      "extended_metrics": {
+        "domain_errors": 0,
+        "expected_maps": 30,
+        "invalid_target_errors": 0,
+        "precision_coverage_curve": [
+          {
+            "accepted_precision": 0.35,
+            "coverage": 1.0,
+            "false_maps": 10,
+            "mappable_recall": 0.4666666666666667,
+            "threshold": 0.0
+          },
+          {
+            "accepted_precision": 0.45161290322580644,
+            "coverage": 0.775,
+            "false_maps": 6,
+            "mappable_recall": 0.4666666666666667,
+            "threshold": 0.5
+          },
+          {
+            "accepted_precision": 0.5652173913043478,
+            "coverage": 0.575,
+            "false_maps": 4,
+            "mappable_recall": 0.43333333333333335,
+            "threshold": 0.6
+          },
+          {
+            "accepted_precision": 0.7857142857142857,
+            "coverage": 0.35,
+            "false_maps": 0,
+            "mappable_recall": 0.36666666666666664,
+            "threshold": 0.7
+          },
+          {
+            "accepted_precision": 0.8461538461538461,
+            "coverage": 0.325,
+            "false_maps": 0,
+            "mappable_recall": 0.36666666666666664,
+            "threshold": 0.8
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.85
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.9
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.95
+          }
+        ],
+        "retrieval_by_domain": {
+          "Condition": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          },
+          "Drug": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 5,
+            "top_k_recall": 0.8333333333333334
+          },
+          "Measurement": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Observation": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Procedure": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          }
+        },
+        "score_calibration_bins": [
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.0,
+            "mean_score": null,
+            "upper": 0.6
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.6,
+            "mean_score": null,
+            "upper": 0.7
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.7,
+            "mean_score": null,
+            "upper": 0.8
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.8,
+            "mean_score": null,
+            "upper": 0.9
+          },
+          {
+            "accuracy": 1.0,
+            "count": 10,
+            "lower": 0.9,
+            "mean_score": 1.0,
+            "upper": 1.0
+          }
+        ],
+        "top_k_hits": 17,
+        "top_k_recall": 0.5666666666666667
+      },
+      "metrics": {
+        "abstain_accuracy": 1.0,
+        "accepted": 10,
+        "accepted_precision": 1.0,
+        "correct": 20,
+        "correct_abstain": 10,
+        "correct_map": 10,
+        "coverage": 0.25,
+        "expected_abstain": 10,
+        "expected_map": 30,
+        "false_map": 0,
+        "mappable_recall": 0.3333333333333333,
+        "missed_map": 20,
+        "overall_accuracy": 0.5,
+        "total": 40,
+        "wrong_map": 0
+      },
+      "performance": {
+        "arm": "embedding-retrieval",
+        "elapsed_seconds": 17.802729699993506,
+        "peak_python_memory_mb": 0.9294567108154297
+      }
+    },
+    "fuzzy-lexical": {
+      "by_domain": {
+        "Condition": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Drug": {
+          "abstain_accuracy": 1.0,
+          "accepted": 4,
+          "accepted_precision": 0.75,
+          "correct": 5,
+          "correct_abstain": 2,
+          "correct_map": 3,
+          "coverage": 0.5,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.5,
+          "missed_map": 2,
+          "overall_accuracy": 0.625,
+          "total": 8,
+          "wrong_map": 1
+        },
+        "Measurement": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Observation": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Procedure": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        }
+      },
+      "extended_metrics": {
+        "domain_errors": 0,
+        "expected_maps": 30,
+        "invalid_target_errors": 0,
+        "precision_coverage_curve": [
+          {
+            "accepted_precision": 0.3,
+            "coverage": 1.0,
+            "false_maps": 10,
+            "mappable_recall": 0.4,
+            "threshold": 0.0
+          },
+          {
+            "accepted_precision": 0.3,
+            "coverage": 1.0,
+            "false_maps": 10,
+            "mappable_recall": 0.4,
+            "threshold": 0.5
+          },
+          {
+            "accepted_precision": 0.3,
+            "coverage": 1.0,
+            "false_maps": 10,
+            "mappable_recall": 0.4,
+            "threshold": 0.6
+          },
+          {
+            "accepted_precision": 0.3333333333333333,
+            "coverage": 0.9,
+            "false_maps": 8,
+            "mappable_recall": 0.4,
+            "threshold": 0.7
+          },
+          {
+            "accepted_precision": 0.41379310344827586,
+            "coverage": 0.725,
+            "false_maps": 3,
+            "mappable_recall": 0.4,
+            "threshold": 0.8
+          },
+          {
+            "accepted_precision": 0.6111111111111112,
+            "coverage": 0.45,
+            "false_maps": 1,
+            "mappable_recall": 0.36666666666666664,
+            "threshold": 0.85
+          },
+          {
+            "accepted_precision": 0.9166666666666666,
+            "coverage": 0.3,
+            "false_maps": 0,
+            "mappable_recall": 0.36666666666666664,
+            "threshold": 0.9
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.95
+          }
+        ],
+        "retrieval_by_domain": {
+          "Condition": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 3,
+            "top_k_recall": 0.5
+          },
+          "Drug": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 3,
+            "top_k_recall": 0.5
+          },
+          "Measurement": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Observation": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Procedure": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 3,
+            "top_k_recall": 0.5
+          }
+        },
+        "score_calibration_bins": [
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.0,
+            "mean_score": null,
+            "upper": 0.6
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.6,
+            "mean_score": null,
+            "upper": 0.7
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.7,
+            "mean_score": null,
+            "upper": 0.8
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.8,
+            "mean_score": null,
+            "upper": 0.9
+          },
+          {
+            "accuracy": 0.9166666666666666,
+            "count": 12,
+            "lower": 0.9,
+            "mean_score": 0.9867439598689599,
+            "upper": 1.0
+          }
+        ],
+        "top_k_hits": 13,
+        "top_k_recall": 0.43333333333333335
+      },
+      "metrics": {
+        "abstain_accuracy": 1.0,
+        "accepted": 12,
+        "accepted_precision": 0.9166666666666666,
+        "correct": 21,
+        "correct_abstain": 10,
+        "correct_map": 11,
+        "coverage": 0.3,
+        "expected_abstain": 10,
+        "expected_map": 30,
+        "false_map": 0,
+        "mappable_recall": 0.36666666666666664,
+        "missed_map": 18,
+        "overall_accuracy": 0.525,
+        "total": 40,
+        "wrong_map": 1
+      },
+      "performance": {
+        "arm": "fuzzy-lexical",
+        "elapsed_seconds": 2.04901910002809,
+        "peak_python_memory_mb": 0.028524398803710938
+      }
+    },
+    "retrieval-llm-llama": {
+      "by_domain": {
+        "Condition": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Drug": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Measurement": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Observation": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Procedure": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        }
+      },
+      "extended_metrics": {
+        "domain_errors": 0,
+        "expected_maps": 30,
+        "invalid_target_errors": 0,
+        "precision_coverage_curve": [
+          {
+            "accepted_precision": 0.45714285714285713,
+            "coverage": 0.875,
+            "false_maps": 7,
+            "mappable_recall": 0.5333333333333333,
+            "threshold": 0.0
+          },
+          {
+            "accepted_precision": 0.5555555555555556,
+            "coverage": 0.675,
+            "false_maps": 5,
+            "mappable_recall": 0.5,
+            "threshold": 0.5
+          },
+          {
+            "accepted_precision": 0.7368421052631579,
+            "coverage": 0.475,
+            "false_maps": 3,
+            "mappable_recall": 0.4666666666666667,
+            "threshold": 0.6
+          },
+          {
+            "accepted_precision": 0.9285714285714286,
+            "coverage": 0.35,
+            "false_maps": 0,
+            "mappable_recall": 0.43333333333333335,
+            "threshold": 0.7
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.3,
+            "false_maps": 0,
+            "mappable_recall": 0.4,
+            "threshold": 0.8
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.85
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.9
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.95
+          }
+        ],
+        "retrieval_by_domain": {
+          "Condition": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          },
+          "Drug": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 5,
+            "top_k_recall": 0.8333333333333334
+          },
+          "Measurement": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Observation": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Procedure": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          }
+        },
+        "score_calibration_bins": [
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.0,
+            "mean_score": null,
+            "upper": 0.6
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.6,
+            "mean_score": null,
+            "upper": 0.7
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.7,
+            "mean_score": null,
+            "upper": 0.8
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.8,
+            "mean_score": null,
+            "upper": 0.9
+          },
+          {
+            "accuracy": 1.0,
+            "count": 10,
+            "lower": 0.9,
+            "mean_score": 1.0,
+            "upper": 1.0
+          }
+        ],
+        "top_k_hits": 17,
+        "top_k_recall": 0.5666666666666667
+      },
+      "metrics": {
+        "abstain_accuracy": 1.0,
+        "accepted": 10,
+        "accepted_precision": 1.0,
+        "correct": 20,
+        "correct_abstain": 10,
+        "correct_map": 10,
+        "coverage": 0.25,
+        "expected_abstain": 10,
+        "expected_map": 30,
+        "false_map": 0,
+        "mappable_recall": 0.3333333333333333,
+        "missed_map": 20,
+        "overall_accuracy": 0.5,
+        "total": 40,
+        "wrong_map": 0
+      },
+      "performance": {
+        "arm": "retrieval-llm-llama",
+        "contract_failures": 0,
+        "elapsed_seconds": 105.9361598000396,
+        "eval_tokens": 3362,
+        "llm_calls": 30,
+        "llm_wall_seconds": 93.80585439957213,
+        "model": "llama3.1:latest",
+        "model_digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+        "ollama_total_duration_seconds": 93.7010627,
+        "peak_python_memory_mb": 1.077040672302246
+      }
+    },
+    "retrieval-llm-qwen": {
+      "by_domain": {
+        "Condition": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Drug": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Measurement": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Observation": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        },
+        "Procedure": {
+          "abstain_accuracy": 1.0,
+          "accepted": 2,
+          "accepted_precision": 1.0,
+          "correct": 4,
+          "correct_abstain": 2,
+          "correct_map": 2,
+          "coverage": 0.25,
+          "expected_abstain": 2,
+          "expected_map": 6,
+          "false_map": 0,
+          "mappable_recall": 0.3333333333333333,
+          "missed_map": 4,
+          "overall_accuracy": 0.5,
+          "total": 8,
+          "wrong_map": 0
+        }
+      },
+      "extended_metrics": {
+        "domain_errors": 0,
+        "expected_maps": 30,
+        "invalid_target_errors": 0,
+        "precision_coverage_curve": [
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.0
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.5
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.6
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.7
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.8
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.85
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.9
+          },
+          {
+            "accepted_precision": 1.0,
+            "coverage": 0.25,
+            "false_maps": 0,
+            "mappable_recall": 0.3333333333333333,
+            "threshold": 0.95
+          }
+        ],
+        "retrieval_by_domain": {
+          "Condition": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          },
+          "Drug": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 5,
+            "top_k_recall": 0.8333333333333334
+          },
+          "Measurement": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Observation": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 2,
+            "top_k_recall": 0.3333333333333333
+          },
+          "Procedure": {
+            "domain_errors": 0,
+            "expected_maps": 6,
+            "invalid_target_errors": 0,
+            "top_k_hits": 4,
+            "top_k_recall": 0.6666666666666666
+          }
+        },
+        "score_calibration_bins": [
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.0,
+            "mean_score": null,
+            "upper": 0.6
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.6,
+            "mean_score": null,
+            "upper": 0.7
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.7,
+            "mean_score": null,
+            "upper": 0.8
+          },
+          {
+            "accuracy": null,
+            "count": 0,
+            "lower": 0.8,
+            "mean_score": null,
+            "upper": 0.9
+          },
+          {
+            "accuracy": 1.0,
+            "count": 10,
+            "lower": 0.9,
+            "mean_score": 1.0,
+            "upper": 1.0
+          }
+        ],
+        "top_k_hits": 17,
+        "top_k_recall": 0.5666666666666667
+      },
+      "metrics": {
+        "abstain_accuracy": 1.0,
+        "accepted": 10,
+        "accepted_precision": 1.0,
+        "correct": 20,
+        "correct_abstain": 10,
+        "correct_map": 10,
+        "coverage": 0.25,
+        "expected_abstain": 10,
+        "expected_map": 30,
+        "false_map": 0,
+        "mappable_recall": 0.3333333333333333,
+        "missed_map": 20,
+        "overall_accuracy": 0.5,
+        "total": 40,
+        "wrong_map": 0
+      },
+      "performance": {
+        "arm": "retrieval-llm-qwen",
+        "contract_failures": 0,
+        "elapsed_seconds": 97.0787302000681,
+        "eval_tokens": 3648,
+        "llm_calls": 30,
+        "llm_wall_seconds": 82.78576630027965,
+        "model": "qwen2.5-coder:7b",
+        "model_digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+        "ollama_total_duration_seconds": 82.6529352,
+        "peak_python_memory_mb": 1.1986885070800781
+      }
+    }
+  },
+  "benchmark": "dirty-hospital-to-omop",
+  "clinical_validation_required": true,
+  "curation_status": "PROVISIONAL_TECHNICAL",
+  "evaluator": {
+    "name": "phase5-comparison",
+    "version": "1.0.0"
+  },
+  "generated_at": "2026-08-27T14:03:05.318143+00:00",
+  "index_preparation": {
+    "collections": {
+      "Condition": {
+        "count": 105324,
+        "signature": "786fadd57aeafcffb637987626a450447dac283bd9c18d353f3f3eacb687771a"
+      },
+      "Drug": {
+        "count": 157190,
+        "signature": "1f96669038a91454c39c624d2687aa9c710184487ca8e71ea55b05fd50f545b2"
+      },
+      "Measurement": {
+        "count": 68106,
+        "signature": "dc6b61f469230332e4a8b6a386f3adf605b39122f86b0bad6b5c5639cc71cd12"
+      },
+      "Observation": {
+        "count": 129490,
+        "signature": "c1608f2d78470a36bbd98bb2ea121020144e407b105cd4fb3638825f045c966b"
+      },
+      "Procedure": {
+        "count": 48344,
+        "signature": "7dc2e5341064169c104903273e9fccbfce17e51d9d0374cd695c93d151777ad7"
+      }
+    },
+    "elapsed_seconds": 928.5755280000158
+  },
+  "protocol": {
+    "fixture_sha256": "295cc7eaeed6a011e48e8d98b5ae4a5ea116437da452f2cb785e61362f1b5d9e",
+    "policy": {
+      "deterministic_exact_first": true,
+      "few_shot_examples": "none",
+      "held_out_adjustment_forbidden": true,
+      "labels": "PROVISIONAL_TECHNICAL",
+      "publication": "benchmark predictions never update OMOP or STCM"
+    },
+    "protocol_version": "phase5-v1"
+  },
+  "provenance": {
+    "duckdb": "1.5.5",
+    "etl_run_id": "RUN-20260827T130150Z-9a082c8e",
+    "fixture_sha256": "295cc7eaeed6a011e48e8d98b5ae4a5ea116437da452f2cb785e61362f1b5d9e",
+    "generation_parameters": {
+      "num_predict": 512,
+      "seed": 0,
+      "temperature": 0.0
+    },
+    "git_commit": "b59e7c7dd4fda91d597dd81c498c8d7b4449e3ee",
+    "ollama_timeout_seconds": 120.0,
+    "onnx_providers": [
+      "DmlExecutionProvider",
+      "CPUExecutionProvider"
+    ],
+    "onnxruntime": "1.24.4",
+    "prompt_version": "mapping-json-v2",
+    "protocol_sha256": "7baff5455bc9e33907a31a14e91d2de97ec7ecfb65813c4974e167c4a96d2180",
+    "python": "3.12.10",
+    "vocabulary_version": "v5.0 27-FEB-26"
+  },
+  "selection": {
+    "case_count": 40,
+    "split": "held_out"
+  }
+}
