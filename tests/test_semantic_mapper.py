@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -11,6 +15,9 @@ from src.mapping.semantic_mapper import (
     run_semantic_mapping,
 )
 from src.utils.config import MODEL_NAME
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _decision(decision="SELECT", concept_id=1004):
@@ -51,6 +58,27 @@ def test_procedure_prompt_is_domain_locked():
     assert "Target domain: Procedure" in prompt
     assert "Never invent an ID" in prompt
     assert "observations or devices" in prompt
+
+
+@pytest.mark.parametrize("adapter", ["condition", "drug", "measurement", "procedure"])
+def test_adapter_can_be_imported_as_a_direct_script_from_any_working_directory(
+    adapter, tmp_path,
+):
+    script = PROJECT_ROOT / "src" / "mapping" / f"llm_{adapter}.py"
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    subprocess.run(
+        [
+            sys.executable, "-c",
+            "import runpy; "
+            f"runpy.run_path({str(script)!r}, run_name='adapter_import_test')",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 class _FakeCollection:
