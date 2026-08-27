@@ -56,6 +56,6 @@ may be generated with `--summary-output`; it excludes labels and local database
 paths. Held-out results must not be used to tune this protocol.
 
 Index preparation records the ONNX Runtime version and available execution
-providers. On Windows with a supported NVIDIA GPU, the optional
-`onnxruntime-gpu` package can accelerate the same Chroma default embedding model
-without changing the frozen semantic protocol.
+providers. On Windows, the optional `onnxruntime-directml` package can
+accelerate the same Chroma default embedding model through DirectML without a
+separate CUDA toolkit and without changing the frozen semantic protocol.
