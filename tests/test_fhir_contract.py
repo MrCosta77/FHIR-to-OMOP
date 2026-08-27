@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.quality.validate_fhir import validate_bundle
+from src.quality.validate_fhir import validate_bundle, validate_directory
 from src.etl.condition import extract_conditions
 from src.etl.drug import extract_drugs
 from src.etl.measurement import extract_measurements
@@ -21,6 +21,38 @@ def test_golden_fhir_bundle_has_stable_resource_contract():
         "Patient": 1, "Encounter": 1, "Condition": 1, "Observation": 2,
         "Medication": 1, "MedicationRequest": 1, "Procedure": 1,
     }
+
+
+def test_directory_accepts_named_synthea_auxiliary_bundle(tmp_path):
+    patient_bundle = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    (tmp_path / "patient.json").write_text(json.dumps(patient_bundle), encoding="utf-8")
+    auxiliary = {
+        "resourceType": "Bundle",
+        "type": "batch",
+        "entry": [{"resource": {"resourceType": "Organization", "id": "org-1"}}],
+    }
+    (tmp_path / "hospitalInformation123.json").write_text(
+        json.dumps(auxiliary), encoding="utf-8"
+    )
+
+    counts = validate_directory(tmp_path)
+
+    assert counts["Patient"] == 1
+    assert counts["Organization"] == 1
+
+
+def test_unnamed_bundle_without_patient_remains_invalid(tmp_path):
+    path = tmp_path / "clinical.json"
+    path.write_text(
+        json.dumps({
+            "resourceType": "Bundle",
+            "entry": [{"resource": {"resourceType": "Organization", "id": "org-1"}}],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="bundle has no Patient"):
+        validate_directory(tmp_path)
 
 
 def _mutated_bundle(tmp_path, mutate):

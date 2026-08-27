@@ -1,4 +1,5 @@
 import json
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -9,7 +10,9 @@ from src.benchmark.evaluate_dirty_hospital import evaluate, load_cases, score_pr
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
-DATABASE = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
+DATABASE = Path(
+    os.environ.get("CMF_DB_PATH", PROJECT_ROOT / "data" / "omop_clinical.duckdb")
+)
 
 
 def test_release_fixture_contract_and_no_split_leakage():

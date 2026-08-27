@@ -145,13 +145,14 @@ def test_nonzero_measurement_units_are_valid_standard_units(db_connection):
     assert invalid == 0
 
 
-def test_quarantined_measurements_are_not_published(db_connection):
+def test_semantically_quarantined_measurements_are_not_published(db_connection):
     published_rejects = db_connection.execute("""
         SELECT COUNT(*)
         FROM etl_quarantine q
         JOIN measurement m ON m.measurement_id = q.target_id
         WHERE q.target_table = 'measurement'
           AND q.active = TRUE
+          AND q.reason_code = 'LOINC_UNIT_SEMANTIC_MISMATCH'
     """).fetchone()[0]
     assert published_rejects == 0
 

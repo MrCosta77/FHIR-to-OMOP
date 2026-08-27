@@ -17,6 +17,7 @@ from src.utils.helpers import normalise_fhir_reference
 CLINICAL_TYPES = {
     "Condition", "Encounter", "MedicationRequest", "Observation", "Procedure"
 }
+AUXILIARY_BUNDLE_PREFIXES = ("hospitalInformation", "practitionerInformation")
 
 
 def _require(condition: bool, message: str) -> None:
@@ -24,7 +25,7 @@ def _require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
-def validate_bundle(path: Path) -> Counter:
+def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
     bundle = json.loads(Path(path).read_text(encoding="utf-8"))
     _require(bundle.get("resourceType") == "Bundle", f"{path}: resourceType must be Bundle")
     entries = bundle.get("entry")
@@ -33,7 +34,8 @@ def validate_bundle(path: Path) -> Counter:
     resources = [entry.get("resource", {}) for entry in entries]
     patients = {resource.get("id") for resource in resources if resource.get("resourceType") == "Patient"}
     patients.discard(None)
-    _require(bool(patients), f"{path}: bundle has no Patient")
+    if require_patient:
+        _require(bool(patients), f"{path}: bundle has no Patient")
     encounters = {
         resource.get("id") for resource in resources
         if resource.get("resourceType") == "Encounter"
@@ -81,7 +83,8 @@ def validate_directory(directory: Path) -> Counter:
     _require(bool(paths), f"No FHIR JSON bundles found in {directory}")
     total: Counter = Counter()
     for path in paths:
-        total.update(validate_bundle(path))
+        is_auxiliary = path.name.startswith(AUXILIARY_BUNDLE_PREFIXES)
+        total.update(validate_bundle(path, require_patient=not is_auxiliary))
     return total
 
 
