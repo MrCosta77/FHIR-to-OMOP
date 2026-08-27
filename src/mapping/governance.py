@@ -6,6 +6,8 @@ import os
 import uuid
 from collections import Counter, defaultdict
 
+from src.security.privacy import audit_security_event, authorize_actor
+
 
 TARGET_GOVERNANCE = {
     "condition_occurrence": ("CMF_SYNTHEA_CONDITION", "SNOMED", "Condition"),
@@ -331,6 +333,7 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     reviewer = reviewer.strip()
     if not reviewer:
         raise ValueError("A reviewer name is required.")
+    reviewer = authorize_actor(reviewer, "reviewer")
     rationale = (rationale or "").strip()
     if not rationale:
         raise ValueError("A clinical rationale is required.")
@@ -360,6 +363,10 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
             review_id, mapping_decision_id, reviewer, verdict, rationale
         ) VALUES (?, ?, ?, ?, ?)
     """, [str(uuid.uuid4()), decision_id, reviewer, action, rationale])
+    audit_security_event(
+        con, "CLINICAL_MAPPING_REVIEW", reviewer, "RECORDED",
+        {"mapping_decision_id": decision_id, "verdict": action},
+    )
     count = existing + 1
     return {
         "mapping_decision_id": decision_id,
@@ -373,6 +380,7 @@ def blinded_review_queue(con, reviewer):
     reviewer = (reviewer or "").strip()
     if not reviewer:
         raise ValueError("A reviewer name is required.")
+    reviewer = authorize_actor(reviewer, "reviewer")
     ensure_governance_tables(con)
     columns = [
         "mapping_decision_id", "run_id", "target_table", "source_value",
@@ -400,7 +408,12 @@ def blinded_review_queue(con, reviewer):
         GROUP BY ALL
         ORDER BY MIN(d.proposed_at), d.mapping_decision_id
     """, [reviewer]).fetchall()
-    return [dict(zip(columns, row, strict=True)) for row in rows]
+    result = [dict(zip(columns, row, strict=True)) for row in rows]
+    audit_security_event(
+        con, "CLINICAL_REVIEW_QUEUE_ACCESS", reviewer, "ALLOWED",
+        {"role": "reviewer", "result_count": len(result)},
+    )
+    return result
 
 
 def blinded_adjudication_queue(con, adjudicator):
@@ -408,6 +421,7 @@ def blinded_adjudication_queue(con, adjudicator):
     adjudicator = (adjudicator or "").strip()
     if not adjudicator:
         raise ValueError("An adjudicator name is required.")
+    adjudicator = authorize_actor(adjudicator, "adjudicator")
     ensure_governance_tables(con)
     columns = [
         "mapping_decision_id", "run_id", "target_table", "source_value",
@@ -439,7 +453,12 @@ def blinded_adjudication_queue(con, adjudicator):
         HAVING COUNT(DISTINCT r.review_id) >= 2
         ORDER BY MIN(d.proposed_at), d.mapping_decision_id
     """, [adjudicator]).fetchall()
-    return [dict(zip(columns, row, strict=True)) for row in rows]
+    result = [dict(zip(columns, row, strict=True)) for row in rows]
+    audit_security_event(
+        con, "CLINICAL_REVIEW_QUEUE_ACCESS", adjudicator, "ALLOWED",
+        {"role": "adjudicator", "result_count": len(result)},
+    )
+    return result
 
 
 def adjudicate_mapping_decision(
@@ -452,6 +471,7 @@ def adjudicate_mapping_decision(
     adjudicator = adjudicator.strip()
     if not adjudicator:
         raise ValueError("An adjudicator name is required.")
+    adjudicator = authorize_actor(adjudicator, "adjudicator")
     rationale = (rationale or "").strip()
     if not rationale:
         raise ValueError("An adjudication rationale is required.")
@@ -485,6 +505,14 @@ def adjudicate_mapping_decision(
             str(uuid.uuid4()), decision_id, adjudicator, action, rationale,
             unanimous,
         ])
+        audit_security_event(
+            con, "CLINICAL_MAPPING_ADJUDICATION", adjudicator, status,
+            {
+                "mapping_decision_id": decision_id,
+                "final_action": action,
+                "unanimous": unanimous,
+            },
+        )
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")

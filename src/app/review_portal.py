@@ -1,5 +1,6 @@
 """Blinded two-review and adjudication portal for governed OMOP mappings."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -132,7 +133,13 @@ st.caption(
     "Two independent reviews are required. Reviewers never see peer votes; "
     "a distinct adjudicator is the only person who can publish or reject a mapping."
 )
-identity = st.text_input("Named reviewer/adjudicator", placeholder="Full professional name")
+authenticated_identity = os.environ.get("CMF_AUTHENTICATED_USER", "").strip()
+identity = st.text_input(
+    "Named reviewer/adjudicator",
+    value=authenticated_identity,
+    disabled=bool(authenticated_identity),
+    placeholder="Full professional name",
+)
 
 pending, ready, approved, rejected, agreement = get_dashboard_metrics()
 metric_columns = st.columns(5)

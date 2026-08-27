@@ -17,7 +17,13 @@ from src.mapping.mapping_service import (
     record_mapping_proposal,
     selected_candidate,
 )
-from src.utils.config import DB_PATH, MODEL_NAME
+from src.mapping.governance import current_run_id
+from src.security.privacy import (
+    audit_security_event,
+    redact_direct_identifiers,
+    validate_privacy_runtime,
+)
+from src.utils.config import DB_PATH, MODEL_NAME, OLLAMA_URL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -195,7 +201,11 @@ def run_semantic_mapping(
     """Run one governed domain adapter without publishing any mapping."""
     if target_table not in DOMAIN_PROMPTS:
         raise ValueError(f"Unsupported semantic mapping target: {target_table}")
-    client = client or ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
+    privacy = validate_privacy_runtime(OLLAMA_URL)
+    client = client or ollama.Client(
+        host=OLLAMA_URL.rsplit("/api/", 1)[0],
+        timeout=OLLAMA_TIMEOUT_SECONDS,
+    )
     config = TARGETS[target_table]
     result = {"target_table": target_table, "terms": 0, "proposals": 0, "abstentions": 0}
     print(f"STARTING GOVERNED LOCAL-LLM MAPPING: {target_table}")
@@ -227,7 +237,8 @@ def run_semantic_mapping(
                 {"concept_id": int(concept_id), "concept_name": documents[index]}
                 for index, concept_id in enumerate(ids)
             ]
-            prompt = build_prompt(target_table, source_value, candidates, few_shot)
+            prompt_source, redaction_categories = redact_direct_identifiers(source_value)
+            prompt = build_prompt(target_table, prompt_source, candidates, few_shot)
             response = client.chat(
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
@@ -235,6 +246,19 @@ def run_semantic_mapping(
                 options=GENERATION_PARAMETERS,
             )
             decision = parse_llm_decision(_response_content(response), ids)
+            decision["reason"], reason_categories = redact_direct_identifiers(
+                decision["reason"]
+            )
+            sanitized_signals = []
+            signal_categories = []
+            for signal in decision["clinical_signals"]:
+                sanitized, categories = redact_direct_identifiers(signal)
+                sanitized_signals.append(sanitized)
+                signal_categories.extend(categories)
+            decision["clinical_signals"] = sanitized_signals
+            redaction_categories = sorted(set(
+                redaction_categories + reason_categories + signal_categories
+            ))
             metadata = {
                 **decision,
                 "prompt_version": PROMPT_VERSION,
@@ -261,6 +285,20 @@ def run_semantic_mapping(
                     (concept_id, concept_name, distance, governed_score), metadata,
                 )
                 result["proposals"] += 1
+            audit_security_event(
+                con,
+                "LOCAL_LLM_MAPPING_DECISION",
+                "LOCAL_MAPPING_ENGINE",
+                status,
+                {
+                    "target_table": target_table,
+                    "model": MODEL_NAME,
+                    "decision": decision["decision"],
+                    "redaction_categories": redaction_categories,
+                    "data_classification": privacy["classification"],
+                },
+                run_id=current_run_id(),
+            )
             print(
                 f"[{position}/{len(terms)}] {source_value!r}: {status}; "
                 f"events={event_count}"

@@ -169,13 +169,19 @@ para afinar o sistema.
 Critério de saída: desempenho, segurança e workflow humano adequados a um piloto
 hospitalar controlado.
 
-Estado técnico em 2026-08-27: marco 6A concluído. O caminho de aprovação única
+Estado técnico em 2026-08-27: marcos 6A e 6B concluídos. O caminho de aprovação única
 foi desativado. Duas revisões independentes e cegas, com rationale obrigatório,
 são necessárias antes de uma terceira pessoa distinta poder adjudicar. Nem a
 concordância entre revisores publica automaticamente. O portal separa filas de
 revisão e adjudicação sem expor identidades, votos ou rationales prévios e mede
 acordo bruto e kappa de Cohen global e por domínio. A execução por profissionais
-clínicos, os controlos de PHI, a calibração em development e os testes de escala
+clínicos continua pendente. A fronteira de privacidade bloqueia endpoints LLM
+externos, redige identificadores diretos antes do prompt e novamente antes de
+persistir texto do modelo, e recusa raw source/prompt/response no audit log. PHI
+falha fechado sem ativação explícita, aprovação institucional, retenção positiva,
+identidade autenticada e allowlist por papel. Nomes e identificadores não
+detetáveis por padrões continuam a exigir minimização/DLP upstream; o portal
+standalone não é autenticação. A calibração em development e os testes de escala
 continuam pendentes; as etiquetas permanecem `PROVISIONAL_TECHNICAL`.
 
 ### Fase 7 — produto e portabilidade

@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import FHIR_DIR, MODEL_NAME, OLLAMA_URL, VOCAB_DIR
+from src.security.privacy import PrivacyError, validate_privacy_runtime
 
 
 ATHENA_FILES = (
@@ -54,8 +55,13 @@ def collect_failures(
     vocab_dir=VOCAB_DIR,
     require_ollama=True,
     require_dqd=False,
+    llm_url=OLLAMA_URL,
 ):
     failures = []
+    try:
+        validate_privacy_runtime(llm_url)
+    except PrivacyError as exc:
+        failures.append(f"Privacy preflight failed: {exc}")
     fhir_path = Path(fhir_dir)
     if not fhir_path.is_dir():
         failures.append(f"FHIR directory is missing: {fhir_path}")
@@ -72,9 +78,9 @@ def collect_failures(
 
     if require_ollama:
         try:
-            models = _ollama_models()
+            models = _ollama_models(llm_url)
         except (OSError, ValueError, urllib.error.URLError) as exc:
-            failures.append(f"Ollama is unavailable at {OLLAMA_URL}: {exc}")
+            failures.append(f"Ollama is unavailable at {llm_url}: {exc}")
         else:
             if MODEL_NAME not in models:
                 failures.append(

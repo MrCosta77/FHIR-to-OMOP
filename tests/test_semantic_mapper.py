@@ -101,11 +101,13 @@ class _FakeCollection:
 class _FakeOllama:
     def __init__(self, content):
         self.content = content
+        self.last_kwargs = None
 
     def list(self):
         return {"models": [{"model": MODEL_NAME, "digest": "sha256:model-test"}]}
 
     def chat(self, **kwargs):
+        self.last_kwargs = kwargs
         assert kwargs["format"]["additionalProperties"] is False
         assert kwargs["options"] == {
             "temperature": 0.0, "seed": 0, "num_predict": 512,
@@ -113,7 +115,7 @@ class _FakeOllama:
         return {"message": {"content": self.content}}
 
 
-def _procedure_database(path):
+def _procedure_database(path, source_value="legacy appendectomy"):
     with duckdb.connect(str(path)) as con:
         ensure_governance_tables(con)
         con.execute("CREATE TABLE vocabulary (vocabulary_id VARCHAR, vocabulary_version VARCHAR)")
@@ -126,7 +128,10 @@ def _procedure_database(path):
                 procedure_source_value VARCHAR
             )
         """)
-        con.execute("INSERT INTO procedure_occurrence VALUES (1, 0, 9001, 'legacy appendectomy')")
+        con.execute(
+            "INSERT INTO procedure_occurrence VALUES (1, 0, 9001, ?)",
+            [source_value],
+        )
 
 
 def test_procedure_adapter_persists_governed_proposal_without_publishing(monkeypatch, tmp_path):
@@ -178,6 +183,42 @@ def test_procedure_adapter_persists_abstention_as_non_publishable(monkeypatch, t
         )
         assert con.execute("SELECT reviewed_by FROM mapping_provenance").fetchone()[0] == "LLM_ABSTAIN"
         assert con.execute("SELECT procedure_concept_id FROM procedure_occurrence").fetchone()[0] == 0
+
+
+def test_adapter_redacts_direct_identifiers_from_prompt_and_persisted_llm_text(
+    monkeypatch, tmp_path,
+):
+    database = tmp_path / "redaction.duckdb"
+    raw_email = "ana@example.org"
+    _procedure_database(database, f"legacy appendectomy contact {raw_email}")
+    monkeypatch.setattr(
+        "src.mapping.semantic_mapper.get_versioned_collection",
+        lambda con, path, target: _FakeCollection(),
+    )
+    payload = json.loads(_decision("ABSTAIN", None))
+    payload["reason"] = f"Contact {raw_email}; clinical evidence is insufficient."
+    payload["clinical_signals"] = [f"reported by {raw_email}"]
+    client = _FakeOllama(json.dumps(payload))
+
+    run_semantic_mapping(
+        "procedure_occurrence", db_path=database, chroma_path=tmp_path,
+        client=client,
+    )
+
+    prompt = client.last_kwargs["messages"][0]["content"]
+    assert raw_email not in prompt
+    assert "[REDACTED_EMAIL]" in prompt
+    with duckdb.connect(str(database), read_only=True) as con:
+        reason, signals = con.execute("""
+            SELECT llm_reason, clinical_signals FROM mapping_decision
+        """).fetchone()
+        assert raw_email not in reason
+        assert raw_email not in signals
+        details = con.execute(
+            "SELECT details_json FROM security_audit_log"
+        ).fetchone()[0]
+        assert raw_email not in details
+        assert json.loads(details)["redaction_categories"] == ["EMAIL"]
 
 
 @pytest.mark.parametrize(

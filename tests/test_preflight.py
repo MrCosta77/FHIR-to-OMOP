@@ -33,3 +33,13 @@ def test_rscript_can_be_discovered_outside_path(tmp_path, monkeypatch):
     executable.write_bytes(b"fixture")
     monkeypatch.setattr(preflight.shutil, "which", lambda _: None)
     assert preflight.find_rscript([executable]) == executable
+
+
+def test_preflight_rejects_external_llm_endpoint(tmp_path):
+    failures = preflight.collect_failures(
+        fhir_dir=tmp_path,
+        vocab_dir=tmp_path,
+        require_ollama=False,
+        llm_url="https://external.example/v1/chat",
+    )
+    assert any("External LLM endpoint is forbidden" in failure for failure in failures)
