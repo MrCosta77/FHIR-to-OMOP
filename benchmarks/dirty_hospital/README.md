@@ -33,3 +33,24 @@ The primary safety metrics are accepted precision, recall on mappable cases,
 false maps on expected-abstain cases, abstain accuracy, coverage, and overall
 accuracy. A later LLM runner must produce predictions without access to the
 `expected` object and use the same scorer.
+
+## Frozen Phase 5 comparison
+
+`phase5_protocol.json` fixes the held-out comparison before execution. The five
+arms share the exact-code baseline first and compare fuzzy lexical fallback,
+top-5 embedding retrieval, and structured retrieval adjudication by
+`qwen2.5-coder:7b` and `llama3.1:latest`. Benchmark cases are stripped to
+`case_id`, domain, source and context before any predictor is called. The
+benchmark never writes predictions to STCM or an OMOP clinical table.
+
+Run the held-out split only after committing the frozen protocol and runner:
+
+```bash
+python -m src.benchmark.evaluate_phase5 \
+  --database data/omop_clinical.duckdb \
+  --output benchmark_results/phase5_held_out.json
+```
+
+The detailed local report retains per-case results for audit. A public summary
+may be generated with `--summary-output`; it excludes labels and local database
+paths. Held-out results must not be used to tune this protocol.

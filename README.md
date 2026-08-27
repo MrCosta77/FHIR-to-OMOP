@@ -104,6 +104,20 @@ The report records full provenance and separates accepted precision, mappable
 recall, false mappings, abstain accuracy, coverage, and overall accuracy. Local
 reports are written under ignored `benchmark_results/`.
 
+The frozen Phase 5 protocol compares the deterministic baseline, Jaro-Winkler
+fuzzy matching, embedding retrieval, and governed retrieval with both local LLM
+models. It fixes the fixture hash, top-k, thresholds, generation parameters and
+the no-few-shot policy before evaluating the held-out split:
+
+```bash
+python -m src.benchmark.evaluate_phase5 \
+  --database data/omop_clinical.duckdb \
+  --output benchmark_results/phase5_held_out.json
+```
+
+Do not use the held-out report to modify prompts or thresholds. Any future
+calibration belongs to development data and requires a new untouched test set.
+
 ### 5. FHIR Encounter and Observation-Period Contract
 
 Clinical events use an explicit FHIR `Encounter/{id}` reference before any

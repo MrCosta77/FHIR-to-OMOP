@@ -1,0 +1,50 @@
+{
+  "benchmark": "dirty-hospital-to-omop",
+  "evaluation_split": "held_out",
+  "fixture_sha256": "295cc7eaeed6a011e48e8d98b5ae4a5ea116437da452f2cb785e61362f1b5d9e",
+  "freeze_date": "2026-08-27",
+  "policy": {
+    "deterministic_exact_first": true,
+    "few_shot_examples": "none",
+    "held_out_adjustment_forbidden": true,
+    "labels": "PROVISIONAL_TECHNICAL",
+    "publication": "benchmark predictions never update OMOP or STCM"
+  },
+  "protocol_version": "phase5-v1",
+  "retrieval": {
+    "embedding_function": "Chroma default all-MiniLM-L6-v2",
+    "top_k": 5
+  },
+  "arms": [
+    {
+      "name": "deterministic-code-only"
+    },
+    {
+      "name": "fuzzy-lexical",
+      "metric": "Jaro-Winkler",
+      "selection_threshold": 0.9
+    },
+    {
+      "name": "embedding-retrieval",
+      "selection_threshold": 0.9
+    },
+    {
+      "name": "retrieval-llm-qwen",
+      "model": "qwen2.5-coder:7b",
+      "selection_threshold": 0.9
+    },
+    {
+      "name": "retrieval-llm-llama",
+      "model": "llama3.1:latest",
+      "selection_threshold": 0.9
+    }
+  ],
+  "generation": {
+    "format": "mapping-json-v2",
+    "num_predict": 512,
+    "seed": 0,
+    "temperature": 0.0,
+    "timeout_seconds": 120.0
+  },
+  "threshold_curve": [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95]
+}

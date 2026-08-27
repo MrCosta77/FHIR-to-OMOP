@@ -145,6 +145,14 @@ Medir por domínio:
 Critério de saída: escolha do modelo e threshold sustentada por resultados
 held-out, não por exemplos demonstrativos.
 
+Estado técnico em 2026-08-27: protocolo `phase5-v1` congelado antes da primeira
+execução held-out. O hash da fixture, os cinco braços, top-5, thresholds,
+parâmetros de geração, ausência de few-shot e proibição de ajuste pós-held-out
+ficam versionados. O runner cega `expected`, curadoria e família, mede métricas
+por domínio, top-k recall, curvas precisão-cobertura, calibração, erros de
+domínio/validade, tempo, memória e telemetria local dos modelos. A execução e a
+escolha experimental permanecem pendentes.
+
 ### Fase 6 — revisão clínica, escala e privacidade
 
 - Calibrar thresholds separados por domínio.
