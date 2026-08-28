@@ -17,7 +17,8 @@
     "retention_environment_variable": "CMF_PHI_RETENTION_DAYS",
     "authenticated_user_environment_variable": "CMF_AUTHENTICATED_USER",
     "reviewer_allowlist_environment_variable": "CMF_REVIEWER_ALLOWLIST",
-    "adjudicator_allowlist_environment_variable": "CMF_ADJUDICATOR_ALLOWLIST"
+    "adjudicator_allowlist_environment_variable": "CMF_ADJUDICATOR_ALLOWLIST",
+    "source_admin_allowlist_environment_variable": "CMF_SOURCE_ADMIN_ALLOWLIST"
   },
   "retention": {
     "raw_prompts_days": 0,

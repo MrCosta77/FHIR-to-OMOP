@@ -32,8 +32,11 @@ model responses are never written to the security audit log.
 ## Access
 
 For PHI, a claimed portal identity must match `CMF_AUTHENTICATED_USER` and be in
-the comma-separated `CMF_REVIEWER_ALLOWLIST` or
-`CMF_ADJUDICATOR_ALLOWLIST`. These environment claims must be injected by an
+the comma-separated `CMF_REVIEWER_ALLOWLIST`,
+`CMF_ADJUDICATOR_ALLOWLIST` or `CMF_SOURCE_ADMIN_ALLOWLIST`, according to the
+operation. Source administrators may register or deactivate hospital source
+identities but cannot clinically review or adjudicate mappings. These
+environment claims must be injected by an
 institution-managed authenticated deployment, not supplied by the end user.
 The current standalone Streamlit text field is not authentication and remains
 limited to synthetic or approved de-identified data.

@@ -116,8 +116,8 @@ def authorize_actor(actor: str, role: str, environ=None) -> str:
     actor = (actor or "").strip()
     if not actor:
         raise PrivacyError("A named actor is required.")
-    if role not in {"reviewer", "adjudicator"}:
-        raise PrivacyError(f"Unsupported clinical role: {role}")
+    if role not in {"reviewer", "adjudicator", "source_admin"}:
+        raise PrivacyError(f"Unsupported governed role: {role}")
     if data_classification(env) != "PHI":
         return actor
     validate_privacy_runtime(
@@ -126,10 +126,12 @@ def authorize_actor(actor: str, role: str, environ=None) -> str:
     authenticated = env.get("CMF_AUTHENTICATED_USER", "").strip()
     if not authenticated or authenticated.casefold() != actor.casefold():
         raise PrivacyError("PHI access requires a matching authenticated identity.")
-    allowlist_key = (
-        "CMF_REVIEWER_ALLOWLIST" if role == "reviewer"
-        else "CMF_ADJUDICATOR_ALLOWLIST"
-    )
+    allowlist_keys = {
+        "reviewer": "CMF_REVIEWER_ALLOWLIST",
+        "adjudicator": "CMF_ADJUDICATOR_ALLOWLIST",
+        "source_admin": "CMF_SOURCE_ADMIN_ALLOWLIST",
+    }
+    allowlist_key = allowlist_keys[role]
     allowed = {
         item.strip().casefold()
         for item in env.get(allowlist_key, "").split(",") if item.strip()

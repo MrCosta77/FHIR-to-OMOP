@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format follows
 - Governed hospital CSV runner reusing Athena/Chroma retrieval and the local
   structured LLM, with hashed record correlation, idempotent proposal/abstention
   persistence and a fail-closed pre-ingestion publication gate.
+- Historical hospital source-identity registry with OMOP-length local
+  vocabulary IDs, explicit deactivation, unambiguous record resolution,
+  metadata-only audit and a PHI-aware source-administrator role.
 
 ## [0.1.0] - 2026-08-28
 

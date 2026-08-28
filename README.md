@@ -56,6 +56,13 @@ keys and `publication_eligible=false`, so they cannot enter review,
 adjudication, STCM or OMOP publication before a later ingestion step binds an
 explicit source vocabulary and concrete OMOP event.
 
+The 7D.4A [source identity registry](docs/SOURCE_IDENTITY_REGISTRY.md) provides
+the fail-closed first half of that binding. It validates canonical hospital
+system/code claims, resolves them to one explicitly registered local OMOP
+source vocabulary, retains deactivation history and requires an authorized
+source administrator in PHI mode. Resolution alone never makes a proposal
+reviewable or publishable.
+
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and
 then publishes the term to STCM. `apply_stcm.py` independently requires matching

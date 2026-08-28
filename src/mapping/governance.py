@@ -173,6 +173,23 @@ def ensure_governance_tables(con):
             adjudicated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS source_identity_registry (
+            source_adapter VARCHAR NOT NULL,
+            source_system VARCHAR NOT NULL,
+            source_vocabulary_id VARCHAR NOT NULL,
+            registered_by VARCHAR NOT NULL,
+            registration_reason VARCHAR NOT NULL,
+            registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            deactivated_by VARCHAR,
+            deactivation_reason VARCHAR,
+            deactivated_at TIMESTAMP,
+            PRIMARY KEY (
+                source_adapter, source_system, source_vocabulary_id
+            )
+        )
+    """)
     _migrate_legacy_decisions(con)
 
 

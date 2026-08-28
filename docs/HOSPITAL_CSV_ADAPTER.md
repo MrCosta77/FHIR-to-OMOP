@@ -54,6 +54,11 @@ text are redacted before use or persistence. The opaque `record_id` is never
 stored; a SHA-256 `source_record_key`, scoped by adapter, source system and
 target table, provides stable, idempotent correlation.
 
+Rows intended for later OMOP ingestion can additionally be converted into a
+fail-closed source identity claim and resolved against the governed
+[`source_identity_registry`](SOURCE_IDENTITY_REGISTRY.md). Resolution requires
+both `source_system` and `source_code`; it never guesses a vocabulary.
+
 ## Governed mapping flow
 
 ```text

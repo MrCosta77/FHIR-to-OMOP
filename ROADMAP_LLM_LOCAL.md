@@ -278,6 +278,17 @@ STCM, políticas de rejeição ou tabelas OMOP antes de uma futura ingestão as
 ligar a vocabulário de origem explícito e evento OMOP concreto. O marco fechou
 com uma suite de 177 testes para validação no ambiente CI/reprodutível.
 
+Estado 7D.4A: tecnicamente concluído. O contrato de identidade exige adaptador,
+sistema local canónico, código de origem dentro do limite OMOP e chave SHA-256
+do registo. O `source_identity_registry` liga cada par adaptador/sistema a
+exatamente um vocabulário local ativo, limitado a 20 caracteres e sem colisão
+com `CMF_SYNTHEA*`. Registos repetidos são idempotentes; mudanças exigem
+desativação explícita com histórico e auditoria. Em PHI, só um `source_admin`
+autenticado e allowlisted pode registar ou desativar identidades. A resolução
+não altera `publication_eligible`, STCM, políticas de rejeição ou eventos OMOP;
+essa ligação concreta fica reservada ao 7D.4B. A suite passa a totalizar 187
+testes para validação no ambiente CI/reprodutível.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,
