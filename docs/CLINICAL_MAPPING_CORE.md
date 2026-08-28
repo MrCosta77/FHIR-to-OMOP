@@ -61,6 +61,8 @@ obtain valid Standard OMOP candidates through the governed retrieval adapter and
 then construct the same `MappingRequest`. The core does not allow a source
 adapter to bypass candidate binding, invent IDs or publish a result.
 
-Do not split this directory into another repository or publish it to PyPI until
-its API has survived at least one additional source adapter, its versioning and
-compatibility policy are explicit, and all boundary/behavior tests remain green.
+The API now supports the first additional source boundary, `hospital-csv-v1`,
+without importing that adapter back into the core. Do not split this directory
+into another repository or publish it to PyPI until the CSV path also completes
+governed retrieval/adjudication, versioning and compatibility policy are
+explicit, and all boundary/behavior tests remain green.

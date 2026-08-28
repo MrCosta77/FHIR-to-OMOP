@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
 - Dependency-free `clinical_mapping_core` boundary with typed candidate,
   request, decision and model-provenance contracts, preserving the existing
   six governed adapters and preparing future HL7 v2 and hospital CSV inputs.
+- Versioned `hospital-csv-v1` adapter with comma/semicolon/tab support,
+  allowlisted clinical context, fail-closed routing and dates, direct-identifier
+  redaction and a metadata-only validation CLI.
 
 ## [0.1.0] - 2026-08-28
 

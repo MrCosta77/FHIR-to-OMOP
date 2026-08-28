@@ -256,6 +256,18 @@ persistência. FHIR/OMOP, retrieval, PHI, governance e publicação permanecem f
 da fronteira. O pacote não será separado nem publicado antes de sobreviver a um
 segundo formato de origem. O marco fechou com 163 testes aprovados.
 
+Estado 7D.2: tecnicamente concluído. O contrato `hospital-csv-v1` aceita UTF-8
+delimitado por vírgula, ponto e vírgula ou tabulação, exige versão/ID/domínio/
+termo, limita contexto clínico a uma allowlist e rejeita colunas desconhecidas,
+IDs duplicados, datas não ISO e domínios não suportados. Condition, Drug,
+Measurement, Observation, Procedure e Device são encaminhados para os mesmos
+contratos do núcleo. `record_id` nunca entra no prompt; source value, sistema,
+código, unidade, espécime, via e dose passam pela redação antes do
+`MappingRequest`. A CLI de validação emite apenas contagens metadata-only. O
+adaptador não consulta o modelo, não escreve DuckDB e não publica mappings; o
+encaixe futuro terá de reutilizar retrieval, revisão e adjudicação existentes.
+O marco fechou com 173 testes aprovados.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

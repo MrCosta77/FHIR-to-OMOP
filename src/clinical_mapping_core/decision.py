@@ -95,6 +95,10 @@ def render_mapping_prompt(
 ) -> str:
     """Render a stable model prompt from a portable mapping request."""
     candidates = [candidate.to_dict() for candidate in request.candidates]
+    context_line = ""
+    if request.context:
+        context = dict(sorted(request.context))
+        context_line = f"Context: {json.dumps(context, ensure_ascii=False)}\n"
     return (
         f"You are a {role} mapping dirty hospital data to OMOP.\n"
         f"Target domain: {request.target_domain}. "
@@ -105,6 +109,7 @@ def render_mapping_prompt(
         "Keep reason under 300 characters and provide at most 6 concise clinical signals.\n"
         f"{few_shot}"
         f"Source value: {json.dumps(request.source_value, ensure_ascii=False)}\n"
+        f"{context_line}"
         f"Candidates: {json.dumps(candidates, ensure_ascii=False)}\n"
         "Return only JSON matching the supplied schema."
     )

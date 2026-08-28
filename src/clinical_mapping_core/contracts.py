@@ -46,6 +46,7 @@ class MappingRequest:
     target_domain: str
     target_vocabulary: str
     candidates: tuple[Candidate, ...]
+    context: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_value, str):
@@ -56,6 +57,17 @@ class MappingRequest:
             raise ValueError("Mapping target_vocabulary must be non-empty")
         if not self.candidates:
             raise ValueError("Mapping request requires at least one candidate")
+        context_keys = []
+        for item in self.context:
+            if (
+                not isinstance(item, tuple) or len(item) != 2
+                or not all(isinstance(value, str) for value in item)
+                or not item[0].strip() or not item[1].strip()
+            ):
+                raise ValueError("Mapping context requires non-empty text key/value pairs")
+            context_keys.append(item[0])
+        if len(context_keys) != len(set(context_keys)):
+            raise ValueError("Mapping context keys must be unique")
 
 
 @dataclass(frozen=True, slots=True)

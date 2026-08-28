@@ -1,0 +1,5 @@
+schema_version;record_id;domain;source_value;source_system;source_code;unit;specimen;route;dose;event_date
+hospital-csv-v1;lab-001;lab;glicose sangue;LIS_LOCAL;GLU_BLD;mg/dL;blood;;;2026-01-15
+hospital-csv-v1;proc-001;procedure;apendicectomia;CAT_PROC;APPX;;;;;2026-01-16
+hospital-csv-v1;drug-001;medication;amoxicilina 500 mg;PHARM_LOCAL;AMOX500;;;oral;500 mg;2026-01-17
+hospital-csv-v1;obs-001;observation;fumador ocasional;EHR_LOCAL;SMOKE;;;;;2026-01-18
