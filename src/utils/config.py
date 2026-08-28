@@ -5,7 +5,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Centralized Paths
-FHIR_DIR = os.path.join(PROJECT_ROOT, "synthea", "output", "fhir")
+FHIR_DIR = os.environ.get(
+    "CMF_FHIR_DIR",
+    os.path.join(PROJECT_ROOT, "synthea", "output", "fhir"),
+)
 DB_PATH = os.environ.get(
     "CMF_DB_PATH",
     os.path.join(PROJECT_ROOT, "data", "omop_clinical.duckdb"),

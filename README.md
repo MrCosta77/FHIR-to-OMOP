@@ -192,6 +192,15 @@ Successful publications are written to `data/omop_clinical.duckdb`. Run
 manifests are retained under `data/run_manifests/`; failed working databases are
 kept under `data/runs/` and can be removed after investigation.
 
+Run the reproducible Phase 6 scale test in a timestamped, isolated directory:
+```bash
+python -m src.benchmark.run_scale_test --population 250 --seed 6062026
+```
+The runner generates fresh synthetic FHIR, sets `CMF_FHIR_DIR` and
+`CMF_DB_PATH` only for its child pipeline, captures both logs and writes a JSON
+report under `benchmark_results/scale/`. It refuses to overwrite an existing
+output directory and never opens the published clinical database.
+
 The first run after a vocabulary change can take considerably longer while
 active vector indexes are rebuilt. Progress is printed per 5,000 concepts and
 an interrupted build resumes from the IDs already indexed.

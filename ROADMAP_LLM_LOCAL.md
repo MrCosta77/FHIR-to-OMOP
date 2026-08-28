@@ -194,6 +194,12 @@ A execução com Llama teve zero falhas de contrato, mas o top-5 recall foi apen
 não autorizam qualquer fallback semântico. Nenhum valor foi promovido. Falta o
 teste de escala para concluir os marcos técnicos internos da fase.
 
+O marco 6D usa um runner reprodutível com população e seed explícitas. A
+geração Synthea, os bundles FHIR, a base DuckDB, os logs e o relatório ficam num
+diretório timestamped sob `benchmark_results/scale/`. A base publicada não é
+aberta nem substituída. O ensaio de referência é de 250 pessoas com seed
+`6062026`; os resultados só serão registados depois de uma execução bem-sucedida.
+
 ### Fase 7 — produto e portabilidade
 
 - Adicionar CI, `renv.lock`, licença, changelog e releases.
