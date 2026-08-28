@@ -11,7 +11,8 @@ def test_scale_command_is_deterministic_and_uses_isolated_output(tmp_path):
     assert command[1:3] == ["/d", "/c"]
     assert Path(command[3]).name == "run_synthea.bat"
     assert command[4:10] == [
-        "-s", "6062026", "-p", "250", f"--exporter.baseDirectory={output}",
+        "-s", "6062026", "-p", "250",
+        f"--exporter.baseDirectory={output.resolve().as_posix()}",
         "--exporter.fhir.export=true",
     ]
     assert "--exporter.csv.export=false" in command

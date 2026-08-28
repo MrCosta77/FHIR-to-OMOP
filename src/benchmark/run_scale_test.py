@@ -38,7 +38,7 @@ def synthea_command(output_root: Path, population: int, seed: int) -> list[str]:
     return [
         os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(launcher),
         "-s", str(seed), "-p", str(population),
-        f"--exporter.baseDirectory={output_root}",
+        f"--exporter.baseDirectory={output_root.resolve().as_posix()}",
         "--exporter.fhir.export=true",
         "--exporter.csv.export=false",
         "--exporter.hospital.fhir.export=true",
