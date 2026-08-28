@@ -196,6 +196,41 @@ def test_proposal_is_event_level_and_threshold_controls_stcm():
         """).fetchone()[0] == "PENDING"
 
 
+def test_proposal_persists_model_name_from_portable_provenance():
+    with duckdb.connect(":memory:") as con:
+        _create_provenance(con)
+        con.execute("CREATE TABLE vocabulary (vocabulary_id VARCHAR, vocabulary_version VARCHAR)")
+        con.execute("INSERT INTO vocabulary VALUES ('None', 'v-test')")
+        con.execute("""
+            CREATE TABLE measurement (
+                measurement_id BIGINT, measurement_concept_id INTEGER,
+                measurement_source_value VARCHAR
+            )
+        """)
+        con.execute("INSERT INTO measurement VALUES (1, 0, 'Legacy')")
+
+        record_mapping_proposal(
+            con,
+            "measurement",
+            "Legacy",
+            (300, "Candidate", 0.05, 0.95),
+            {
+                "model_name": "model-from-contract",
+                "decision": "SELECT",
+                "confidence": 0.95,
+                "reason": "Safe candidate.",
+                "clinical_signals": [],
+            },
+        )
+
+        assert con.execute(
+            "SELECT model_name FROM mapping_decision"
+        ).fetchone()[0] == "model-from-contract"
+        assert con.execute(
+            "SELECT model_name FROM mapping_provenance"
+        ).fetchone()[0] == "model-from-contract"
+
+
 def test_deterministic_mapping_supersedes_pending_event_proposal():
     with duckdb.connect(":memory:") as con:
         _create_provenance(con)

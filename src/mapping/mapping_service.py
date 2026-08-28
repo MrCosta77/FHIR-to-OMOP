@@ -290,6 +290,7 @@ def _decision_metadata_kwargs(decision_metadata):
     signals = metadata.get("clinical_signals")
     parameters = metadata.get("generation_parameters")
     return {
+        "model_name": metadata.get("model_name"),
         "prompt_version": metadata.get("prompt_version", "mapping-prompt-v1"),
         "llm_decision": metadata.get("decision"),
         "llm_confidence": metadata.get("confidence"),
@@ -337,11 +338,13 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
         "Below_Confidence_Threshold": "LOW_CONFIDENCE",
         "REJECTED_BY_POLICY": "REJECTED_BY_POLICY",
     }[review_status]
+    metadata_kwargs = _decision_metadata_kwargs(decision_metadata)
+    decision_model_name = metadata_kwargs.pop("model_name") or MODEL_NAME
     decision_id = register_decision(
         con, target_table, source_value, concept_id, concept_name,
-        mapping_method, score, MODEL_NAME, vocabulary_version,
+        mapping_method, score, decision_model_name, vocabulary_version,
         decision_status,
-        **_decision_metadata_kwargs(decision_metadata),
+        **metadata_kwargs,
     )
 
     # Remove the legacy term-level placeholder now that every affected event
@@ -370,7 +373,7 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
             )
         """, [
             target_table, target_id, source_value, concept_name, concept_id,
-            mapping_method, score, MODEL_NAME, vocabulary_version, review_status,
+            mapping_method, score, decision_model_name, vocabulary_version, review_status,
             current_run_id(), decision_id,
             target_table, target_id, concept_id, mapping_method, current_run_id(),
         ])
@@ -396,10 +399,12 @@ def record_mapping_abstention(con, target_table, source_value, decision_metadata
     """).fetchone()
     vocabulary_version = vocabulary_version[0] if vocabulary_version else "Unknown"
     confidence = float(decision_metadata.get("confidence", 0.0))
+    metadata_kwargs = _decision_metadata_kwargs(decision_metadata)
+    decision_model_name = metadata_kwargs.pop("model_name") or MODEL_NAME
     decision_id = register_decision(
         con, target_table, source_value, 0, None,
-        "llm_rag_json", confidence, MODEL_NAME, vocabulary_version,
-        "ABSTAINED", **_decision_metadata_kwargs(decision_metadata),
+        "llm_rag_json", confidence, decision_model_name, vocabulary_version,
+        "ABSTAINED", **metadata_kwargs,
     )
     for target_id in target_ids:
         con.execute("""
@@ -416,7 +421,7 @@ def record_mapping_abstention(con, target_table, source_value, decision_metadata
                   AND COALESCE(run_id, '') = COALESCE(?, '')
             )
         """, [
-            target_table, target_id, source_value, confidence, MODEL_NAME,
+            target_table, target_id, source_value, confidence, decision_model_name,
             vocabulary_version, current_run_id(), decision_id,
             target_table, target_id, current_run_id(),
         ])

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Dependency-free `clinical_mapping_core` boundary with typed candidate,
+  request, decision and model-provenance contracts, preserving the existing
+  six governed adapters and preparing future HL7 v2 and hospital CSV inputs.
+
 ## [0.1.0] - 2026-08-28
 
 ### Added

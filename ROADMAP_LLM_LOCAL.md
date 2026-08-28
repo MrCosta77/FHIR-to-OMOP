@@ -246,6 +246,16 @@ clínica. O código e a documentação própria são publicados sob Apache-2.0, 
 atribuição preservada em `NOTICE`; dependências, modelos, vocabulários e dados
 mantêm os seus próprios termos. O marco fechou com 157 testes aprovados.
 
+Estado 7D.1: tecnicamente concluído. Os contratos `Candidate`, `MappingRequest`,
+`MappingDecision` e `ModelProvenance`, o parser fail-closed e o renderer de
+prompt foram isolados em `src/clinical_mapping_core/`, sem dependências de
+DuckDB, Chroma, Ollama, Streamlit, configuração ou adaptadores hospitalares.
+Os seis adaptadores mantêm a API e o comportamento existentes, mas delegam no
+novo núcleo e transportam explicitamente a identidade do modelo até à
+persistência. FHIR/OMOP, retrieval, PHI, governance e publicação permanecem fora
+da fronteira. O pacote não será separado nem publicado antes de sobreviver a um
+segundo formato de origem. O marco fechou com 163 testes aprovados.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

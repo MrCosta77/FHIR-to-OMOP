@@ -43,6 +43,11 @@ or abstention and never changes a clinical table before named human approval.
 Approval preserves the selected concept's actual vocabulary rather than
 inferring it from the target table.
 
+The model-facing contracts, fail-closed parser, prompt renderer and provenance
+value objects are isolated in the dependency-free `src/clinical_mapping_core/`
+boundary. FHIR/OMOP, retrieval, Ollama, privacy and database publication remain
+explicit adapters. See [`docs/CLINICAL_MAPPING_CORE.md`](docs/CLINICAL_MAPPING_CORE.md).
+
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and
 then publishes the term to STCM. `apply_stcm.py` independently requires matching
