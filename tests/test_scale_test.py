@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from src.benchmark.run_scale_test import synthea_command
+import sys
+
+from src.benchmark.run_scale_test import _run_logged, synthea_command
 
 
 def test_scale_command_is_deterministic_and_uses_isolated_output(tmp_path):
@@ -21,6 +23,16 @@ def test_scale_command_is_deterministic_and_uses_isolated_output(tmp_path):
 def test_scale_command_rejects_nonpositive_population(tmp_path):
     with pytest.raises(ValueError, match="positive"):
         synthea_command(Path(tmp_path), 0, 1)
+
+
+def test_logged_command_replaces_invalid_console_bytes(tmp_path):
+    log = tmp_path / "command.log"
+    _run_logged(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([143]))"],
+        tmp_path,
+        log,
+    )
+    assert "\ufffd" in log.read_text(encoding="utf-8")
 
 
 def test_fhir_directory_can_be_overridden_for_isolated_scale_run(monkeypatch, tmp_path):

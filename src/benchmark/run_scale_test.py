@@ -49,7 +49,8 @@ def synthea_command(output_root: Path, population: int, seed: int) -> list[str]:
 def _run_logged(command, cwd, log_path, *, env=None, timeout=7200):
     started = time.perf_counter()
     completed = subprocess.run(
-        command, cwd=cwd, env=env, text=True, capture_output=True,
+        command, cwd=cwd, env=env, text=True, encoding="utf-8",
+        errors="replace", capture_output=True,
         timeout=timeout,
     )
     elapsed = time.perf_counter() - started
