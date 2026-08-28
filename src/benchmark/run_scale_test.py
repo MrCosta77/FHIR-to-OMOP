@@ -18,6 +18,7 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SYNTHEA_ROOT = PROJECT_ROOT / "synthea"
 DEFAULT_ROOT = PROJECT_ROOT / "benchmark_results" / "scale"
+DEFAULT_PUBLISHED_DB = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
 CLINICAL_TABLES = (
     "person", "visit_occurrence", "condition_occurrence", "drug_exposure",
     "measurement", "observation", "procedure_occurrence", "device_exposure",
@@ -29,6 +30,13 @@ def _git_commit():
         ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
+
+
+def _file_identity(path: Path):
+    if not path.exists():
+        return {"exists": False, "size": None, "mtime_ns": None}
+    stat = path.stat()
+    return {"exists": True, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
 def synthea_command(output_root: Path, population: int, seed: int) -> list[str]:
@@ -72,6 +80,9 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
     output_root.mkdir(parents=True)
     generated_root = output_root / "synthea-output"
     database = output_root / "omop_scale.duckdb"
+    if database.resolve() == DEFAULT_PUBLISHED_DB.resolve():
+        raise ValueError("Scale database must not be the published database.")
+    published_before = _file_identity(DEFAULT_PUBLISHED_DB)
     generated_log = output_root / "synthea.log"
     pipeline_log = output_root / "pipeline.log"
     git_commit = _git_commit()
@@ -115,6 +126,12 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
             "procedure_occurrence": con.execute(
                 "SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0"
             ).fetchone()[0],
+            "drug_exposure": con.execute(
+                "SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0"
+            ).fetchone()[0],
+            "measurement": con.execute(
+                "SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0"
+            ).fetchone()[0],
             "observation": con.execute(
                 "SELECT COUNT(*) FROM observation WHERE observation_concept_id = 0"
             ).fetchone()[0],
@@ -124,6 +141,10 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
         }
 
     total_seconds = generation_seconds + pipeline_seconds
+    published_after = _file_identity(DEFAULT_PUBLISHED_DB)
+    published_untouched = published_before == published_after
+    if not published_untouched:
+        raise RuntimeError("Published database changed during isolated scale test.")
     return {
         "benchmark": "synthea-isolated-scale-test",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -150,7 +171,12 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
         },
         "table_counts": counts,
         "unresolved": unresolved,
-        "published_database_untouched": True,
+        "published_database_guard": {
+            "path": str(DEFAULT_PUBLISHED_DB),
+            "before": published_before,
+            "after": published_after,
+            "untouched": published_untouched,
+        },
     }
 
 

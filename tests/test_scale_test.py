@@ -4,7 +4,7 @@ import pytest
 
 import sys
 
-from src.benchmark.run_scale_test import _run_logged, synthea_command
+from src.benchmark.run_scale_test import _file_identity, _run_logged, synthea_command
 
 
 def test_scale_command_is_deterministic_and_uses_isolated_output(tmp_path):
@@ -33,6 +33,17 @@ def test_logged_command_replaces_invalid_console_bytes(tmp_path):
         log,
     )
     assert "\ufffd" in log.read_text(encoding="utf-8")
+
+
+def test_file_identity_detects_changes_without_reading_contents(tmp_path):
+    target = tmp_path / "published.duckdb"
+    missing = _file_identity(target)
+    target.write_bytes(b"first")
+    before = _file_identity(target)
+    target.write_bytes(b"different-size")
+    after = _file_identity(target)
+    assert missing["exists"] is False
+    assert before != after
 
 
 def test_fhir_directory_can_be_overridden_for_isolated_scale_run(monkeypatch, tmp_path):

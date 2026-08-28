@@ -199,7 +199,8 @@ python -m src.benchmark.run_scale_test --population 250 --seed 6062026
 The runner generates fresh synthetic FHIR, sets `CMF_FHIR_DIR` and
 `CMF_DB_PATH` only for its child pipeline, captures both logs and writes a JSON
 report under `benchmark_results/scale/`. It refuses to overwrite an existing
-output directory and never opens the published clinical database.
+output directory, never opens the published clinical database and verifies from
+pre/post file identity that the published database did not change.
 
 The first run after a vocabulary change can take considerably longer while
 active vector indexes are rebuilt. Progress is printed per 5,000 concepts and

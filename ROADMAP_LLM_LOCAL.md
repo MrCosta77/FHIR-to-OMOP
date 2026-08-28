@@ -191,14 +191,25 @@ mantém `deployment_authorized=false` e não altera a configuração de produç�
 A execução com Llama teve zero falhas de contrato, mas o top-5 recall foi apenas
 20% nos 30 fallbacks mapeáveis. O threshold provisório foi 0,70 para Condition e
 1,00 para Drug, Measurement, Observation e Procedure; estes quatro resultados
-não autorizam qualquer fallback semântico. Nenhum valor foi promovido. Falta o
-teste de escala para concluir os marcos técnicos internos da fase.
+não autorizam qualquer fallback semântico. Nenhum valor foi promovido.
 
-O marco 6D usa um runner reprodutível com população e seed explícitas. A
-geração Synthea, os bundles FHIR, a base DuckDB, os logs e o relatório ficam num
-diretório timestamped sob `benchmark_results/scale/`. A base publicada não é
-aberta nem substituída. O ensaio de referência é de 250 pessoas com seed
-`6062026`; os resultados só serão registados depois de uma execução bem-sucedida.
+O marco 6D está tecnicamente concluído. O runner reprodutível mantém geração,
+FHIR, staging, manifestos, DuckDB, logs e relatório num diretório isolado sob
+`benchmark_results/scale/` e verifica que a base publicada não mudou. Com seed
+`6062026` e população-alvo 250, Synthea produziu 282 Patient (250 vivos e 32
+mortos) e 284 bundles. A pipeline completa passou todos os gates no commit
+`12c2703`, processou 13.404 visitas e 151.888 eventos clínicos em 647,3 s
+(683,8 s incluindo geração), produzindo uma base de 1,39 GB. Ficaram por mapear
+34/3.796 Conditions (0,90%) e 266/21.099 Procedures (1,26%); Drug,
+Measurement, Observation e Device tiveram zero concept IDs não resolvidos. O
+relatório local tem SHA-256
+`12FB4261956015D4B5826F7189C3AAF621B09933713F213D86F1C8DC217DDD66`.
+
+Os marcos técnicos internos da fase 6 estão concluídos, mas isto ainda não é
+autorização para piloto clínico. Continuam obrigatórias a revisão por
+profissionais clínicos reais, integração com identidade institucional,
+minimização/DLP upstream e aprovação formal de privacidade/retenção. Os
+thresholds continuam `PROVISIONAL_TECHNICAL` e não foram promovidos.
 
 ### Fase 7 — produto e portabilidade
 
