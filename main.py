@@ -14,9 +14,31 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-PUBLISHED_DB = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
-RUNS_DIR = PROJECT_ROOT / "data" / "runs"
-MANIFESTS_DIR = PROJECT_ROOT / "data" / "run_manifests"
+
+
+def resolve_runtime_paths(environment=None):
+    environment = os.environ if environment is None else environment
+    return {
+        "published_db": Path(environment.get(
+            "CMF_DB_PATH", PROJECT_ROOT / "data" / "omop_clinical.duckdb"
+        )).resolve(),
+        "fhir_dir": Path(environment.get(
+            "CMF_FHIR_DIR", PROJECT_ROOT / "synthea" / "output" / "fhir"
+        )).resolve(),
+        "runs_dir": Path(environment.get(
+            "CMF_RUNS_DIR", PROJECT_ROOT / "data" / "runs"
+        )).resolve(),
+        "manifests_dir": Path(environment.get(
+            "CMF_MANIFESTS_DIR", PROJECT_ROOT / "data" / "run_manifests"
+        )).resolve(),
+    }
+
+
+_RUNTIME_PATHS = resolve_runtime_paths()
+PUBLISHED_DB = _RUNTIME_PATHS["published_db"]
+FHIR_INPUT_DIR = _RUNTIME_PATHS["fhir_dir"]
+RUNS_DIR = _RUNTIME_PATHS["runs_dir"]
+MANIFESTS_DIR = _RUNTIME_PATHS["manifests_dir"]
 
 PIPELINE_STEPS = [
     {"name": "0. Validate External Prerequisites", "script": "src/quality/preflight.py"},
@@ -26,7 +48,7 @@ PIPELINE_STEPS = [
     {
         "name": "2c. Validate FHIR Input Contract",
         "script": "src/quality/validate_fhir.py",
-        "args": ["synthea/output/fhir"],
+        "args": [str(FHIR_INPUT_DIR)],
     },
     {"name": "3. Extract Persons", "script": "src/etl/person.py"},
     {"name": "4. Extract Visits", "script": "src/etl/visit.py"},
@@ -73,15 +95,19 @@ def sha256_file(path):
 
 def input_manifest():
     roots = [
-        PROJECT_ROOT / "synthea" / "output" / "fhir",
+        FHIR_INPUT_DIR,
         PROJECT_ROOT / "data" / "omop_vocab",
     ]
     files = []
     for root in roots:
         if root.is_dir():
             for path in sorted(item for item in root.iterdir() if item.is_file()):
+                try:
+                    manifest_path = path.relative_to(PROJECT_ROOT)
+                except ValueError:
+                    manifest_path = path
                 files.append({
-                    "path": str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    "path": str(manifest_path).replace("\\", "/"),
                     "size": path.stat().st_size,
                     "sha256": sha256_file(path),
                 })

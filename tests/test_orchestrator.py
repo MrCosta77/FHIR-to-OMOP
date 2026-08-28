@@ -6,6 +6,22 @@ import duckdb
 import main
 
 
+def test_runtime_paths_honor_isolation_environment(tmp_path):
+    environment = {
+        "CMF_DB_PATH": str(tmp_path / "published.duckdb"),
+        "CMF_FHIR_DIR": str(tmp_path / "fhir"),
+        "CMF_RUNS_DIR": str(tmp_path / "runs"),
+        "CMF_MANIFESTS_DIR": str(tmp_path / "manifests"),
+    }
+    paths = main.resolve_runtime_paths(environment)
+    assert paths == {
+        "published_db": (tmp_path / "published.duckdb").resolve(),
+        "fhir_dir": (tmp_path / "fhir").resolve(),
+        "runs_dir": (tmp_path / "runs").resolve(),
+        "manifests_dir": (tmp_path / "manifests").resolve(),
+    }
+
+
 def test_staging_copy_isolated_from_published_database(monkeypatch, tmp_path):
     published = tmp_path / "published.duckdb"
     runs = tmp_path / "runs"
