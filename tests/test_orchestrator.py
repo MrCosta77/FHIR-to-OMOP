@@ -12,6 +12,8 @@ def test_runtime_paths_honor_isolation_environment(tmp_path):
         "CMF_FHIR_DIR": str(tmp_path / "fhir"),
         "CMF_RUNS_DIR": str(tmp_path / "runs"),
         "CMF_MANIFESTS_DIR": str(tmp_path / "manifests"),
+        "CMF_REPORTS_DIR": str(tmp_path / "reports"),
+        "CMF_DQD_RESULTS_DIR": str(tmp_path / "dqd"),
     }
     paths = main.resolve_runtime_paths(environment)
     assert paths == {
@@ -19,6 +21,8 @@ def test_runtime_paths_honor_isolation_environment(tmp_path):
         "fhir_dir": (tmp_path / "fhir").resolve(),
         "runs_dir": (tmp_path / "runs").resolve(),
         "manifests_dir": (tmp_path / "manifests").resolve(),
+        "reports_dir": (tmp_path / "reports").resolve(),
+        "dqd_results_dir": (tmp_path / "dqd").resolve(),
     }
 
 
@@ -73,6 +77,21 @@ def test_missing_step_fails_closed(tmp_path):
         assert "Required pipeline step" in str(exc)
     else:
         raise AssertionError("Missing mandatory step was silently skipped")
+
+
+def test_pytest_step_emits_run_scoped_junit(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+
+    monkeypatch.setattr(main, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    main.run_step(
+        {"name": "quality", "script": "tests", "is_pytest": True},
+        {"CMF_RUN_ID": "RUN-test"},
+    )
+    assert f"--junitxml={tmp_path / 'RUN-test.pytest.xml'}" in captured["command"]
 
 
 def test_run_manifest_is_persisted_in_database(tmp_path):

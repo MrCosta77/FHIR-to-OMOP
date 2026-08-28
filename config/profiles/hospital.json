@@ -8,11 +8,14 @@
     "chroma_path": "data/chroma_db",
     "runs_dir": "data/hospital/runs",
     "manifests_dir": "data/hospital/run_manifests",
+    "reports_dir": "data/hospital/run_reports",
+    "dqd_results_dir": "data/hospital/dqd_results",
     "ollama_url": "http://localhost:11434/api/generate",
     "model_name": "llama3.1",
     "similarity_threshold": 1.0,
     "data_classification": "PHI",
     "simulate_lis_noise": false,
-    "require_integration": true
+    "require_integration": true,
+    "include_dqd": true
   }
 }

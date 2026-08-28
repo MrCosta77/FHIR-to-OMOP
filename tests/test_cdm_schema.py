@@ -60,6 +60,9 @@ def test_dqd_runner_explicitly_uses_cdm_54_checks():
     assert '"measureValueCompleteness", "plausibleValueHigh"' in worker
     assert "tablesToExclude" in worker
     assert "src.quality.merge_dqd_results" in runner
+    assert "CMF_DQD_RESULTS_DIR" in runner
+    assert "CMF_PYTHON_EXECUTABLE" in runner
+    assert "CMF_DB_PATH" in worker
 
 
 def test_clinical_etls_create_tables_from_the_pinned_specification():

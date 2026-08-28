@@ -196,6 +196,12 @@ Successful publications are written to `data/omop_clinical.duckdb`. Run
 manifests are retained under `data/run_manifests/`; failed working databases are
 kept under `data/runs/` and can be removed after investigation.
 
+Each successful publication also writes a content-addressed, immutable evidence
+report under `data/run_reports/` (or the active profile override). It aggregates
+pytest, DQD status, mapping coverage, database/input hashes and provenance
+without source values or identities. See
+[`docs/RUN_REPORTS.md`](docs/RUN_REPORTS.md).
+
 Run the reproducible Phase 6 scale test in a timestamped, isolated directory:
 ```bash
 python -m src.benchmark.run_scale_test --population 250 --seed 6062026

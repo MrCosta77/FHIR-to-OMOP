@@ -16,6 +16,7 @@ def test_development_profile_resolves_portable_paths(tmp_path):
     assert settings.profile == "development"
     assert settings.db_path == (tmp_path / "data" / "omop_clinical.duckdb").resolve()
     assert settings.fhir_dir == (tmp_path / "synthea" / "output" / "fhir").resolve()
+    assert settings.reports_dir == (tmp_path / "data" / "run_reports").resolve()
 
 
 def test_environment_overrides_profile_without_loading_dotenv(tmp_path):
@@ -60,6 +61,7 @@ def test_hospital_profile_accepts_complete_phi_activation():
     assert settings.profile == "hospital"
     assert settings.data_classification == "PHI"
     assert settings.similarity_threshold == 1.0
+    assert settings.include_dqd is True
 
 
 @pytest.mark.parametrize("override", [
@@ -67,6 +69,7 @@ def test_hospital_profile_accepts_complete_phi_activation():
     {"CMF_SIMILARITY_THRESHOLD": "0.9"},
     {"CMF_SIMULATE_LIS_NOISE": "true"},
     {"CMF_REQUIRE_INTEGRATION": "false"},
+    {"CMF_INCLUDE_DQD": "false"},
 ])
 def test_hospital_profile_cannot_downgrade_safety(override):
     environment = {

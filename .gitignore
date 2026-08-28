@@ -20,6 +20,8 @@ __pycache__/
 data/chroma_db/
 data/runs/
 data/run_manifests/
+data/run_reports/
+data/hospital/
 
 # Raw & Temporary Data (Synthetic data and vocabularies)
 data/synthea_output/

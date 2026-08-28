@@ -226,6 +226,16 @@ reduzir a classificação PHI, threshold 1,0, quality gate completo nem ativar
 ruído LIS. A configuração efetiva não-secreta entra no manifesto de execução e
 é validada na CI; 145 testes passaram no fecho do marco.
 
+Estado 7B: tecnicamente concluído. Cada publicação bem-sucedida produz JUnit
+por run e um relatório JSON v1 metadata-only com configuração segura, agregado
+dos inputs, passos e tempos, estado pytest/DQD, cobertura de mapping por domínio,
+contagens de governance e SHA-256 exato da DuckDB. O payload é validado
+fail-closed, selado com SHA-256, nomeado pelo conteúdo e publicado em duas fases
+sem overwrite. Development e benchmark declaram DQD `NOT_RUN`; hospital não
+pode desativar o DQD run-linked nem publicar se este falhar a política aprovada.
+Os relatórios mantêm `deployment_authorized=false` e revisão clínica obrigatória.
+O marco fechou com 154 testes aprovados.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

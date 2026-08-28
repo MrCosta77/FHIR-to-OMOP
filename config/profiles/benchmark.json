@@ -8,11 +8,14 @@
     "chroma_path": "data/chroma_db",
     "runs_dir": "benchmark_results/runs",
     "manifests_dir": "benchmark_results/run_manifests",
+    "reports_dir": "benchmark_results/run_reports",
+    "dqd_results_dir": "benchmark_results/dqd_results",
     "ollama_url": "http://localhost:11434/api/generate",
     "model_name": "llama3.1",
     "similarity_threshold": 0.9,
     "data_classification": "SYNTHETIC",
     "simulate_lis_noise": false,
-    "require_integration": true
+    "require_integration": true,
+    "include_dqd": false
   }
 }

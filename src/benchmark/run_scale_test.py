@@ -106,6 +106,8 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
         "CMF_DB_PATH": str(database),
         "CMF_RUNS_DIR": str(output_root / "runs"),
         "CMF_MANIFESTS_DIR": str(output_root / "manifests"),
+        "CMF_REPORTS_DIR": str(output_root / "run-reports"),
+        "CMF_DQD_RESULTS_DIR": str(output_root / "dqd-results"),
         "CMF_DATA_CLASSIFICATION": "SYNTHETIC",
     })
     pipeline_seconds = _run_logged(

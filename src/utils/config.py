@@ -16,8 +16,9 @@ SUPPORTED_PROFILES = {"development", "benchmark", "hospital"}
 PROFILE_SCHEMA_VERSION = "1.0.0"
 PROFILE_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
-    "manifests_dir", "ollama_url", "model_name", "similarity_threshold",
-    "data_classification", "simulate_lis_noise", "require_integration",
+    "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
+    "model_name", "similarity_threshold", "data_classification",
+    "simulate_lis_noise", "require_integration", "include_dqd",
 }
 ENVIRONMENT_KEYS = {
     "db_path": "CMF_DB_PATH",
@@ -26,16 +27,19 @@ ENVIRONMENT_KEYS = {
     "chroma_path": "CMF_CHROMA_PATH",
     "runs_dir": "CMF_RUNS_DIR",
     "manifests_dir": "CMF_MANIFESTS_DIR",
+    "reports_dir": "CMF_REPORTS_DIR",
+    "dqd_results_dir": "CMF_DQD_RESULTS_DIR",
     "ollama_url": "CMF_OLLAMA_URL",
     "model_name": "CMF_MODEL_NAME",
     "similarity_threshold": "CMF_SIMILARITY_THRESHOLD",
     "data_classification": "CMF_DATA_CLASSIFICATION",
     "simulate_lis_noise": "CMF_SIMULATE_LIS_NOISE",
     "require_integration": "CMF_REQUIRE_INTEGRATION",
+    "include_dqd": "CMF_INCLUDE_DQD",
 }
 PATH_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
-    "manifests_dir",
+    "manifests_dir", "reports_dir", "dqd_results_dir",
 }
 
 
@@ -53,12 +57,15 @@ class RuntimeSettings:
     chroma_path: Path
     runs_dir: Path
     manifests_dir: Path
+    reports_dir: Path
+    dqd_results_dir: Path
     ollama_url: str
     model_name: str
     similarity_threshold: float
     data_classification: str
     simulate_lis_noise: bool
     require_integration: bool
+    include_dqd: bool
 
     def manifest(self) -> dict:
         """Return non-secret settings suitable for immutable run provenance."""
@@ -70,12 +77,15 @@ class RuntimeSettings:
             "chroma_path": str(self.chroma_path),
             "runs_dir": str(self.runs_dir),
             "manifests_dir": str(self.manifests_dir),
+            "reports_dir": str(self.reports_dir),
+            "dqd_results_dir": str(self.dqd_results_dir),
             "ollama_url": self.ollama_url,
             "model_name": self.model_name,
             "similarity_threshold": self.similarity_threshold,
             "data_classification": self.data_classification,
             "simulate_lis_noise": self.simulate_lis_noise,
             "require_integration": self.require_integration,
+            "include_dqd": self.include_dqd,
         }
 
 
@@ -163,6 +173,7 @@ def load_settings(
     require_integration = _parse_boolean(
         values["require_integration"], "CMF_REQUIRE_INTEGRATION"
     )
+    include_dqd = _parse_boolean(values["include_dqd"], "CMF_INCLUDE_DQD")
     if not model_name:
         raise SettingsError("CMF_MODEL_NAME must not be empty.")
     if profile == "hospital":
@@ -176,6 +187,8 @@ def load_settings(
             raise SettingsError("LIS noise simulation is forbidden in the hospital profile.")
         if not require_integration:
             raise SettingsError("The hospital profile requires the complete integration gate.")
+        if not include_dqd:
+            raise SettingsError("The hospital profile requires the OHDSI DQD gate.")
     privacy_environment = dict(env)
     privacy_environment["CMF_DATA_CLASSIFICATION"] = classification
     privacy_environment["CMF_OLLAMA_URL"] = ollama_url
@@ -194,6 +207,7 @@ def load_settings(
         data_classification=privacy["classification"],
         simulate_lis_noise=simulate_lis_noise,
         require_integration=require_integration,
+        include_dqd=include_dqd,
     )
 
 
@@ -206,11 +220,14 @@ VOCAB_DIR = str(SETTINGS.vocab_dir)
 CHROMA_PATH = str(SETTINGS.chroma_path)
 RUNS_DIR = str(SETTINGS.runs_dir)
 MANIFESTS_DIR = str(SETTINGS.manifests_dir)
+REPORTS_DIR = str(SETTINGS.reports_dir)
+DQD_RESULTS_DIR = str(SETTINGS.dqd_results_dir)
 OLLAMA_URL = SETTINGS.ollama_url
 MODEL_NAME = SETTINGS.model_name
 SIMILARITY_THRESHOLD = SETTINGS.similarity_threshold
 SIMULATE_LIS_NOISE = SETTINGS.simulate_lis_noise
 REQUIRE_INTEGRATION = SETTINGS.require_integration
+INCLUDE_DQD = SETTINGS.include_dqd
 PROFILE = SETTINGS.profile
 
 

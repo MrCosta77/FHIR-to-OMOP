@@ -7,7 +7,11 @@ if (!file.exists(file.path(project_root, "main.py"))) {
 
 resume_id <- Sys.getenv("DQD_RESUME_ID", unset = "")
 run_id <- if (nzchar(resume_id)) resume_id else format(Sys.time(), "%Y%m%d%H%M%S")
-parts_root <- file.path(project_root, "dqd_results", ".parts", run_id)
+dqd_root <- Sys.getenv(
+  "CMF_DQD_RESULTS_DIR", unset = file.path(project_root, "dqd_results")
+)
+dir.create(dqd_root, recursive = TRUE, showWarnings = FALSE)
+parts_root <- file.path(dqd_root, ".parts", run_id)
 base_folder <- file.path(parts_root, "base")
 dir.create(base_folder, recursive = TRUE, showWarnings = FALSE)
 
@@ -81,9 +85,10 @@ for (table in heavy_tables) {
 }
 
 combined_json <- file.path(
-  project_root, "dqd_results", paste0("cmf-synthea-", run_id, ".json")
+  dqd_root, paste0("cmf-synthea-", run_id, ".json")
 )
-python <- if (.Platform$OS.type == "windows") {
+python <- Sys.getenv("CMF_PYTHON_EXECUTABLE", unset = "")
+if (!nzchar(python)) python <- if (.Platform$OS.type == "windows") {
   file.path(project_root, ".venv", "Scripts", "python.exe")
 } else {
   file.path(project_root, ".venv", "bin", "python")

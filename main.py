@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.utils.config import SETTINGS, load_settings
+from src.quality.run_report import (
+    build_run_report,
+    publish_staged_report,
+    stage_immutable_report,
+)
 
 PROJECT_ROOT = SETTINGS.project_root
 
@@ -24,6 +29,8 @@ def resolve_runtime_paths(environment=None):
         "fhir_dir": settings.fhir_dir,
         "runs_dir": settings.runs_dir,
         "manifests_dir": settings.manifests_dir,
+        "reports_dir": settings.reports_dir,
+        "dqd_results_dir": settings.dqd_results_dir,
     }
 
 
@@ -32,9 +39,15 @@ PUBLISHED_DB = _RUNTIME_PATHS["published_db"]
 FHIR_INPUT_DIR = _RUNTIME_PATHS["fhir_dir"]
 RUNS_DIR = _RUNTIME_PATHS["runs_dir"]
 MANIFESTS_DIR = _RUNTIME_PATHS["manifests_dir"]
+REPORTS_DIR = _RUNTIME_PATHS["reports_dir"]
+DQD_RESULTS_DIR = _RUNTIME_PATHS["dqd_results_dir"]
 
 PIPELINE_STEPS = [
-    {"name": "0. Validate External Prerequisites", "script": "src/quality/preflight.py"},
+    {
+        "name": "0. Validate External Prerequisites",
+        "script": "src/quality/preflight.py",
+        "args": ["--include-dqd"] if SETTINGS.include_dqd else [],
+    },
     {"name": "1. Setup Vocabularies", "script": "src/utils/setup_vocab.py"},
     {"name": "2. Setup Audit/Provenance", "script": "src/utils/setup_audit.py"},
     {"name": "2b. Build OMOP DDL Skeleton", "script": "src/utils/setup_cdm_schema.py"},
@@ -66,8 +79,24 @@ PIPELINE_STEPS = [
         "script": "tests",
         "is_pytest": True,
     },
-    {"name": "17. Generate RWE Analytics Report", "script": "src/analytics/rwe_cohort_discovery.py"},
 ]
+if SETTINGS.include_dqd:
+    PIPELINE_STEPS.extend([
+        {
+            "name": "17. Run OHDSI DataQualityDashboard",
+            "script": "src/analytics/run_dqd_tests.R",
+            "is_rscript": True,
+        },
+        {
+            "name": "17b. Validate OHDSI DQD Policy",
+            "script": "src/quality/validate_dqd.py",
+            "is_dqd_validation": True,
+        },
+    ])
+PIPELINE_STEPS.append({
+    "name": "18. Generate RWE Analytics Report",
+    "script": "src/analytics/rwe_cohort_discovery.py",
+})
 
 
 def utc_now():
@@ -176,14 +205,31 @@ def run_step(step, environment):
     script_path = PROJECT_ROOT / step["script"]
     if not script_path.exists():
         raise FileNotFoundError(f"Required pipeline step not found: {script_path}")
-    command = [sys.executable, "-X", "utf8"]
+    if step.get("is_rscript"):
+        from src.quality.preflight import find_rscript
+
+        rscript = find_rscript()
+        if rscript is None:
+            raise FileNotFoundError("Rscript is required for the DQD gate.")
+        command = [str(rscript), str(script_path)]
+    else:
+        command = [sys.executable, "-X", "utf8"]
     if step.get("is_pytest"):
         run_id = environment.get("CMF_RUN_ID", "untracked")
         pytest_temp = RUNS_DIR / f"{run_id}.pytest"
+        junit_path = RUNS_DIR / f"{run_id}.pytest.xml"
         command.extend([
             "-m", "pytest", str(script_path), "-v", "--disable-warnings",
             f"--basetemp={pytest_temp}",
+            f"--junitxml={junit_path}",
         ])
+    elif step.get("is_dqd_validation"):
+        run_id = environment.get("CMF_RUN_ID", "untracked")
+        command.extend([str(script_path), str(
+            DQD_RESULTS_DIR / f"cmf-synthea-{run_id}.json"
+        )])
+    elif step.get("is_rscript"):
+        pass
     else:
         command.append(str(script_path))
     command.extend(step.get("args", []))
@@ -214,6 +260,11 @@ def main():
     environment["CMF_RUN_ID"] = run_id
     environment["CMF_DB_PATH"] = str(staging_db)
     environment["CMF_REQUIRE_INTEGRATION"] = "1"
+    environment["CMF_DQD_RESULTS_DIR"] = str(DQD_RESULTS_DIR)
+    environment["CMF_PYTHON_EXECUTABLE"] = sys.executable
+    environment["DQD_RESUME_ID"] = run_id
+    database_published = False
+    staged_report_path = None
     write_manifest(manifest_path, manifest)
     persist_run(staging_db, manifest)
 
@@ -235,12 +286,40 @@ def main():
         manifest["status"] = "SUCCESS"
         manifest["completed_at"] = utc_now().isoformat()
         persist_run(staging_db, manifest)
-        PUBLISHED_DB.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging_db, PUBLISHED_DB)
         write_manifest(manifest_path, manifest)
+        junit_path = RUNS_DIR / f"{run_id}.pytest.xml"
+        dqd_path = (
+            DQD_RESULTS_DIR / f"cmf-synthea-{run_id}.json"
+            if SETTINGS.include_dqd else None
+        )
+        report = build_run_report(
+            manifest, staging_db, junit_path,
+            dqd_required=SETTINGS.include_dqd, dqd_path=dqd_path,
+        )
+        staged_report_path, report_path = stage_immutable_report(report, REPORTS_DIR)
+        try:
+            PUBLISHED_DB.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staging_db, PUBLISHED_DB)
+            database_published = True
+        except Exception:
+            orphan = RUNS_DIR / f"{run_id}.orphaned-report.json"
+            os.replace(staged_report_path, orphan)
+            raise
+        publish_staged_report(staged_report_path, report_path)
+        staged_report_path = None
         elapsed = (utc_now() - started).total_seconds()
-        print(f"Pipeline {run_id} published atomically in {elapsed:.1f}s")
+        print(
+            f"Pipeline {run_id} published atomically in {elapsed:.1f}s; "
+            f"immutable report: {report_path}"
+        )
     except Exception as exc:
+        if database_published:
+            print(
+                f"Pipeline {run_id} database was published, but immutable report "
+                f"publication requires recovery from: {staged_report_path}",
+                file=sys.stderr,
+            )
+            raise
         manifest["status"] = "FAILED"
         manifest["completed_at"] = utc_now().isoformat()
         manifest["error_message"] = str(exc)

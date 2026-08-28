@@ -13,7 +13,9 @@ output_folder <- normalizePath(args[[3]], winslash = "/", mustWork = FALSE)
 included_table <- if (length(args) == 4L) args[[4]] else NULL
 dir.create(output_folder, recursive = TRUE, showWarnings = FALSE)
 
-db_path <- file.path(project_root, "data", "omop_clinical.duckdb")
+db_path <- Sys.getenv(
+  "CMF_DB_PATH", unset = file.path(project_root, "data", "omop_clinical.duckdb")
+)
 connection_details <- createConnectionDetails(dbms = "duckdb", server = db_path)
 available_checks <- DataQualityDashboard::listDqChecks(cdmVersion = "5.4")
 all_check_names <- unique(available_checks$checkDescriptions$checkName)

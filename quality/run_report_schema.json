@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clinical-mapping-factory.local/schemas/run-report-v1.json",
+  "title": "Clinical Mapping Factory immutable run report",
+  "type": "object",
+  "required": [
+    "schema_version", "report_builder_version", "generated_at", "run",
+    "configuration", "inputs", "pipeline", "quality_gates", "mapping",
+    "database", "privacy", "readiness", "integrity"
+  ],
+  "properties": {
+    "schema_version": {"const": "cmf-run-report-v1"},
+    "report_builder_version": {"type": "string"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "run": {
+      "type": "object",
+      "required": ["run_id", "status", "git_commit"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^RUN-"},
+        "status": {"const": "SUCCESS"},
+        "git_commit": {"type": ["string", "null"]},
+        "started_at": {"type": ["string", "null"]},
+        "completed_at": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "configuration": {"type": "object"},
+    "inputs": {"type": "object"},
+    "pipeline": {"type": "object"},
+    "quality_gates": {
+      "type": "object",
+      "required": ["pytest", "dqd"],
+      "properties": {
+        "pytest": {"type": "object"},
+        "dqd": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "mapping": {"type": "object"},
+    "database": {
+      "type": "object",
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "privacy": {"type": "object"},
+    "readiness": {
+      "type": "object",
+      "required": ["classification", "deployment_authorized", "clinical_validation_required"],
+      "properties": {
+        "classification": {"const": "TECHNICAL_EVIDENCE"},
+        "deployment_authorized": {"const": false},
+        "clinical_validation_required": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "payload_sha256"],
+      "properties": {
+        "algorithm": {"const": "SHA-256"},
+        "canonicalization": {"type": "string"},
+        "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

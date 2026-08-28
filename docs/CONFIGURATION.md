@@ -18,7 +18,8 @@ the execution environment using the mechanism appropriate to that platform.
   the Llama candidate selected for development calibration.
 - `hospital` defaults to PHI, a conservative threshold of `1.0`, and fails at
   import/startup unless PHI activation, named approval and positive retention
-  are provided. It is a safety template, not deployment authorization.
+  are provided. It also requires the complete integration and OHDSI DQD gates.
+  It is a safety template, not deployment authorization.
 
 Relative paths are anchored at the repository root, independent of the current
 working directory. Absolute paths are accepted on the host platform. No profile
