@@ -14,6 +14,8 @@ from typing import Iterable
 
 import duckdb
 
+from src.utils.config import SETTINGS
+
 SYSTEM_TO_VOCABULARY = {
     "http://snomed.info/sct": "SNOMED",
     "http://loinc.org": "LOINC",
@@ -233,7 +235,7 @@ def evaluate(fixture_path: Path, database_path: Path, split: str = "all") -> dic
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=Path("benchmarks/dirty_hospital/cases.jsonl"))
-    parser.add_argument("--database", type=Path, default=Path("data/omop_clinical.duckdb"))
+    parser.add_argument("--database", type=Path, default=SETTINGS.db_path)
     parser.add_argument("--split", choices=["all", "development", "held_out"], default="all")
     parser.add_argument("--output", type=Path, default=Path("benchmark_results/deterministic_baseline.json"))
     args = parser.parse_args()

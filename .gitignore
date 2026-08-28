@@ -3,6 +3,9 @@
 */.venv/
 env/
 venv/
+.env
+.env.*
+!.env.example
 
 # Python Cache & Compiled Files
 __pycache__/

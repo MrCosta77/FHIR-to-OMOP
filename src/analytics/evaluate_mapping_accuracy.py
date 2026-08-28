@@ -21,7 +21,7 @@ def evaluate_accuracy():
         except Exception:
             print("❌ ERROR: No Ground Truth table found.")
             print("Please run the pipeline with noise enabled first:")
-            print('$env:SIMULATE_LIS_NOISE="true"; python main.py')
+            print('$env:CMF_SIMULATE_LIS_NOISE="true"; python main.py')
             return
 
         # Evaluate Precision and Recall by joining STCM-mapped measurements with ground truth

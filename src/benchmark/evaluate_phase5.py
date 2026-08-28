@@ -18,6 +18,8 @@ import duckdb
 import ollama
 import onnxruntime
 
+from src.utils.config import SETTINGS
+
 from src.benchmark.evaluate_dirty_hospital import (
     deterministic_prediction,
     load_cases,
@@ -41,8 +43,8 @@ from src.mapping.semantic_mapper import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
 DEFAULT_PROTOCOL = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_protocol.json"
-DEFAULT_DATABASE = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
-DEFAULT_CHROMA = PROJECT_ROOT / "data" / "chroma_db"
+DEFAULT_DATABASE = SETTINGS.db_path
+DEFAULT_CHROMA = SETTINGS.chroma_path
 EVALUATOR_VERSION = "1.0.0"
 DOMAIN_TARGETS = {
     "Condition": "condition_occurrence",

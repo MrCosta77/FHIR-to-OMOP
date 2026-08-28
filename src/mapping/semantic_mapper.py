@@ -23,11 +23,10 @@ from src.security.privacy import (
     redact_direct_identifiers,
     validate_privacy_runtime,
 )
-from src.utils.config import DB_PATH, MODEL_NAME, OLLAMA_URL
+from src.utils.config import CHROMA_PATH, DB_PATH, MODEL_NAME, OLLAMA_URL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CHROMA_PATH = PROJECT_ROOT / "data" / "chroma_db"
 PROMPT_VERSION = "mapping-json-v2"
 GENERATION_PARAMETERS = {"temperature": 0.0, "seed": 0, "num_predict": 512}
 OLLAMA_TIMEOUT_SECONDS = 120.0

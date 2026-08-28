@@ -1,4 +1,3 @@
-import os
 import sys
 import duckdb
 import random
@@ -8,13 +7,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH
+from src.utils.config import DB_PATH, SIMULATE_LIS_NOISE
 
 def run_noise_injection():
     # 1. O Portão de Segurança (Só corre se o utilizador pedir explicitamente)
-    if os.getenv("SIMULATE_LIS_NOISE") != "true":
+    if not SIMULATE_LIS_NOISE:
         print("🧪 LIS NOISE SIMULATION: Disabled.")
-        print("⏭️  Skipping noise injection. To run, use: $env:SIMULATE_LIS_NOISE=\"true\"; python main.py")
+        print("⏭️  Skipping noise injection. Set CMF_SIMULATE_LIS_NOISE=true to enable it.")
         return
 
     print("🧪 STARTING SIMULATION: INJECTING LEGACY LIS NOISE")

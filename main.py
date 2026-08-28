@@ -12,25 +12,18 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.utils.config import SETTINGS, load_settings
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = SETTINGS.project_root
 
 
 def resolve_runtime_paths(environment=None):
-    environment = os.environ if environment is None else environment
+    settings = load_settings(environment)
     return {
-        "published_db": Path(environment.get(
-            "CMF_DB_PATH", PROJECT_ROOT / "data" / "omop_clinical.duckdb"
-        )).resolve(),
-        "fhir_dir": Path(environment.get(
-            "CMF_FHIR_DIR", PROJECT_ROOT / "synthea" / "output" / "fhir"
-        )).resolve(),
-        "runs_dir": Path(environment.get(
-            "CMF_RUNS_DIR", PROJECT_ROOT / "data" / "runs"
-        )).resolve(),
-        "manifests_dir": Path(environment.get(
-            "CMF_MANIFESTS_DIR", PROJECT_ROOT / "data" / "run_manifests"
-        )).resolve(),
+        "published_db": settings.db_path,
+        "fhir_dir": settings.fhir_dir,
+        "runs_dir": settings.runs_dir,
+        "manifests_dir": settings.manifests_dir,
     }
 
 
@@ -96,7 +89,7 @@ def sha256_file(path):
 def input_manifest():
     roots = [
         FHIR_INPUT_DIR,
-        PROJECT_ROOT / "data" / "omop_vocab",
+        SETTINGS.vocab_dir,
     ]
     files = []
     for root in roots:
@@ -213,7 +206,7 @@ def main():
         "configuration": {
             "database_publish_path": str(PUBLISHED_DB),
             "python": sys.version,
-            "similarity_threshold": os.environ.get("CMF_SIMILARITY_THRESHOLD", "0.90"),
+            "runtime": SETTINGS.manifest(),
         },
         "steps": [],
     }

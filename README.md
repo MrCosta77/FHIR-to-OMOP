@@ -173,17 +173,21 @@ Any external FHIR bundle can be checked before ETL with
 **2. Prerequisites**
 * Download the **OMOP Vocabularies** from [Athena](https://athena.ohdsi.org/) and place `CONCEPT.csv`, `CONCEPT_RELATIONSHIP.csv`, `VOCABULARY.csv`, `DOMAIN.csv`, `CONCEPT_CLASS.csv` and `CONCEPT_ANCESTOR.csv` in `data/omop_vocab/`. Missing required files fail the run.
 * Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `synthea/output/fhir/`. Every bundle is contract-validated before clinical tables are rebuilt.
-* Ensure [Ollama](https://ollama.ai/) is installed and running locally with the target model: `ollama pull qwen2.5-coder:7b`
+* Ensure [Ollama](https://ollama.ai/) is installed and running locally with the model selected by the active profile. Development defaults to `qwen2.5-coder:7b`; benchmark and hospital default to `llama3.1`.
 
 Check all mandatory pipeline inputs and services before starting a run:
 ```bash
+python -m src.utils.config
 python -m src.quality.preflight
 ```
 Add `--include-dqd` to also require `Rscript` for the official OHDSI DQD.
+Runtime settings come from the versioned `development`, `benchmark`, or
+fail-closed `hospital` profile and explicit `CMF_*` overrides. See
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and [`.env.example`](.env.example).
 
 **3. Run the Full Orchestrator**
 Executes the full pipeline (Vocabularies ➔ Base ETL ➔ STCM Application ➔ Era Derivation ➔ Tests ➔ Analytics).
-*(To test AI accuracy, inject LIS noise by setting `SIMULATE_LIS_NOISE="true"`).*
+*(To test AI accuracy, inject LIS noise by setting `CMF_SIMULATE_LIS_NOISE="true"`).*
 ```bash
 python main.py
 ```

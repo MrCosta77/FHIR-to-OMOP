@@ -218,6 +218,14 @@ thresholds continuam `PROVISIONAL_TECHNICAL` e não foram promovidos.
 - Extrair componentes reutilizáveis para um futuro `clinical-mapping-core`.
 - Gerar relatórios imutáveis por execução com testes, DQD e métricas do mapping.
 
+Estado 7A: tecnicamente concluído. A configuração tem perfis versionados
+`development`, `benchmark` e `hospital`, precedência explícita de ambiente,
+caminhos portáteis ancorados no repositório e validação fail-closed de tipos,
+thresholds, classificação PHI e endpoint LLM local. O perfil hospital não pode
+reduzir a classificação PHI, threshold 1,0, quality gate completo nem ativar
+ruído LIS. A configuração efetiva não-secreta entra no manifesto de execução e
+é validada na CI; 145 testes passaram no fecho do marco.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

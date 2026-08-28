@@ -14,11 +14,13 @@ from pathlib import Path
 
 import duckdb
 
+from src.utils.config import load_settings
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SYNTHEA_ROOT = PROJECT_ROOT / "synthea"
 DEFAULT_ROOT = PROJECT_ROOT / "benchmark_results" / "scale"
-DEFAULT_PUBLISHED_DB = PROJECT_ROOT / "data" / "omop_clinical.duckdb"
+DEFAULT_PUBLISHED_DB = load_settings({"CMF_PROFILE": "development"}).db_path
 CLINICAL_TABLES = (
     "person", "visit_occurrence", "condition_occurrence", "drug_exposure",
     "measurement", "observation", "procedure_occurrence", "device_exposure",
@@ -99,6 +101,7 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
 
     environment = os.environ.copy()
     environment.update({
+        "CMF_PROFILE": "benchmark",
         "CMF_FHIR_DIR": str(fhir_dir),
         "CMF_DB_PATH": str(database),
         "CMF_RUNS_DIR": str(output_root / "runs"),

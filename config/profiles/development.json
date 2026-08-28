@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "profile": "development",
+  "defaults": {
+    "db_path": "data/omop_clinical.duckdb",
+    "fhir_dir": "synthea/output/fhir",
+    "vocab_dir": "data/omop_vocab",
+    "chroma_path": "data/chroma_db",
+    "runs_dir": "data/runs",
+    "manifests_dir": "data/run_manifests",
+    "ollama_url": "http://localhost:11434/api/generate",
+    "model_name": "qwen2.5-coder:7b",
+    "similarity_threshold": 0.9,
+    "data_classification": "SYNTHETIC",
+    "simulate_lis_noise": false,
+    "require_integration": false
+  }
+}
