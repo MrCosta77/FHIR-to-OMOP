@@ -71,6 +71,9 @@ def ensure_governance_tables(con):
     for name, datatype in (
         ("run_id", "VARCHAR"),
         ("mapping_decision_id", "VARCHAR"),
+        ("source_adapter", "VARCHAR"),
+        ("source_record_key", "VARCHAR"),
+        ("publication_eligible", "BOOLEAN DEFAULT TRUE"),
     ):
         _add_column(con, "mapping_provenance", name, datatype)
 
@@ -116,6 +119,9 @@ def ensure_governance_tables(con):
         ("model_digest", "VARCHAR"),
         ("generation_parameters", "VARCHAR"),
         ("index_signature", "VARCHAR"),
+        ("source_adapter", "VARCHAR"),
+        ("source_record_key", "VARCHAR"),
+        ("publication_eligible", "BOOLEAN DEFAULT TRUE"),
     ):
         _add_column(con, "mapping_decision", name, datatype)
     con.execute("""
@@ -251,10 +257,16 @@ def _migrate_legacy_decisions(con):
         """)
 
 
-def decision_id_for(run_id, target_table, source_value, concept_id):
-    identity = "|".join(
-        [run_id or "UNTRACKED", target_table, source_value.strip().lower(), str(concept_id)]
-    )
+def decision_id_for(
+    run_id, target_table, source_value, concept_id, *, source_record_key=None
+):
+    identity_parts = [
+        run_id or "UNTRACKED", target_table, source_value.strip().lower(),
+        str(concept_id),
+    ]
+    if source_record_key:
+        identity_parts.append(source_record_key)
+    identity = "|".join(identity_parts)
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:mapping-decision:{identity}"))
 
 
@@ -287,18 +299,25 @@ def register_decision(
     model_digest=None,
     generation_parameters=None,
     index_signature=None,
+    source_adapter=None,
+    source_record_key=None,
+    publication_eligible=True,
 ):
     ensure_governance_tables(con)
     run_id = run_id or current_run_id()
-    decision_id = decision_id_for(run_id, target_table, source_value, concept_id)
+    decision_id = decision_id_for(
+        run_id, target_table, source_value, concept_id,
+        source_record_key=source_record_key,
+    )
     con.execute("""
         INSERT INTO mapping_decision (
             mapping_decision_id, run_id, target_table, source_value,
             normalized_value, assigned_concept_id, mapping_method, score,
             model_name, prompt_version, vocabulary_version, status,
             llm_decision, llm_confidence, llm_reason, clinical_signals,
-            model_digest, generation_parameters, index_signature
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_digest, generation_parameters, index_signature,
+            source_adapter, source_record_key, publication_eligible
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (mapping_decision_id) DO UPDATE SET
             normalized_value = EXCLUDED.normalized_value,
             score = EXCLUDED.score,
@@ -312,6 +331,9 @@ def register_decision(
             model_digest = EXCLUDED.model_digest,
             generation_parameters = EXCLUDED.generation_parameters,
             index_signature = EXCLUDED.index_signature,
+            source_adapter = EXCLUDED.source_adapter,
+            source_record_key = EXCLUDED.source_record_key,
+            publication_eligible = EXCLUDED.publication_eligible,
             status = CASE
                 WHEN mapping_decision.status IN ('APPROVED', 'REJECTED')
                 THEN mapping_decision.status ELSE EXCLUDED.status END
@@ -321,6 +343,7 @@ def register_decision(
         prompt_version, vocabulary_version, status, llm_decision,
         llm_confidence, llm_reason, clinical_signals, model_digest,
         generation_parameters, index_signature,
+        source_adapter, source_record_key, bool(publication_eligible),
     ])
     return decision_id
 
@@ -339,11 +362,16 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
         raise ValueError("A clinical rationale is required.")
     ensure_governance_tables(con)
     row = con.execute("""
-        SELECT status FROM mapping_decision
+        SELECT status, COALESCE(publication_eligible, TRUE) FROM mapping_decision
         WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not row:
         raise ValueError(f"Unknown mapping decision: {decision_id}")
+    if not row[1]:
+        raise ValueError(
+            "Pre-ingestion proposals are not clinically reviewable until bound "
+            "to an explicit source vocabulary and ingested OMOP event."
+        )
     if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
         raise ValueError(f"Decision is not independently reviewable: {row[0]}")
     existing = con.execute("""
@@ -396,6 +424,7 @@ def blinded_review_queue(con, reviewer):
         LEFT JOIN mapping_provenance p
           ON p.mapping_decision_id = d.mapping_decision_id
         WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND COALESCE(d.publication_eligible, TRUE)
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_review r
               WHERE r.mapping_decision_id = d.mapping_decision_id
@@ -440,6 +469,7 @@ def blinded_adjudication_queue(con, adjudicator):
         LEFT JOIN mapping_provenance p
           ON p.mapping_decision_id = d.mapping_decision_id
         WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND COALESCE(d.publication_eligible, TRUE)
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_adjudication a
               WHERE a.mapping_decision_id = d.mapping_decision_id
@@ -595,12 +625,18 @@ def _finalize_mapping_decision(
         raise ValueError("A reviewer name is required.")
     ensure_governance_tables(con)
     row = con.execute("""
-        SELECT target_table, source_value, assigned_concept_id, run_id
+        SELECT target_table, source_value, assigned_concept_id, run_id,
+               COALESCE(publication_eligible, TRUE)
         FROM mapping_decision WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not row:
         raise ValueError(f"Unknown mapping decision: {decision_id}")
-    target_table, source_value, concept_id, run_id = row
+    target_table, source_value, concept_id, run_id, publication_eligible = row
+    if not publication_eligible:
+        raise ValueError(
+            "This pre-ingestion proposal is not adjudication-eligible; "
+            "bind it to an explicit source vocabulary and ingested OMOP event first."
+        )
     source_vocabulary, target_vocabulary, expected_domain = TARGET_GOVERNANCE[target_table]
     new_status = "APPROVED" if action == "APPROVE" else "REJECTED"
 

@@ -49,7 +49,12 @@ boundary. FHIR/OMOP, retrieval, Ollama, privacy and database publication remain
 explicit adapters. See [`docs/CLINICAL_MAPPING_CORE.md`](docs/CLINICAL_MAPPING_CORE.md).
 The first non-FHIR boundary accepts the versioned, allowlisted
 [`hospital-csv-v1`](docs/HOSPITAL_CSV_ADAPTER.md) contract and converts its
-redacted clinical fields into the same typed request without publishing data.
+redacted clinical fields into the same typed request. Its governed runner now
+reuses Athena/Chroma retrieval and the local structured LLM to persist
+idempotent pre-ingestion proposals and abstentions. These carry hashed record
+keys and `publication_eligible=false`, so they cannot enter review,
+adjudication, STCM or OMOP publication before a later ingestion step binds an
+explicit source vocabulary and concrete OMOP event.
 
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and

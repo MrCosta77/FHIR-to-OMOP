@@ -268,6 +268,16 @@ adaptador não consulta o modelo, não escreve DuckDB e não publica mappings; o
 encaixe futuro terá de reutilizar retrieval, revisão e adjudicação existentes.
 O marco fechou com 173 testes aprovados.
 
+Estado 7D.3: tecnicamente concluído. Cada registo CSV validado reutiliza o
+índice Athena/Chroma do domínio, o contrato estruturado `SELECT`/`ABSTAIN`, o
+LLM exclusivamente local e a proveniência do modelo. Retrieval, prompt e texto
+de resposta são redigidos; `record_id` nunca é persistido e é correlacionado por
+SHA-256 estável. Propostas e abstenções são idempotentes e explicitamente
+`publication_eligible=false`: não entram nas filas clínicas e não podem alterar
+STCM, políticas de rejeição ou tabelas OMOP antes de uma futura ingestão as
+ligar a vocabulário de origem explícito e evento OMOP concreto. O marco fechou
+com uma suite de 177 testes para validação no ambiente CI/reprodutível.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

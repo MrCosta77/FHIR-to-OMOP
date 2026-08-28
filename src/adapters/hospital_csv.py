@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 from collections import Counter
@@ -74,6 +75,26 @@ class HospitalCSVRecord:
     target_vocabulary: str
     source_value: str
     context: tuple[tuple[str, str], ...]
+
+    @property
+    def source_record_key(self) -> str:
+        """Return a stable, non-reversible key without persisting record_id."""
+        source_system = dict(self.context).get("source_system", "UNSPECIFIED")
+        identity = (
+            f"{SCHEMA_VERSION}|{source_system}|{self.target_table}|{self.record_id}"
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+    def prepare_retrieval_text(self) -> tuple[str, tuple[str, ...]]:
+        """Build redacted terminology retrieval text from prompt-eligible fields."""
+        values = [self.source_value, *(value for _key, value in self.context)]
+        redacted_values = []
+        categories = []
+        for value in values:
+            redacted, found = redact_direct_identifiers(value)
+            redacted_values.append(redacted)
+            categories.extend(found)
+        return " | ".join(redacted_values), tuple(sorted(set(categories)))
 
     def prepare_mapping_request(
         self,

@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
 - Versioned `hospital-csv-v1` adapter with comma/semicolon/tab support,
   allowlisted clinical context, fail-closed routing and dates, direct-identifier
   redaction and a metadata-only validation CLI.
+- Governed hospital CSV runner reusing Athena/Chroma retrieval and the local
+  structured LLM, with hashed record correlation, idempotent proposal/abstention
+  persistence and a fail-closed pre-ingestion publication gate.
 
 ## [0.1.0] - 2026-08-28
 

@@ -240,6 +240,92 @@ def _decision_metadata_kwargs(decision_metadata):
     }
 
 
+def _vocabulary_version(con):
+    row = con.execute("""
+        SELECT vocabulary_version FROM vocabulary
+        WHERE vocabulary_id = 'None' LIMIT 1
+    """).fetchone()
+    return row[0] if row else "Unknown"
+
+
+def record_external_mapping_decision(
+    con,
+    target_table,
+    source_value,
+    source_record_key,
+    match,
+    decision_metadata,
+    *,
+    source_adapter,
+):
+    """Persist one pre-ingestion decision without making it publishable."""
+    source_adapter = (source_adapter or "").strip()
+    if not source_adapter:
+        raise ValueError("External mapping decisions require a source adapter")
+    if not re.fullmatch(r"[0-9a-f]{64}", source_record_key or ""):
+        raise ValueError("External source_record_key must be a lowercase SHA-256 digest")
+    decision = decision_metadata.get("decision")
+    if decision not in {"SELECT", "ABSTAIN"}:
+        raise ValueError("External mapping decision must be SELECT or ABSTAIN")
+    if (decision == "SELECT") != (match is not None):
+        raise ValueError("SELECT requires a match and ABSTAIN forbids one")
+    concept_id = int(match[0]) if match else 0
+    concept_name = match[1] if match else None
+    score = (
+        float(match[3])
+        if match
+        else float(decision_metadata.get("confidence", 0.0))
+    )
+    is_abstention = decision == "ABSTAIN"
+    review_status = "LLM_ABSTAIN"
+    decision_status = "ABSTAINED"
+    if not is_abstention:
+        review_status = (
+            "Pre_Ingestion_Proposal"
+            if score >= SIMILARITY_THRESHOLD
+            else "Pre_Ingestion_Low_Confidence"
+        )
+        decision_status = (
+            "PRE_INGESTION"
+            if review_status == "Pre_Ingestion_Proposal"
+            else "PRE_INGESTION_LOW_CONFIDENCE"
+        )
+    metadata_kwargs = _decision_metadata_kwargs(decision_metadata)
+    decision_model_name = metadata_kwargs.pop("model_name") or MODEL_NAME
+    decision_id = register_decision(
+        con, target_table, source_value, concept_id, concept_name,
+        "llm_rag_json", score, decision_model_name, _vocabulary_version(con),
+        decision_status,
+        source_adapter=source_adapter,
+        source_record_key=source_record_key,
+        publication_eligible=False,
+        **metadata_kwargs,
+    )
+    target_id = -int(source_record_key[:15], 16)
+    before = con.execute("SELECT COUNT(*) FROM mapping_provenance").fetchone()[0]
+    con.execute("""
+        INSERT INTO mapping_provenance (
+            target_table, target_id, source_value, normalized_value,
+            assigned_concept_id, mapping_method, score, model_name,
+            vocabulary_version, reviewed_by, run_id, mapping_decision_id,
+            source_adapter, source_record_key, publication_eligible
+        ) SELECT ?, ?, ?, ?, ?, 'llm_rag_json', ?, ?, ?, ?, ?, ?, ?, ?, FALSE
+        WHERE NOT EXISTS (
+            SELECT 1 FROM mapping_provenance
+            WHERE source_adapter = ? AND source_record_key = ?
+              AND assigned_concept_id = ? AND mapping_method = 'llm_rag_json'
+              AND COALESCE(run_id, '') = COALESCE(?, '')
+        )
+    """, [
+        target_table, target_id, source_value, concept_name, concept_id, score,
+        decision_model_name, _vocabulary_version(con), review_status,
+        current_run_id(), decision_id, source_adapter, source_record_key,
+        source_adapter, source_record_key, concept_id, current_run_id(),
+    ])
+    after = con.execute("SELECT COUNT(*) FROM mapping_provenance").fetchone()[0]
+    return decision_status, after - before
+
+
 def record_mapping_proposal(con, target_table, source_value, match, decision_metadata=None):
     """Persist an event-level candidate without publishing it before review."""
     if not match:
