@@ -236,6 +236,16 @@ pode desativar o DQD run-linked nem publicar se este falhar a política aprovada
 Os relatórios mantêm `deployment_authorized=false` e revisão clínica obrigatória.
 O marco fechou com 154 testes aprovados.
 
+Estado 7C: tecnicamente concluído. A versão inicial é `0.1.0`; Python 3.12 tem lock
+universal transitivo com hashes e o stack R 4.6.1/OHDSI tem `renv.lock`. A CI
+instala exclusivamente o lock verificado, valida metadados e mantém um workflow
+de tags que só publica uma release quando tag, `VERSION`, changelog, testes e
+licença coincidirem. O changelog e o checklist de release mantêm explicitamente
+o estatuto `PROVISIONAL_TECHNICAL` e bloqueiam qualquer inferência de autorização
+clínica. O código e a documentação própria são publicados sob Apache-2.0, com
+atribuição preservada em `NOTICE`; dependências, modelos, vocabulários e dados
+mantêm os seus próprios termos. O marco fechou com 157 testes aprovados.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

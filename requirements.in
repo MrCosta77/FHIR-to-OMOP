@@ -1,0 +1,9 @@
+# Direct Python dependencies for FHIR-to-OMOP.
+# Generate requirements.lock with scripts/compile_python_lock.ps1.
+duckdb==1.5.5
+chromadb==1.5.9
+ollama==0.6.2
+sentence-transformers==2.5.1
+pandas==3.0.5
+streamlit>=1.30.0,<2
+pytest==9.1.1

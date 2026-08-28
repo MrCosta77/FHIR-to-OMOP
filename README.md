@@ -2,6 +2,10 @@
 
 An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)**, and maps messy/legacy clinical text using a **Retrieval-Augmented Generation (RAG) + Human-in-the-Loop Architecture**.
 
+Licensed under the [Apache License 2.0](LICENSE). Copyright and attribution are
+recorded in [`NOTICE`](NOTICE). Third-party libraries, models, vocabularies and
+datasets retain their own licences and terms.
+
 ## 🚀 Core Engineering Philosophy
 
 This project was built with strict adherence to clinical data management standards, focusing on determinism, auditability, and OHDSI conventions:
@@ -154,7 +158,7 @@ cd FHIR-to-OMOP
 # Set up Python virtual environment
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements.lock
 ```
 
 The repository includes a small versioned FHIR golden bundle. Contract and
@@ -162,6 +166,9 @@ unit tests run in GitHub Actions without Athena, Ollama, or a local database:
 ```bash
 python -m pytest -m "not integration" -v
 ```
+Python 3.12 dependencies are transitively pinned with artifact hashes. The
+official OHDSI R stack is pinned for R 4.6.1 in `renv.lock`; restore and release
+instructions are in [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md).
 After building the local DuckDB, run the complete suite (including OMOP
 integration checks):
 ```bash

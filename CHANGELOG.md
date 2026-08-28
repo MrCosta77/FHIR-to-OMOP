@@ -1,0 +1,34 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-08-28
+
+### Added
+
+- Reproducible FHIR-to-OMOP pipeline with official Athena vocabulary loading,
+  OMOP CDM 5.4 contracts, deterministic provenance and atomic publication.
+- Governed local-LLM mapping for Condition, Drug, Measurement, Procedure,
+  Observation and Device, including constrained retrieval, validated JSON,
+  normal abstention and blinded human review with independent adjudication.
+- Versioned dirty-hospital benchmark, held-out evaluation, development-only
+  calibration, scale evidence and privacy controls for future PHI processing.
+- Portable runtime profiles and immutable, content-addressed run evidence with
+  pytest, DQD, mapping coverage, governance counts and database/input hashes.
+- Universal hashed Python dependency lock and an R `renv.lock` containing the
+  official OHDSI DataQualityDashboard stack.
+- Apache License 2.0 with preserved project attribution in `NOTICE`.
+
+### Safety
+
+- The release is labelled `PROVISIONAL_TECHNICAL`; it is not a medical device,
+  clinical recommendation system or authorization for clinical deployment.
+- Documented clinical review and institutional governance remain mandatory
+  before any hospital pilot.
+
+[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/MrCosta77/FHIR-to-OMOP/releases/tag/v0.1.0
