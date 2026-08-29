@@ -1,9 +1,10 @@
-# Governed hospital source identity
+# Governed hospital source identity and event binding
 
-The source identity registry is the 7D.4A boundary between an opaque
-pre-ingestion record and a future publishable OMOP event. It establishes which
-local code system a hospital feed represents without enabling mapping review,
-STCM publication or clinical-table writes.
+The source identity registry and event-binding contract form the 7D.4 boundary
+between an opaque pre-ingestion record and an existing OMOP event. Registration
+establishes which local code system a hospital feed represents. Binding then
+verifies one concrete event before the proposal may enter the existing blinded
+review and adjudication workflow.
 
 ## Identity contract
 
@@ -55,15 +56,54 @@ In PHI mode, the actor must match `CMF_AUTHENTICATED_USER` and appear in
 `CMF_SOURCE_ADMIN_ALLOWLIST`. The current environment-variable identity remains
 a technical hook, not an institutional identity provider.
 
-## Deliberate 7D.4A limit
+## 7D.4B event-binding contract
 
-A resolved identity remains pre-ingestion evidence only. This phase does not:
+A resolved identity remains pre-ingestion evidence until
+`bind_pre_ingestion_decision` atomically verifies all of the following:
 
-- change `publication_eligible=false`;
-- place a proposal in clinical review or adjudication queues;
-- insert or update `source_to_concept_map`;
-- create or update an OMOP clinical event;
-- infer a vocabulary ID from free text or from a target table.
+- the caller is an authorized `source_admin` and supplies a rationale;
+- the registry entry is still active and unchanged;
+- the decision belongs to the same adapter, hashed record key and target table;
+- the pre-ingestion result is `SELECT`, not `ABSTAIN`;
+- `target_id` identifies exactly one existing OMOP event in that table;
+- its target concept is `0`, its source concept is `0`/`NULL`, and its source
+  value exactly equals the registered local `source_code`;
+- exactly one non-publishable provenance row exists for the decision.
 
-7D.4B must bind the resolved identity to a concrete, domain-correct OMOP event
-and verify the local code before any proposal can become reviewable.
+On success, `source_event_binding` records the immutable correlation, the
+decision and provenance receive the explicit source system/vocabulary/code and
+the proposal becomes eligible for the normal review queue. A repeated identical
+call is idempotent; any conflicting binding fails closed. Binding does not create
+or modify a clinical event, publish STCM, or approve a mapping.
+
+```python
+from src.adapters.event_binding import bind_pre_ingestion_decision
+
+binding = bind_pre_ingestion_decision(
+    con,
+    identity,
+    mapping_decision_id,
+    measurement_id,
+    actor="Source Administrator",
+    reason="Verified against the ingested LIS event",
+)
+```
+
+## Publication and policy scope
+
+Adjudication rechecks both the active registry entry and the bound event. An
+approval writes the explicit local `source_code` and `source_vocabulary_id` to
+`source_to_concept_map`; a rejection records policy under the same scoped
+identity. `scoped_approved_mapping_set` and
+`scoped_mapping_rejection_policy` are authoritative for this vocabulary-aware
+path, preventing identical codes in different hospitals from colliding. The
+legacy tables remain intact and are dual-written only for legacy Synthea
+decisions.
+
+`apply_stcm.py` joins hospital mappings through the active binding and approved
+event provenance, so another event with the same local code is not changed
+unless it has its own governed binding. The adapter still cannot publish, and
+the required two blinded reviewers plus distinct adjudicator remain the sole
+approval path.
+
+Audit records contain binding metadata, not raw source values or local codes.

@@ -83,6 +83,12 @@ pre-ingestion proposal/abstention + provenance
       |
       v
 publication_eligible = false (review, adjudication and STCM blocked)
+      |
+      v
+active source identity + exact existing OMOP event binding
+      |
+      v
+existing two-review + independent adjudication workflow
 ```
 
 The adapter does not make CSV clinically authorized. Real hospital files remain
@@ -92,10 +98,9 @@ defence in depth and is not a replacement for upstream minimization or DLP.
 
 ## Deliberate publication boundary
 
-This milestone stops before an end-to-end CSV ingestion pipeline. CSV decisions
-are explicitly tagged `source_adapter=hospital-csv-v1` and
-`publication_eligible=false`; they are excluded from clinical review queues,
-direct review fails closed, and neither approval nor rejection can mutate STCM,
-the rejection policy or an OMOP clinical table. A later ingestion phase must
-bind each record to an explicit local source vocabulary and a concrete OMOP
-event before the existing blinded review and adjudication path may be enabled.
+CSV decisions start as `publication_eligible=false`; they are excluded from
+clinical review, adjudication, STCM and clinical-table publication. After a
+separate ingestion step has created the OMOP event, the governed
+[identity/event-binding contract](SOURCE_IDENTITY_REGISTRY.md) may promote only
+an exact `SELECT` proposal into the existing blinded workflow. It does not
+provide CSV ingestion, create events, approve mappings or bypass review.

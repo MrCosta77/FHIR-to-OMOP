@@ -20,6 +20,11 @@ All notable changes to this project are documented here. The format follows
 - Historical hospital source-identity registry with OMOP-length local
   vocabulary IDs, explicit deactivation, unambiguous record resolution,
   metadata-only audit and a PHI-aware source-administrator role.
+- Atomic hospital source-event binding that revalidates active source identity,
+  exact local code and one existing unmapped OMOP event before enabling the
+  established two-review adjudication path. Vocabulary-scoped approval and
+  rejection policy prevents local-code collisions, while approved STCM
+  application remains restricted to the bound event.
 
 ## [0.1.0] - 2026-08-28
 

@@ -6,6 +6,7 @@ import os
 import uuid
 from collections import Counter, defaultdict
 
+from src.omop.mapping_targets import TARGETS
 from src.security.privacy import audit_security_event, authorize_actor
 
 
@@ -73,6 +74,9 @@ def ensure_governance_tables(con):
         ("mapping_decision_id", "VARCHAR"),
         ("source_adapter", "VARCHAR"),
         ("source_record_key", "VARCHAR"),
+        ("source_system", "VARCHAR"),
+        ("source_code", "VARCHAR"),
+        ("source_vocabulary_id", "VARCHAR"),
         ("publication_eligible", "BOOLEAN DEFAULT TRUE"),
     ):
         _add_column(con, "mapping_provenance", name, datatype)
@@ -121,6 +125,9 @@ def ensure_governance_tables(con):
         ("index_signature", "VARCHAR"),
         ("source_adapter", "VARCHAR"),
         ("source_record_key", "VARCHAR"),
+        ("source_system", "VARCHAR"),
+        ("source_code", "VARCHAR"),
+        ("source_vocabulary_id", "VARCHAR"),
         ("publication_eligible", "BOOLEAN DEFAULT TRUE"),
     ):
         _add_column(con, "mapping_decision", name, datatype)
@@ -148,6 +155,39 @@ def ensure_governance_tables(con):
             approved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             active BOOLEAN NOT NULL DEFAULT TRUE,
             PRIMARY KEY (target_table, source_value)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS scoped_mapping_rejection_policy (
+            target_table VARCHAR NOT NULL,
+            source_vocabulary_id VARCHAR NOT NULL,
+            source_code VARCHAR NOT NULL,
+            source_value VARCHAR NOT NULL,
+            assigned_concept_id INTEGER NOT NULL,
+            reviewer VARCHAR NOT NULL,
+            reason VARCHAR,
+            rejected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            PRIMARY KEY (
+                target_table, source_vocabulary_id, source_code,
+                assigned_concept_id
+            )
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS scoped_approved_mapping_set (
+            target_table VARCHAR NOT NULL,
+            source_vocabulary_id VARCHAR NOT NULL,
+            source_code VARCHAR NOT NULL,
+            source_value VARCHAR NOT NULL,
+            assigned_concept_id INTEGER NOT NULL,
+            mapping_decision_id VARCHAR NOT NULL,
+            approved_run_id VARCHAR,
+            reviewer VARCHAR NOT NULL,
+            reason VARCHAR,
+            approved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            PRIMARY KEY (target_table, source_vocabulary_id, source_code)
         )
     """)
     con.execute("""
@@ -190,7 +230,57 @@ def ensure_governance_tables(con):
             )
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS source_event_binding (
+            binding_id VARCHAR PRIMARY KEY,
+            source_adapter VARCHAR NOT NULL,
+            source_record_key VARCHAR NOT NULL UNIQUE,
+            source_system VARCHAR NOT NULL,
+            source_vocabulary_id VARCHAR NOT NULL,
+            source_code VARCHAR NOT NULL,
+            target_table VARCHAR NOT NULL,
+            target_id BIGINT NOT NULL,
+            mapping_decision_id VARCHAR NOT NULL UNIQUE,
+            bound_by VARCHAR NOT NULL,
+            binding_reason VARCHAR NOT NULL,
+            bound_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            UNIQUE (target_table, target_id)
+        )
+    """)
+    _copy_legacy_publication_policy(con)
     _migrate_legacy_decisions(con)
+
+
+def _copy_legacy_publication_policy(con):
+    """Non-destructively seed vocabulary-scoped policy from legacy tables."""
+    for target_table, (source_vocabulary_id, _target_vocab, _domain) in (
+        TARGET_GOVERNANCE.items()
+    ):
+        con.execute("""
+            INSERT INTO scoped_mapping_rejection_policy (
+                target_table, source_vocabulary_id, source_code, source_value,
+                assigned_concept_id, reviewer, reason, rejected_at, active
+            )
+            SELECT target_table, ?, source_value, source_value,
+                   assigned_concept_id, reviewer, reason, rejected_at, active
+            FROM mapping_rejection_policy
+            WHERE target_table = ?
+            ON CONFLICT DO NOTHING
+        """, [source_vocabulary_id, target_table])
+        con.execute("""
+            INSERT INTO scoped_approved_mapping_set (
+                target_table, source_vocabulary_id, source_code, source_value,
+                assigned_concept_id, mapping_decision_id, approved_run_id,
+                reviewer, reason, approved_at, active
+            )
+            SELECT target_table, ?, source_value, source_value,
+                   assigned_concept_id, mapping_decision_id, approved_run_id,
+                   reviewer, reason, approved_at, active
+            FROM approved_mapping_set
+            WHERE target_table = ?
+            ON CONFLICT DO NOTHING
+        """, [source_vocabulary_id, target_table])
 
 
 def _migrate_legacy_decisions(con):
@@ -287,13 +377,28 @@ def decision_id_for(
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:mapping-decision:{identity}"))
 
 
-def rejection_policy_exists(con, target_table, source_value, concept_id):
+def rejection_policy_exists(
+    con,
+    target_table,
+    source_value,
+    concept_id,
+    *,
+    source_vocabulary_id=None,
+    source_code=None,
+):
     ensure_governance_tables(con)
+    source_vocabulary_id = (
+        source_vocabulary_id or TARGET_GOVERNANCE[target_table][0]
+    )
+    source_code = source_code or source_value
     return bool(con.execute("""
-        SELECT COUNT(*) FROM mapping_rejection_policy
-        WHERE target_table = ? AND LOWER(TRIM(source_value)) = LOWER(TRIM(?))
+        SELECT COUNT(*) FROM scoped_mapping_rejection_policy
+        WHERE target_table = ? AND source_vocabulary_id = ?
+          AND LOWER(TRIM(source_code)) = LOWER(TRIM(?))
           AND assigned_concept_id = ? AND active
-    """, [target_table, source_value, int(concept_id)]).fetchone()[0])
+    """, [
+        target_table, source_vocabulary_id, source_code, int(concept_id),
+    ]).fetchone()[0])
 
 
 def register_decision(
@@ -630,6 +735,54 @@ def review_mapping_decision(*_args, **_kwargs):
     )
 
 
+def _validate_scoped_event_binding(
+    con,
+    decision_id,
+    target_table,
+    source_adapter,
+    source_record_key,
+    source_system,
+    source_vocabulary_id,
+    source_code,
+):
+    """Revalidate external identity and event state at adjudication time."""
+    binding = con.execute("""
+        SELECT target_id FROM source_event_binding
+        WHERE mapping_decision_id = ? AND source_adapter = ?
+          AND source_record_key = ? AND source_system = ?
+          AND source_vocabulary_id = ? AND source_code = ?
+          AND target_table = ? AND active
+    """, [
+        decision_id, source_adapter, source_record_key, source_system,
+        source_vocabulary_id, source_code, target_table,
+    ]).fetchall()
+    if len(binding) != 1:
+        raise ValueError("Decision requires exactly one active source-event binding")
+    active_registry = con.execute("""
+        SELECT COUNT(*) FROM source_identity_registry
+        WHERE source_adapter = ? AND source_system = ?
+          AND source_vocabulary_id = ? AND active
+    """, [
+        source_adapter, source_system, source_vocabulary_id,
+    ]).fetchone()[0]
+    if active_registry != 1:
+        raise ValueError("Decision source identity is no longer active")
+    config = TARGETS[target_table]
+    event = con.execute(f"""
+        SELECT {config['concept_column']}, {config['source_concept_column']},
+               {config['source_column']}
+        FROM {target_table}
+        WHERE {config['id_column']} = ?
+    """, [int(binding[0][0])]).fetchall()
+    if len(event) != 1:
+        raise ValueError("Bound OMOP event no longer exists uniquely")
+    concept_id, source_concept_id, event_source_code = event[0]
+    if int(concept_id or 0) != 0 or source_concept_id not in {None, 0}:
+        raise ValueError("Bound OMOP event is no longer an unmapped source event")
+    if event_source_code != source_code:
+        raise ValueError("Bound OMOP event source code has changed")
+
+
 def _finalize_mapping_decision(
     con, decision_id, action, reviewer, reason=None, *, manage_transaction=True
 ):
@@ -643,18 +796,38 @@ def _finalize_mapping_decision(
     ensure_governance_tables(con)
     row = con.execute("""
         SELECT target_table, source_value, assigned_concept_id, run_id,
-               COALESCE(publication_eligible, TRUE)
+               COALESCE(publication_eligible, TRUE), source_adapter,
+               source_record_key, source_system, source_code,
+               source_vocabulary_id
         FROM mapping_decision WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not row:
         raise ValueError(f"Unknown mapping decision: {decision_id}")
-    target_table, source_value, concept_id, run_id, publication_eligible = row
+    (
+        target_table, source_value, concept_id, run_id, publication_eligible,
+        source_adapter, source_record_key, source_system, explicit_source_code,
+        explicit_source_vocabulary,
+    ) = row
     if not publication_eligible:
         raise ValueError(
             "This pre-ingestion proposal is not adjudication-eligible; "
             "bind it to an explicit source vocabulary and ingested OMOP event first."
         )
-    source_vocabulary, target_vocabulary, expected_domain = TARGET_GOVERNANCE[target_table]
+    default_source_vocabulary, target_vocabulary, expected_domain = (
+        TARGET_GOVERNANCE[target_table]
+    )
+    source_vocabulary = explicit_source_vocabulary or default_source_vocabulary
+    source_code = explicit_source_code or source_value
+    if source_adapter:
+        if not all((
+            source_record_key, source_system, explicit_source_code,
+            explicit_source_vocabulary,
+        )):
+            raise ValueError("External decision has incomplete source identity")
+        _validate_scoped_event_binding(
+            con, decision_id, target_table, source_adapter, source_record_key,
+            source_system, source_vocabulary, source_code,
+        )
     new_status = "APPROVED" if action == "APPROVE" else "REJECTED"
 
     if action == "APPROVE":
@@ -698,11 +871,14 @@ def _finalize_mapping_decision(
 
         if action == "APPROVE":
             con.execute("""
-                INSERT INTO approved_mapping_set (
-                    target_table, source_value, assigned_concept_id,
-                    mapping_decision_id, approved_run_id, reviewer, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (target_table, source_value) DO UPDATE SET
+                INSERT INTO scoped_approved_mapping_set (
+                    target_table, source_vocabulary_id, source_code,
+                    source_value, assigned_concept_id, mapping_decision_id,
+                    approved_run_id, reviewer, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (target_table, source_vocabulary_id, source_code)
+                DO UPDATE SET
+                    source_value = EXCLUDED.source_value,
                     assigned_concept_id = EXCLUDED.assigned_concept_id,
                     mapping_decision_id = EXCLUDED.mapping_decision_id,
                     approved_run_id = EXCLUDED.approved_run_id,
@@ -710,13 +886,30 @@ def _finalize_mapping_decision(
                     reason = EXCLUDED.reason,
                     approved_at = now(), active = TRUE
             """, [
-                target_table, source_value, int(concept_id), decision_id,
-                run_id, reviewer, reason,
+                target_table, source_vocabulary, source_code, source_value,
+                int(concept_id), decision_id, run_id, reviewer, reason,
             ])
+            if not source_adapter:
+                con.execute("""
+                    INSERT INTO approved_mapping_set (
+                        target_table, source_value, assigned_concept_id,
+                        mapping_decision_id, approved_run_id, reviewer, reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (target_table, source_value) DO UPDATE SET
+                        assigned_concept_id = EXCLUDED.assigned_concept_id,
+                        mapping_decision_id = EXCLUDED.mapping_decision_id,
+                        approved_run_id = EXCLUDED.approved_run_id,
+                        reviewer = EXCLUDED.reviewer,
+                        reason = EXCLUDED.reason,
+                        approved_at = now(), active = TRUE
+                """, [
+                    target_table, source_value, int(concept_id), decision_id,
+                    run_id, reviewer, reason,
+                ])
             con.execute("""
                 DELETE FROM source_to_concept_map
                 WHERE source_code = ? AND source_vocabulary_id = ?
-            """, [source_value, source_vocabulary])
+            """, [source_code, source_vocabulary])
             con.execute("""
                 INSERT INTO source_to_concept_map (
                     source_code, source_concept_id, source_vocabulary_id,
@@ -725,35 +918,73 @@ def _finalize_mapping_decision(
                     invalid_reason
                 ) VALUES (?, 0, ?, ?, ?, ?, CURRENT_DATE, '2099-12-31', NULL)
             """, [
-                source_value, source_vocabulary, source_value,
+                source_code, source_vocabulary, source_value,
                 int(concept_id), target_vocabulary,
             ])
             con.execute("""
-                UPDATE mapping_rejection_policy SET active = FALSE
-                WHERE target_table = ? AND source_value = ?
+                UPDATE scoped_mapping_rejection_policy SET active = FALSE
+                WHERE target_table = ? AND source_vocabulary_id = ?
+                  AND source_code = ?
                   AND assigned_concept_id = ?
-            """, [target_table, source_value, int(concept_id)])
+            """, [
+                target_table, source_vocabulary, source_code, int(concept_id),
+            ])
+            if not source_adapter:
+                con.execute("""
+                    UPDATE mapping_rejection_policy SET active = FALSE
+                    WHERE target_table = ? AND source_value = ?
+                      AND assigned_concept_id = ?
+                """, [target_table, source_value, int(concept_id)])
         else:
             con.execute("""
-                INSERT INTO mapping_rejection_policy (
-                    target_table, source_value, assigned_concept_id,
-                    reviewer, reason
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (target_table, source_value, assigned_concept_id)
+                INSERT INTO scoped_mapping_rejection_policy (
+                    target_table, source_vocabulary_id, source_code,
+                    source_value, assigned_concept_id, reviewer, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (
+                    target_table, source_vocabulary_id, source_code,
+                    assigned_concept_id
+                )
                 DO UPDATE SET reviewer = EXCLUDED.reviewer,
+                              source_value = EXCLUDED.source_value,
                               reason = EXCLUDED.reason,
                               rejected_at = now(), active = TRUE
-            """, [target_table, source_value, int(concept_id), reviewer, reason])
+            """, [
+                target_table, source_vocabulary, source_code, source_value,
+                int(concept_id), reviewer, reason,
+            ])
             con.execute("""
-                UPDATE approved_mapping_set SET active = FALSE
-                WHERE target_table = ? AND source_value = ?
+                UPDATE scoped_approved_mapping_set SET active = FALSE
+                WHERE target_table = ? AND source_vocabulary_id = ?
+                  AND source_code = ?
                   AND assigned_concept_id = ?
-            """, [target_table, source_value, int(concept_id)])
+            """, [
+                target_table, source_vocabulary, source_code, int(concept_id),
+            ])
+            if not source_adapter:
+                con.execute("""
+                    INSERT INTO mapping_rejection_policy (
+                        target_table, source_value, assigned_concept_id,
+                        reviewer, reason
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (
+                        target_table, source_value, assigned_concept_id
+                    ) DO UPDATE SET reviewer = EXCLUDED.reviewer,
+                                    reason = EXCLUDED.reason,
+                                    rejected_at = now(), active = TRUE
+                """, [
+                    target_table, source_value, int(concept_id), reviewer, reason,
+                ])
+                con.execute("""
+                    UPDATE approved_mapping_set SET active = FALSE
+                    WHERE target_table = ? AND source_value = ?
+                      AND assigned_concept_id = ?
+                """, [target_table, source_value, int(concept_id)])
             con.execute("""
                 DELETE FROM source_to_concept_map
                 WHERE source_code = ? AND source_vocabulary_id = ?
                   AND target_concept_id = ?
-            """, [source_value, source_vocabulary, int(concept_id)])
+            """, [source_code, source_vocabulary, int(concept_id)])
         if manage_transaction:
             con.execute("COMMIT")
     except Exception:

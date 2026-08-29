@@ -289,6 +289,18 @@ não altera `publication_eligible`, STCM, políticas de rejeição ou eventos OM
 essa ligação concreta fica reservada ao 7D.4B. A suite passa a totalizar 187
 testes para validação no ambiente CI/reprodutível.
 
+Estado 7D.4B: tecnicamente concluído. Uma identidade ativa pode agora ser ligada
+atomicamente a exatamente um evento OMOP existente, ainda não mapeado e com
+`source_value` igual ao código local registado. Só propostas `SELECT` com uma
+única proveniência pré-ingestão podem ser promovidas para as filas já existentes
+de duas revisões cegas e adjudicação independente. Identidade e evento voltam a
+ser validados na adjudicação; aprovação publica código e vocabulário locais no
+STCM, e a aplicação do STCM fica limitada ao evento ligado. As políticas
+autoritativas passam a ter escopo por vocabulário e código, sem colisões entre
+hospitais; as tabelas legadas Synthea são preservadas sem migração destrutiva.
+A suite passa a totalizar 196 testes para validação no ambiente
+CI/reprodutível.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,
