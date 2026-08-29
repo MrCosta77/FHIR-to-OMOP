@@ -11,7 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, MODEL_NAME
 
-# 1. Definir o "Cérebro" do Agente: O Contexto da Base de Dados
+# 1. Define the Agent's "Brain": Database Context
 SCHEMA_CONTEXT = """
 You are an expert Health Data Scientist and SQL developer working with an OMOP CDM v5.4 database in DuckDB.
 Your task is to translate natural language clinical questions into exact, executable DuckDB SQL queries.
@@ -35,7 +35,7 @@ CRITICAL RULES:
 """
 
 def generate_sql_query(question):
-    """Pede ao Ollama para traduzir Inglês em SQL usando o schema providenciado."""
+    """Requests Ollama to translate English text into SQL using the provided schema context."""
     try:
         response = ollama.chat(
             model=MODEL_NAME,
@@ -43,12 +43,12 @@ def generate_sql_query(question):
                 {'role': 'system', 'content': SCHEMA_CONTEXT},
                 {'role': 'user', 'content': f"Write a SQL query to answer this clinical question: {question}"}
             ],
-            options={'temperature': 0.0} # Queremos respostas exatas e determinísticas
+            options={'temperature': 0.0} # We want exact and deterministic responses
         )
         
         raw_output = response['message']['content'].strip()
         
-        # Expressão regular para limpar blocos de código Markdown caso o LLM os adicione (```sql ... ```)
+        # Regex to strip markdown formatting if the LLM includes it (e.g., ```sql ... ```)
         sql_match = re.search(r'```(?:sql)?\n(.*?)\n```', raw_output, re.DOTALL | re.IGNORECASE)
         if sql_match:
             return sql_match.group(1).strip()
@@ -66,7 +66,7 @@ def run_agent():
     print("Welcome to your autonomous Real-World Evidence assistant.")
     print("Type your clinical question in English (or 'exit' to quit).")
     
-    # Abrimos a base de dados em modo read_only por segurança (o LLM não pode apagar nada acidentalmente)
+    # Open the database in read_only mode for safety (prevents the LLM from accidentally deleting data)
     with duckdb.connect(DB_PATH, read_only=True) as con:
         while True:
             print("-" * 50)
@@ -85,7 +85,7 @@ def run_agent():
             if not sql_query:
                 continue
                 
-            print(f"📝 Generated SQL:\n\033[94m{sql_query}\033[0m\n") # \033[94m adiciona uma cor azul ao terminal
+            print(f"📝 Generated SQL:\n\033[94m{sql_query}\033[0m\n") # \033[94m adds blue color to the terminal
             
             try:
                 print("⚙️ Executing query in DuckDB...")
@@ -96,7 +96,7 @@ def run_agent():
                 if not result:
                     print("No data found.")
                 else:
-                    # Formatação simples de tabela no terminal
+                    # Simple table formatting in the terminal
                     print(" | ".join(columns))
                     print("-" * (len(" | ".join(columns))))
                     for row in result:

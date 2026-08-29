@@ -71,7 +71,6 @@ streamlit run src/app/review_portal.py
 ```
 
 ![Streamlit Portal](docs/assets/streamlit_portal.png)
-*(Note: Save a screenshot of your portal to `docs/assets/streamlit_portal.png` to display it here).*
 
 ## 🧠 Core Engineering Philosophy
 
