@@ -13,7 +13,7 @@ def test_versioned_dependency_locks_and_changelog_are_consistent():
     result = validate_release_metadata(ROOT)
 
     assert result == {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "python_direct_dependencies": 7,
         "r_version": "4.6.1",
         "r_packages": 71,
