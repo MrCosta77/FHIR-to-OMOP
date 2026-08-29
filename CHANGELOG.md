@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-08-29
 
 ### Added
 
@@ -29,6 +29,10 @@ All notable changes to this project are documented here. The format follows
   input-manifest digest, with source-admin authorization, per-record atomic and
   idempotent handoff, durable binding lineage, explicit partial-failure reporting
   and a metadata-only CLI.
+- Comprehensive 7D.4D synthetic End-to-End Hospital Acceptance gate spanning 
+  all six domains, proving isolated mapping, ingestion handoff, manual review,
+  adjudication, and final STCM logic. Includes a real-environment validation
+  script bridging automated tests and operational RAG infrastructure.
 
 ## [0.1.0] - 2026-08-28
 
@@ -54,5 +58,6 @@ All notable changes to this project are documented here. The format follows
 - Documented clinical review and institutional governance remain mandatory
   before any hospital pilot.
 
-[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrCosta77/FHIR-to-OMOP/releases/tag/v0.1.0

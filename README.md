@@ -174,6 +174,10 @@ when clinical-event evidence falls outside that range. If no encounter exists,
 the event envelope is an explicit fallback. `observation_period_provenance`
 records the evidence bounds and derivation method for every run.
 
+### 6. End-to-End Hospital Acceptance (7D.4D)
+
+The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`run_7d4d_real_environment.py`) is provided to validate the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts, proving production readiness without generating PHI.
+
 ## 🛠️ Setup & Execution
 
 **1. Environment Setup**
