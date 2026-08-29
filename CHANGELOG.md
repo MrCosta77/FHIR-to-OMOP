@@ -29,7 +29,7 @@ All notable changes to this project are documented here. The format follows
   input-manifest digest, with source-admin authorization, per-record atomic and
   idempotent handoff, durable binding lineage, explicit partial-failure reporting
   and a metadata-only CLI.
-- Comprehensive 7D.4D synthetic End-to-End Hospital Acceptance gate spanning 
+- Comprehensive synthetic End-to-End Hospital Acceptance gate spanning 
   all six domains, proving isolated mapping, ingestion handoff, manual review,
   adjudication, and final STCM logic. Includes a real-environment validation
   script bridging automated tests and operational RAG infrastructure.

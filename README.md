@@ -1,7 +1,5 @@
 # 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
 
-# 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
-
 An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)**, and maps messy/legacy clinical text using a **Retrieval-Augmented Generation (RAG) + Human-in-the-Loop Architecture**.
 
 Licensed under the [Apache License 2.0](LICENSE). Copyright and attribution are
@@ -247,19 +245,7 @@ records the evidence bounds and derivation method for every run.
 
 The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`scripts/run_e2e_evaluation.py`) is provided to validate the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts, proving production readiness without generating PHI.
 
-## 🛠️ Setup & Execution
-
-**1. Environment Setup**
-```bash
-# Clone the repository
-git clone https://github.com/MrCosta77/FHIR-to-OMOP.git
-cd FHIR-to-OMOP
-
-# Set up Python virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
-python -m pip install --require-hashes -r requirements.lock
-```
+## 🛠️ Advanced Execution & Evaluation
 
 The repository includes a small versioned FHIR golden bundle. Contract and
 unit tests run in GitHub Actions without Athena, Ollama, or a local database:
