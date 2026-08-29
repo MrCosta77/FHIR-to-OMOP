@@ -181,8 +181,9 @@ persistir texto do modelo, e recusa raw source/prompt/response no audit log. PHI
 falha fechado sem ativação explícita, aprovação institucional, retenção positiva,
 identidade autenticada e allowlist por papel. Nomes e identificadores não
 detetáveis por padrões continuam a exigir minimização/DLP upstream; o portal
-standalone não é autenticação. A calibração em development e os testes de escala
-continuam pendentes; as etiquetas permanecem `PROVISIONAL_TECHNICAL`.
+standalone não é autenticação. A calibração e os testes de escala foram
+concluídos nos marcos 6C e 6D subsequentes; as etiquetas permanecem
+`PROVISIONAL_TECHNICAL`.
 
 O marco 6C está tecnicamente concluído: thresholds
 por domínio maximizam recall sob restrições pré-fixadas de pelo menos 95% de
@@ -312,9 +313,9 @@ ou chaves de registo. O componente não cria eventos clínicos a partir do CSV d
 mapping, cuja informação de pessoa e visita é deliberadamente insuficiente. A
 suite passa a totalizar 204 testes para validação no ambiente CI/reprodutível.
 
-## Primeiro passo aprovado
+## Histórico — primeiro marco (Fase 1)
 
-Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,
+Objetivo original: esquema do benchmark, primeiros casos multi domínio,
 separação development/held-out e runner da baseline determinística. Não ajustar
 prompts nem thresholds até existir esta medição independente.
 
@@ -330,6 +331,8 @@ prompts nem thresholds até existir esta medição independente.
 - Contrato, geração determinística, leakage e baseline cobertos por testes.
 
 As etiquetas permanecem `PROVISIONAL_TECHNICAL`; a revisão clínica documentada
-continua obrigatória antes de chamar ao conjunto “gold standard”. As Fases 2 a
-5 estão tecnicamente concluídas. O próximo marco é a Fase 6: revisão clínica,
-melhoria de retrieval em development, escala e controlos formais de privacidade.
+continua obrigatória antes de chamar ao conjunto "gold standard". As Fases 1 a
+6 e os marcos 7A a 7D.4C estão tecnicamente concluídos. O próximo marco é o
+7D.4D: teste de aceitação end-to-end hospitalar sintético, cobrindo os seis
+domínios sem mocks de integração e sem PHI. Após o 7D.4D, segue-se a
+consolidação deste roadmap e a release técnica v0.2.0.
