@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import uuid
+from collections import Counter, defaultdict
+
+from src.security.privacy import audit_security_event, authorize_actor
+from .schema import ensure_governance_tables
+from .core import TARGET_GOVERNANCE
+
+def submit_blinded_review(con, decision_id, action, reviewer, rationale):
+    """Record one independent review without exposing or publishing peer votes."""
+    action = action.strip().upper()
+    if action not in {"APPROVE", "REJECT"}:
+        raise ValueError("action must be APPROVE or REJECT")
+    reviewer = reviewer.strip()
+    if not reviewer:
+        raise ValueError("A reviewer name is required.")
+    reviewer = authorize_actor(reviewer, "reviewer")
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise ValueError("A clinical rationale is required.")
+    ensure_governance_tables(con)
+    row = con.execute("""
+        SELECT status, COALESCE(publication_eligible, TRUE) FROM mapping_decision
+        WHERE mapping_decision_id = ?
+    """, [decision_id]).fetchone()
+    if not row:
+        raise ValueError(f"Unknown mapping decision: {decision_id}")
+    if not row[1]:
+        raise ValueError(
+            "Pre-ingestion proposals are not clinically reviewable until bound "
+            "to an explicit source vocabulary and ingested OMOP event."
+        )
+    if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
+        raise ValueError(f"Decision is not independently reviewable: {row[0]}")
+    existing = con.execute("""
+        SELECT COUNT(*) FROM clinical_mapping_review
+        WHERE mapping_decision_id = ?
+    """, [decision_id]).fetchone()[0]
+    if existing >= 2:
+        raise ValueError("Two independent reviews already exist; adjudication is required.")
+    duplicate = con.execute("""
+        SELECT COUNT(*) FROM clinical_mapping_review
+        WHERE mapping_decision_id = ? AND LOWER(TRIM(reviewer)) = LOWER(TRIM(?))
+    """, [decision_id, reviewer]).fetchone()[0]
+    if duplicate:
+        raise ValueError("The same reviewer cannot review a decision twice.")
+    con.execute("""
+        INSERT INTO clinical_mapping_review (
+            review_id, mapping_decision_id, reviewer, verdict, rationale
+        ) VALUES (?, ?, ?, ?, ?)
+    """, [str(uuid.uuid4()), decision_id, reviewer, action, rationale])
+    audit_security_event(
+        con, "CLINICAL_MAPPING_REVIEW", reviewer, "RECORDED",
+        {"mapping_decision_id": decision_id, "verdict": action},
+    )
+    count = existing + 1
+    return {
+        "mapping_decision_id": decision_id,
+        "review_count": count,
+        "ready_for_adjudication": count == 2,
+    }
+
+def blinded_review_queue(con, reviewer):
+    """Return proposals not yet reviewed by this reviewer, without peer votes."""
+    reviewer = (reviewer or "").strip()
+    if not reviewer:
+        raise ValueError("A reviewer name is required.")
+    reviewer = authorize_actor(reviewer, "reviewer")
+    ensure_governance_tables(con)
+    columns = [
+        "mapping_decision_id", "run_id", "target_table", "source_value",
+        "normalized_value", "assigned_concept_id", "mapping_method", "score",
+        "model_name", "affected_events",
+    ]
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.run_id, d.target_table,
+               d.source_value, d.normalized_value, d.assigned_concept_id,
+               d.mapping_method, d.score, d.model_name,
+               COUNT(DISTINCT p.target_id) AS affected_events
+        FROM mapping_decision d
+        LEFT JOIN mapping_provenance p
+          ON p.mapping_decision_id = d.mapping_decision_id
+        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND COALESCE(d.publication_eligible, TRUE)
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_review r
+              WHERE r.mapping_decision_id = d.mapping_decision_id
+                AND LOWER(TRIM(r.reviewer)) = LOWER(TRIM(?))
+          )
+          AND (
+              SELECT COUNT(*) FROM clinical_mapping_review r
+              WHERE r.mapping_decision_id = d.mapping_decision_id
+          ) < 2
+        GROUP BY ALL
+        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
+    """, [reviewer]).fetchall()
+    result = [dict(zip(columns, row, strict=True)) for row in rows]
+    audit_security_event(
+        con, "CLINICAL_REVIEW_QUEUE_ACCESS", reviewer, "ALLOWED",
+        {"role": "reviewer", "result_count": len(result)},
+    )
+    return result
+
+def blinded_adjudication_queue(con, adjudicator):
+    """Return two-review cases without exposing reviewer identities or votes."""
+    adjudicator = (adjudicator or "").strip()
+    if not adjudicator:
+        raise ValueError("An adjudicator name is required.")
+    adjudicator = authorize_actor(adjudicator, "adjudicator")
+    ensure_governance_tables(con)
+    columns = [
+        "mapping_decision_id", "run_id", "target_table", "source_value",
+        "normalized_value", "assigned_concept_id", "mapping_method", "score",
+        "model_name", "affected_events", "review_count",
+    ]
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.run_id, d.target_table,
+               d.source_value, d.normalized_value, d.assigned_concept_id,
+               d.mapping_method, d.score, d.model_name,
+               COUNT(DISTINCT p.target_id) AS affected_events,
+               COUNT(DISTINCT r.review_id) AS review_count
+        FROM mapping_decision d
+        JOIN clinical_mapping_review r
+          ON r.mapping_decision_id = d.mapping_decision_id
+        LEFT JOIN mapping_provenance p
+          ON p.mapping_decision_id = d.mapping_decision_id
+        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+          AND COALESCE(d.publication_eligible, TRUE)
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_adjudication a
+              WHERE a.mapping_decision_id = d.mapping_decision_id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_review own
+              WHERE own.mapping_decision_id = d.mapping_decision_id
+                AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
+          )
+        GROUP BY ALL
+        HAVING COUNT(DISTINCT r.review_id) >= 2
+        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
+    """, [adjudicator]).fetchall()
+    result = [dict(zip(columns, row, strict=True)) for row in rows]
+    audit_security_event(
+        con, "CLINICAL_REVIEW_QUEUE_ACCESS", adjudicator, "ALLOWED",
+        {"role": "adjudicator", "result_count": len(result)},
+    )
+    return result
+
+def clinical_review_agreement(con):
+    """Measure raw agreement and Cohen's kappa for completed review pairs."""
+    ensure_governance_tables(con)
+    rows = con.execute("""
+        SELECT d.mapping_decision_id, d.target_table, r.verdict
+        FROM mapping_decision d
+        JOIN clinical_mapping_review r
+          ON r.mapping_decision_id = d.mapping_decision_id
+        ORDER BY d.mapping_decision_id, r.submitted_at, r.review_id
+    """).fetchall()
+    grouped = defaultdict(list)
+    domains = {}
+    for decision_id, target_table, verdict in rows:
+        grouped[decision_id].append(verdict)
+        domains[decision_id] = TARGET_GOVERNANCE[target_table][2]
+
+    def metrics(pairs):
+        if not pairs:
+            return {
+                "pair_count": 0, "raw_agreement": None,
+                "cohens_kappa": None, "approve_votes": 0, "reject_votes": 0,
+            }
+        votes = Counter(value for pair in pairs for value in pair)
+        left_votes = Counter(pair[0] for pair in pairs)
+        right_votes = Counter(pair[1] for pair in pairs)
+        observed = sum(left == right for left, right in pairs) / len(pairs)
+        total_votes = 2 * len(pairs)
+        expected = sum(
+            (left_votes[verdict] / len(pairs))
+            * (right_votes[verdict] / len(pairs))
+            for verdict in ("APPROVE", "REJECT")
+        )
+        kappa = None if expected == 1.0 else (observed - expected) / (1.0 - expected)
+        return {
+            "pair_count": len(pairs), "raw_agreement": observed,
+            "cohens_kappa": kappa, "approve_votes": votes["APPROVE"],
+            "reject_votes": votes["REJECT"],
+        }
+
+    complete = {
+        decision_id: verdicts[:2]
+        for decision_id, verdicts in grouped.items() if len(verdicts) >= 2
+    }
+    by_domain = {}
+    for domain in sorted(set(domains.values())):
+        pairs = [
+            pair for decision_id, pair in complete.items()
+            if domains[decision_id] == domain
+        ]
+        by_domain[domain] = metrics(pairs)
+    return {
+        "overall": metrics(list(complete.values())),
+        "by_domain": by_domain,
+    }
+
+def review_mapping_decision(*_args, **_kwargs):
+    """Block the retired single-review publication path."""
+    raise ValueError(
+        "Direct publication is disabled; use two blinded reviews and adjudication."
+    )
