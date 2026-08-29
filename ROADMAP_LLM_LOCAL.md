@@ -301,6 +301,17 @@ hospitais; as tabelas legadas Synthea são preservadas sem migração destrutiva
 A suite passa a totalizar 196 testes para validação no ambiente
 CI/reprodutível.
 
+Estado 7D.4C: tecnicamente concluído. O contrato estrito
+`cmf-ingestion-receipt-v1` liga o handoff a uma execução `etl_run` bem-sucedida
+e ao SHA-256 exato do respetivo manifesto de inputs, recusando campos extra,
+duplicados, runs misturados ou eventos não comprovados antes de qualquer
+binding. Cada recibo é processado numa transação independente através do 7D.4B;
+falhas esperadas ficam isoladas e explícitas, enquanto falhas internas abortam.
+Repetições são idempotentes e o relatório/CLI não expõe códigos, source values
+ou chaves de registo. O componente não cria eventos clínicos a partir do CSV de
+mapping, cuja informação de pessoa e visita é deliberadamente insuficiente. A
+suite passa a totalizar 204 testes para validação no ambiente CI/reprodutível.
+
 ## Primeiro passo aprovado
 
 Implementar a Fase 1: esquema do benchmark, primeiros casos multi domínio,

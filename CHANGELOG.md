@@ -25,6 +25,10 @@ All notable changes to this project are documented here. The format follows
   established two-review adjudication path. Vocabulary-scoped approval and
   rejection policy prevents local-code collisions, while approved STCM
   application remains restricted to the bound event.
+- Strict ingestion receipts anchored to a successful `etl_run` and its exact
+  input-manifest digest, with source-admin authorization, per-record atomic and
+  idempotent handoff, durable binding lineage, explicit partial-failure reporting
+  and a metadata-only CLI.
 
 ## [0.1.0] - 2026-08-28
 

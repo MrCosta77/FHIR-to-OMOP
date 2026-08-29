@@ -104,3 +104,8 @@ separate ingestion step has created the OMOP event, the governed
 [identity/event-binding contract](SOURCE_IDENTITY_REGISTRY.md) may promote only
 an exact `SELECT` proposal into the existing blinded workflow. It does not
 provide CSV ingestion, create events, approve mappings or bypass review.
+
+Operational upstream ETLs can submit the resulting event correlations through
+the strict [governed ingestion handoff](INGESTION_HANDOFF.md). A receipt must
+reference a successful `etl_run` and the exact input-manifest digest; the handoff
+does not infer missing person, visit or event data from this CSV contract.

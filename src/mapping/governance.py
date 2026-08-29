@@ -245,9 +245,18 @@ def ensure_governance_tables(con):
             binding_reason VARCHAR NOT NULL,
             bound_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             active BOOLEAN NOT NULL DEFAULT TRUE,
+            ingestion_run_id VARCHAR,
+            input_manifest_sha256 VARCHAR,
+            handoff_batch_id VARCHAR,
             UNIQUE (target_table, target_id)
         )
     """)
+    for name, datatype in (
+        ("ingestion_run_id", "VARCHAR"),
+        ("input_manifest_sha256", "VARCHAR"),
+        ("handoff_batch_id", "VARCHAR"),
+    ):
+        _add_column(con, "source_event_binding", name, datatype)
     _copy_legacy_publication_policy(con)
     _migrate_legacy_decisions(con)
 

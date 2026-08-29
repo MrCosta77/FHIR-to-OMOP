@@ -64,6 +64,11 @@ binding promotes the proposal into the existing blinded review workflow. The
 registry and event are revalidated at adjudication; approval publishes the
 explicit local code/vocabulary to STCM, and STCM application is restricted to
 the bound event. No adapter-side or single-review publication path is added.
+The [7D.4C ingestion handoff](docs/INGESTION_HANDOFF.md) accepts strict receipts
+from a successful, manifest-linked upstream ETL run and coordinates those
+bindings per record. Its report is metadata-only, partial expected failures are
+explicit, and the component never fabricates person, visit or clinical events
+from the mapping CSV.
 
 LLM candidates are recorded once per affected clinical event. Approval validates
 that the target is a current Standard Concept in the required OMOP domain and

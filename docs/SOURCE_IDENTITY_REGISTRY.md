@@ -107,3 +107,10 @@ the required two blinded reviewers plus distinct adjudicator remain the sole
 approval path.
 
 Audit records contain binding metadata, not raw source values or local codes.
+
+For batch operation, the [7D.4C ingestion handoff](INGESTION_HANDOFF.md)
+validates an authorized upstream attestation against one successful,
+manifest-linked ETL run before delegating to this binding contract. The run,
+manifest digest and first batch are retained on the binding. Expected failures
+remain isolated to their receipt and are surfaced through a metadata-only
+report.
