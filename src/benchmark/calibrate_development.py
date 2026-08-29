@@ -32,7 +32,7 @@ from src.benchmark.evaluate_phase5 import (
 from src.mapping.mapping_service import get_versioned_collection
 from src.mapping.semantic_mapper import (
     GENERATION_PARAMETERS,
-    OLLAMA_TIMEOUT_SECONDS,
+    OLLAMA_TIMEOUT,
     PROMPT_VERSION,
 )
 
@@ -148,7 +148,7 @@ def calibrate(
     inputs = blind_inputs(cases)
     if any(case["split"] != "development" for case in cases):
         raise ValueError("Held-out case reached development calibration.")
-    client = client or ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
+    client = client or ollama.Client(timeout=OLLAMA_TIMEOUT)
     model = protocol["model"]
     top_k = int(protocol["top_k"])
 

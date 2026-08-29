@@ -29,7 +29,7 @@ from src.mapping.mapping_service import (
 from src.mapping.semantic_mapper import (
     DOMAIN_PROMPTS,
     GENERATION_PARAMETERS,
-    OLLAMA_TIMEOUT_SECONDS,
+    OLLAMA_TIMEOUT,
     _model_digest,
     _response_content,
 )
@@ -48,7 +48,7 @@ def run_hospital_csv_mapping(
     records = load_hospital_csv(path)
     privacy = validate_privacy_runtime(OLLAMA_URL)
     client = client or ollama.Client(
-        host=OLLAMA_URL.rsplit("/api/", 1)[0], timeout=OLLAMA_TIMEOUT_SECONDS
+        host=OLLAMA_URL.rsplit("/api/", 1)[0], timeout=OLLAMA_TIMEOUT
     )
     result = {
         "source_adapter": SCHEMA_VERSION,

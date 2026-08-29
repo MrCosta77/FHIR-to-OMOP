@@ -31,7 +31,7 @@ from src.mapping.mapping_service import TARGETS, get_versioned_collection
 from src.mapping.semantic_mapper import (
     DECISION_SCHEMA,
     GENERATION_PARAMETERS,
-    OLLAMA_TIMEOUT_SECONDS,
+    OLLAMA_TIMEOUT,
     PROMPT_VERSION,
     _model_digest,
     _response_content,
@@ -571,7 +571,7 @@ def evaluate_phase5(
             "onnx_providers": onnxruntime.get_available_providers(),
             "prompt_version": PROMPT_VERSION,
             "generation_parameters": GENERATION_PARAMETERS,
-            "ollama_timeout_seconds": OLLAMA_TIMEOUT_SECONDS,
+            "ollama_timeout_seconds": OLLAMA_TIMEOUT,
         },
         "index_preparation": index_preparation,
         "arms": results,

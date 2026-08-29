@@ -16,6 +16,7 @@
     "data_classification": "SYNTHETIC",
     "simulate_lis_noise": false,
     "require_integration": true,
-    "include_dqd": false
+    "include_dqd": false,
+    "ollama_timeout": 120.0
   }
 }
