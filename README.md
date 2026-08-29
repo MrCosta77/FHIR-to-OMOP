@@ -1,12 +1,81 @@
 # 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
 
+# 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
+
 An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)**, and maps messy/legacy clinical text using a **Retrieval-Augmented Generation (RAG) + Human-in-the-Loop Architecture**.
 
 Licensed under the [Apache License 2.0](LICENSE). Copyright and attribution are
 recorded in [`NOTICE`](NOTICE). Third-party libraries, models, vocabularies and
 datasets retain their own licences and terms.
 
-## 🚀 Core Engineering Philosophy
+```mermaid
+flowchart TD
+    %% Define Styles
+    classDef file fill:#f9f9f9,stroke:#333,stroke-width:1px,color:#333
+    classDef process fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px,color:#01579b
+    classDef db fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#4a148c
+    classDef human fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#e65100
+
+    %% Nodes
+    FHIR[("📄 FHIR JSON<br>(Raw Clinical Data)")]:::file
+    ETL["⚙️ Extraction & Staging<br>(Python)"]:::process
+    DB[("🦆 DuckDB<br>(omop_clinical.duckdb)")]:::db
+    
+    RAG["🔍 RAG Retrieval<br>(ChromaDB Vector Search)"]:::process
+    LLM["🤖 Local LLM<br>(Qwen/Llama)"]:::process
+    
+    Portal["🖥️ Human-in-the-loop<br>(Streamlit Portal)"]:::human
+    RStudio["📊 Validation<br>(OHDSI DQD)"]:::process
+
+    %% Relationships
+    FHIR --> ETL
+    ETL -->|"Staging Tables"| DB
+    DB -->|"Unmapped Terms"| RAG
+    RAG -->|"Top 5 Candidates"| LLM
+    LLM -->|"SELECT/ABSTAIN"| DB
+    DB -->|"Pending Review"| Portal
+    Portal -->|"Approved Mappings"| DB
+    DB -->|"Final OMOP CDM"| RStudio
+```
+
+## 🚀 Quick Start
+
+Get the pipeline running locally in under 5 minutes:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/MrCosta77/FHIR-to-OMOP.git
+cd FHIR-to-OMOP
+
+# 2. Create and activate a virtual environment
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Mac/Linux:
+source venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment (sets default paths and local LLM config)
+cp .env.example .env
+
+# 5. Run the full orchestrator
+python main.py
+```
+
+## 📸 Review Portal (Human-in-the-Loop)
+
+The framework includes a Streamlit portal for clinical experts to adjudicate LLM mappings. 
+To launch it locally:
+```bash
+streamlit run src/app/review_portal.py
+```
+
+![Streamlit Portal](docs/assets/streamlit_portal.png)
+*(Note: Save a screenshot of your portal to `docs/assets/streamlit_portal.png` to display it here).*
+
+## 🧠 Core Engineering Philosophy
 
 This project was built with strict adherence to clinical data management standards, focusing on determinism, auditability, and OHDSI conventions:
 
@@ -16,7 +85,7 @@ This project was built with strict adherence to clinical data management standar
 4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
 5. **Standards-Based Era Derivation:** After approved STCM mappings are applied, mapped conditions are collapsed into `CONDITION_ERA` with a 30-day persistence window. Drug products are expanded through `CONCEPT_ANCESTOR` to every current Standard Ingredient before `DRUG_ERA` is derived. Both tables use deterministic IDs and are published together only after coverage and integrity checks pass.
 
-## 🧠 The AI Mapping Engine & Governance Loop
+## 🤖 The AI Mapping Engine & Governance Loop
 
 Standard OMOP vocabularies handle the majority of clinical data, but real-world data (like legacy LIS lab results) is messy. This framework uses a progressive retrieval-adjudication system:
 
@@ -174,9 +243,9 @@ when clinical-event evidence falls outside that range. If no encounter exists,
 the event envelope is an explicit fallback. `observation_period_provenance`
 records the evidence bounds and derivation method for every run.
 
-### 6. End-to-End Hospital Acceptance (7D.4D)
+### 6. Real-World Hospital Acceptance Testing
 
-The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`run_7d4d_real_environment.py`) is provided to validate the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts, proving production readiness without generating PHI.
+The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`scripts/run_e2e_evaluation.py`) is provided to validate the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts, proving production readiness without generating PHI.
 
 ## 🛠️ Setup & Execution
 

@@ -44,3 +44,6 @@ Thumbs.db
 # Local code-flattening utilities and generated summaries
 flatten.py
 codigo_completo.txt
+
+# Local scratch files
+.local_scratch/
