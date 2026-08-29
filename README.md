@@ -123,7 +123,7 @@ keys and `publication_eligible=false`, so they cannot enter review,
 adjudication, STCM or OMOP publication before a later ingestion step binds an
 explicit source vocabulary and concrete OMOP event.
 
-The 7D.4 [source identity and event-binding boundary](docs/SOURCE_IDENTITY_REGISTRY.md)
+The [source identity and event-binding boundary](docs/SOURCE_IDENTITY_REGISTRY.md)
 validates canonical hospital system/code claims, resolves them to one explicitly
 registered local OMOP source vocabulary and atomically binds a `SELECT` proposal
 to exactly one existing, unmapped, domain-correct OMOP event. Only that verified
@@ -131,7 +131,7 @@ binding promotes the proposal into the existing blinded review workflow. The
 registry and event are revalidated at adjudication; approval publishes the
 explicit local code/vocabulary to STCM, and STCM application is restricted to
 the bound event. No adapter-side or single-review publication path is added.
-The [7D.4C ingestion handoff](docs/INGESTION_HANDOFF.md) accepts strict receipts
+The [ingestion handoff](docs/INGESTION_HANDOFF.md) accepts strict receipts
 from a successful, manifest-linked upstream ETL run and coordinates those
 bindings per record. Its report is metadata-only, partial expected failures are
 explicit, and the component never fabricates person, visit or clinical events
