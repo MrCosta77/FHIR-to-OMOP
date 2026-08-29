@@ -50,7 +50,7 @@ class _E2EFakeOllama:
                 break
 
         decision = "ABSTAIN"
-        if any(token in prompt for token in ["FEVER_PERS", "PARA_1G", "HBA1C", "EX_SMOKER", "ECHO_TT", "PACEMAKER_IMP"]):
+        if any(token in prompt for token in ["Fever", "acetaminophen 500", "HBA1C_RATIO", "Current smoker", "Transthoracic echocardiography", "Implantable cardiac pacemaker"]):
             decision = "SELECT"
 
         return {"message": {"content": json.dumps({
@@ -116,12 +116,12 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
         
         # Insert unmapped OMOP events
         events = [
-            ("condition_occurrence", "condition_occurrence_id", 101, "condition_concept_id", "condition_start_date", "condition_source_value", "FEVER_PERS"),
-            ("drug_exposure", "drug_exposure_id", 201, "drug_concept_id", "drug_exposure_start_date", "drug_source_value", "PARA_1G"),
-            ("measurement", "measurement_id", 301, "measurement_concept_id", "measurement_date", "measurement_source_value", "HBA1C"),
-            ("observation", "observation_id", 401, "observation_concept_id", "observation_date", "observation_source_value", "EX_SMOKER"),
-            ("procedure_occurrence", "procedure_occurrence_id", 501, "procedure_concept_id", "procedure_date", "procedure_source_value", "ECHO_TT"),
-            ("device_exposure", "device_exposure_id", 601, "device_concept_id", "device_exposure_start_date", "device_source_value", "PACEMAKER_IMP"),
+            ("condition_occurrence", "condition_occurrence_id", 101, "condition_concept_id", "condition_start_date", "condition_source_value", "FEVER"),
+            ("drug_exposure", "drug_exposure_id", 201, "drug_concept_id", "drug_exposure_start_date", "drug_source_value", "ACETAMINOPHEN_500"),
+            ("measurement", "measurement_id", 301, "measurement_concept_id", "measurement_date", "measurement_source_value", "HBA1C_RATIO"),
+            ("observation", "observation_id", 401, "observation_concept_id", "observation_date", "observation_source_value", "CURRENT_SMOKER"),
+            ("procedure_occurrence", "procedure_occurrence_id", 501, "procedure_concept_id", "procedure_date", "procedure_source_value", "TTE"),
+            ("device_exposure", "device_exposure_id", 601, "device_concept_id", "device_exposure_start_date", "device_source_value", "CARDIAC_PACEMAKER"),
         ]
         
         for table, id_col, id_val, concept_col, date_col, src_val_col, src_val in events:

@@ -1,13 +1,13 @@
 ﻿schema_version,record_id,domain,source_value,source_system,source_code,unit,specimen,route,dose,event_date
-hospital-csv-v1,E2E-COND-01,condition,febre persistente,E2E_HOSP,FEVER_PERS,,,,,2026-06-01
-hospital-csv-v1,E2E-COND-02,condition,sintoma inespecifico,E2E_HOSP,UNSPEC_SX,,,,,2026-06-01
-hospital-csv-v1,E2E-DRUG-01,drug,paracetamol 1g comprimido,E2E_HOSP,PARA_1G,,,,1g,2026-06-02
-hospital-csv-v1,E2E-DRUG-02,drug,medicamento desconhecido,E2E_HOSP,UNK_MED,,,,,2026-06-02
-hospital-csv-v1,E2E-MEAS-01,measurement,hemoglobina A1c,E2E_HOSP,HBA1C,%,blood,,,2026-06-03
-hospital-csv-v1,E2E-MEAS-02,measurement,teste laboratorial generico,E2E_HOSP,UNK_LAB,,,,,2026-06-03
-hospital-csv-v1,E2E-OBS-01,observation,ex-fumador desde 2020,E2E_HOSP,EX_SMOKER,,,,,2026-06-04
-hospital-csv-v1,E2E-OBS-02,observation,nota clinica generica,E2E_HOSP,GEN_NOTE,,,,,2026-06-04
-hospital-csv-v1,E2E-PROC-01,procedure,ecocardiograma transtoracico,E2E_HOSP,ECHO_TT,,,,,2026-06-05
-hospital-csv-v1,E2E-PROC-02,procedure,procedimento nao especificado,E2E_HOSP,UNSPEC_PROC,,,,,2026-06-05
-hospital-csv-v1,E2E-DEV-01,device,pacemaker cardiaco implantado,E2E_HOSP,PACEMAKER_IMP,,,,,2026-06-06
-hospital-csv-v1,E2E-DEV-02,device,dispositivo medico antigo,E2E_HOSP,OLD_DEV,,,,,2026-06-06
+hospital-csv-v1,E2E-COND-01,condition,Fever,E2E_HOSP,FEVER,,,,,2026-06-01
+hospital-csv-v1,E2E-COND-02,condition,unknown condition with insufficient clinical information,E2E_HOSP,UNKNOWN_CONDITION,,,,,2026-06-01
+hospital-csv-v1,E2E-DRUG-01,drug,acetaminophen 500 MG Oral Tablet,E2E_HOSP,ACETAMINOPHEN_500,,,oral,500 mg,2026-06-02
+hospital-csv-v1,E2E-DRUG-02,drug,unknown medication with insufficient clinical information,E2E_HOSP,UNKNOWN_DRUG,,,,,2026-06-02
+hospital-csv-v1,E2E-MEAS-01,measurement,Hemoglobin A1c/Hemoglobin.total in Blood,E2E_HOSP,HBA1C_RATIO,%,blood,,,2026-06-03
+hospital-csv-v1,E2E-MEAS-02,measurement,unknown laboratory result with insufficient information,E2E_HOSP,UNKNOWN_MEASUREMENT,,,,,2026-06-03
+hospital-csv-v1,E2E-OBS-01,observation,Current smoker,E2E_HOSP,CURRENT_SMOKER,,,,,2026-06-04
+hospital-csv-v1,E2E-OBS-02,observation,unknown observation with insufficient clinical information,E2E_HOSP,UNKNOWN_OBSERVATION,,,,,2026-06-04
+hospital-csv-v1,E2E-PROC-01,procedure,Transthoracic echocardiography,E2E_HOSP,TTE,,,,,2026-06-05
+hospital-csv-v1,E2E-PROC-02,procedure,unknown procedure with insufficient clinical information,E2E_HOSP,UNKNOWN_PROCEDURE,,,,,2026-06-05
+hospital-csv-v1,E2E-DEV-01,device,Implantable cardiac pacemaker,E2E_HOSP,CARDIAC_PACEMAKER,,,,,2026-06-06
+hospital-csv-v1,E2E-DEV-02,device,unknown device with insufficient clinical information,E2E_HOSP,UNKNOWN_DEVICE,,,,,2026-06-06
