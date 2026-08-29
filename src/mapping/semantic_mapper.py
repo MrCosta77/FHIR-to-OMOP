@@ -33,12 +33,11 @@ from src.security.privacy import (
     redact_direct_identifiers,
     validate_privacy_runtime,
 )
-from src.utils.config import CHROMA_PATH, DB_PATH, MODEL_NAME, OLLAMA_URL
+from src.utils.config import CHROMA_PATH, DB_PATH, MODEL_NAME, OLLAMA_URL, OLLAMA_TIMEOUT
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GENERATION_PARAMETERS = {"temperature": 0.0, "seed": 0, "num_predict": 512}
-OLLAMA_TIMEOUT_SECONDS = 120.0
 
 DOMAIN_PROMPTS = {
     "condition_occurrence": {
@@ -148,7 +147,7 @@ def run_semantic_mapping(
     privacy = validate_privacy_runtime(OLLAMA_URL)
     client = client or ollama.Client(
         host=OLLAMA_URL.rsplit("/api/", 1)[0],
-        timeout=OLLAMA_TIMEOUT_SECONDS,
+        timeout=OLLAMA_TIMEOUT,
     )
     config = TARGETS[target_table]
     result = {"target_table": target_table, "terms": 0, "proposals": 0, "abstentions": 0}

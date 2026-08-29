@@ -17,7 +17,7 @@ PROFILE_SCHEMA_VERSION = "1.0.0"
 PROFILE_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
     "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
-    "model_name", "similarity_threshold", "data_classification",
+    "ollama_timeout", "model_name", "similarity_threshold", "data_classification",
     "simulate_lis_noise", "require_integration", "include_dqd",
 }
 ENVIRONMENT_KEYS = {
@@ -30,6 +30,7 @@ ENVIRONMENT_KEYS = {
     "reports_dir": "CMF_REPORTS_DIR",
     "dqd_results_dir": "CMF_DQD_RESULTS_DIR",
     "ollama_url": "CMF_OLLAMA_URL",
+    "ollama_timeout": "CMF_OLLAMA_TIMEOUT_SECONDS",
     "model_name": "CMF_MODEL_NAME",
     "similarity_threshold": "CMF_SIMILARITY_THRESHOLD",
     "data_classification": "CMF_DATA_CLASSIFICATION",
@@ -60,6 +61,7 @@ class RuntimeSettings:
     reports_dir: Path
     dqd_results_dir: Path
     ollama_url: str
+    ollama_timeout: float
     model_name: str
     similarity_threshold: float
     data_classification: str
@@ -80,6 +82,7 @@ class RuntimeSettings:
             "reports_dir": str(self.reports_dir),
             "dqd_results_dir": str(self.dqd_results_dir),
             "ollama_url": self.ollama_url,
+            "ollama_timeout": self.ollama_timeout,
             "model_name": self.model_name,
             "similarity_threshold": self.similarity_threshold,
             "data_classification": self.data_classification,
@@ -164,6 +167,11 @@ def load_settings(
     if not 0.0 <= threshold <= 1.0:
         raise SettingsError("CMF_SIMILARITY_THRESHOLD must be between 0 and 1.")
 
+    try:
+        ollama_timeout = float(values.get("ollama_timeout", 120.0))
+    except (TypeError, ValueError) as exc:
+        raise SettingsError("CMF_OLLAMA_TIMEOUT_SECONDS must be numeric.") from exc
+
     model_name = str(values["model_name"]).strip()
     ollama_url = str(values["ollama_url"]).strip()
     classification = str(values["data_classification"]).strip().upper()
@@ -202,6 +210,7 @@ def load_settings(
         project_root=root,
         **parsed_paths,
         ollama_url=ollama_url,
+        ollama_timeout=ollama_timeout,
         model_name=model_name,
         similarity_threshold=threshold,
         data_classification=privacy["classification"],
@@ -223,6 +232,7 @@ MANIFESTS_DIR = str(SETTINGS.manifests_dir)
 REPORTS_DIR = str(SETTINGS.reports_dir)
 DQD_RESULTS_DIR = str(SETTINGS.dqd_results_dir)
 OLLAMA_URL = SETTINGS.ollama_url
+OLLAMA_TIMEOUT = SETTINGS.ollama_timeout
 MODEL_NAME = SETTINGS.model_name
 SIMILARITY_THRESHOLD = SETTINGS.similarity_threshold
 SIMULATE_LIS_NOISE = SETTINGS.simulate_lis_noise

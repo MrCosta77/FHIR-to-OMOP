@@ -36,41 +36,6 @@ flowchart TD
     DB -->|"Final OMOP CDM"| RStudio
 ```
 
-## 🚀 Quick Start
-
-Get the pipeline running locally in under 5 minutes:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/MrCosta77/FHIR-to-OMOP.git
-cd FHIR-to-OMOP
-
-# 2. Create and activate a virtual environment
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment (sets default paths and local LLM config)
-cp .env.example .env
-
-# 5. Run the full orchestrator
-python main.py
-```
-
-## 📸 Review Portal (Human-in-the-Loop)
-
-The framework includes a Streamlit portal for clinical experts to adjudicate LLM mappings. 
-To launch it locally:
-```bash
-streamlit run src/app/review_portal.py
-```
-
-![Streamlit Portal](docs/assets/streamlit_portal.png)
 
 ## 🧠 Core Engineering Philosophy
 
