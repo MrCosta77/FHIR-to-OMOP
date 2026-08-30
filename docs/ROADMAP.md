@@ -332,7 +332,10 @@ prompts nem thresholds até existir esta medição independente.
 
 As etiquetas permanecem `PROVISIONAL_TECHNICAL`; a revisão clínica documentada
 continua obrigatória antes de chamar ao conjunto "gold standard". As Fases 1 a
-6 e os marcos 7A a 7D.4C estão tecnicamente concluídos. O próximo marco é o
-7D.4D: teste de aceitação end-to-end hospitalar sintético, cobrindo os seis
-domínios sem mocks de integração e sem PHI. Após o 7D.4D, segue-se a
-consolidação deste roadmap e a release técnica v0.2.0.
+6 e os marcos 7A a 7D.4D estão tecnicamente concluídos. O 7D.4D cobre o workflow
+hospitalar completo nos seis domínios com dados sintéticos, base temporária e
+doubles controlados de Chroma/Ollama; não deve ser apresentado como validação
+da infraestrutura real. Essa evidência é separada: a Phase 5 executa
+Athena/Chroma/Ollama reais, enquanto a aceitação 7D.4D prova binding, handoff,
+revisão, adjudicação, STCM e aplicação sem tocar em dados locais. A release
+técnica v0.2.0 foi concluída; a v0.2.1 consolida estas correções de manutenção.

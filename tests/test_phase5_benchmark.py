@@ -2,8 +2,10 @@ import hashlib
 import json
 from pathlib import Path
 
+import duckdb
 import pytest
 
+import src.benchmark.evaluate_phase5 as phase5
 from src.benchmark.evaluate_phase5 import (
     _extended_metrics,
     _threshold_prediction,
@@ -150,3 +152,119 @@ def test_versioned_phase5_result_is_case_free_and_matches_frozen_run():
     assert result["arms"]["fuzzy-lexical"]["metrics"]["wrong_map"] == 1
     for name in ("retrieval-llm-qwen", "retrieval-llm-llama"):
         assert result["arms"][name]["performance"]["contract_failures"] == 0
+
+
+def test_phase5_evaluator_orchestrates_all_arms_without_external_services(
+    tmp_path, monkeypatch
+):
+    fixture = tmp_path / "cases.jsonl"
+    protocol_path = tmp_path / "phase5_protocol.json"
+    database = tmp_path / "omop.duckdb"
+    fixture.write_text("smoke fixture\n", encoding="utf-8")
+    protocol_path.write_text("{}", encoding="utf-8")
+
+    with duckdb.connect(str(database)) as connection:
+        connection.execute("CREATE TABLE cdm_source (vocabulary_version VARCHAR)")
+        connection.execute("INSERT INTO cdm_source VALUES ('test-vocabulary')")
+        connection.execute(
+            "CREATE TABLE etl_run "
+            "(run_id VARCHAR, status VARCHAR, completed_at TIMESTAMP)"
+        )
+        connection.execute(
+            "INSERT INTO etl_run VALUES "
+            "('RUN-test', 'SUCCESS', CURRENT_TIMESTAMP)"
+        )
+
+    case = {
+        "case_id": "phase5-smoke-1",
+        "split": "held_out",
+        "domain": "Condition",
+        "source": {"text": "unknown condition"},
+        "context": {},
+        "expected": {"decision": "ABSTAIN", "concept_id": None},
+    }
+    protocol = {
+        "protocol_version": "phase5-v1",
+        "fixture_sha256": "test-hash",
+        "evaluation_split": "held_out",
+        "retrieval": {"top_k": 5},
+        "threshold_curve": [0.0, 0.9],
+        "generation": {"timeout_seconds": 1},
+        "policy": {"held_out_adjustment_forbidden": True},
+        "arms": [
+            {"name": "deterministic-code-only"},
+            {"name": "fuzzy-lexical", "selection_threshold": 0.9},
+            {"name": "embedding-retrieval", "selection_threshold": 0.9},
+            {
+                "name": "retrieval-llm-qwen",
+                "selection_threshold": 0.9,
+                "model": "qwen-test",
+            },
+            {
+                "name": "retrieval-llm-llama",
+                "selection_threshold": 0.9,
+                "model": "llama-test",
+            },
+        ],
+    }
+
+    class FakeCollection:
+        metadata = {"index_signature": "test-index"}
+
+        @staticmethod
+        def count():
+            return 1
+
+    def abstain_prediction(*args, **kwargs):
+        return {
+            "decision": "ABSTAIN",
+            "concept_id": None,
+            "score": 0.0,
+            "raw_decision": "ABSTAIN",
+            "raw_concept_id": None,
+            "retrieval_candidate_ids": [],
+        }
+
+    monkeypatch.setattr(phase5, "load_protocol", lambda *args: protocol)
+    monkeypatch.setattr(phase5, "load_cases", lambda *args: [case])
+    monkeypatch.setattr(phase5, "validate_cases", lambda *args: None)
+    monkeypatch.setattr(phase5, "validate_reference_concepts", lambda *args: None)
+    monkeypatch.setattr(
+        phase5, "get_versioned_collection", lambda *args: FakeCollection()
+    )
+    monkeypatch.setattr(phase5, "deterministic_prediction", abstain_prediction)
+    monkeypatch.setattr(phase5, "fuzzy_prediction", abstain_prediction)
+    monkeypatch.setattr(phase5, "embedding_prediction", abstain_prediction)
+    monkeypatch.setattr(
+        phase5,
+        "llm_prediction",
+        lambda *args, **kwargs: (abstain_prediction(), {"llm_called": False}),
+    )
+    monkeypatch.setattr(phase5, "_model_digest", lambda *args: "sha256:test")
+    monkeypatch.setattr(phase5, "_git_commit", lambda: "test-commit")
+
+    report = phase5.evaluate_phase5(
+        fixture,
+        database,
+        protocol_path,
+        tmp_path / "chroma",
+        client=object(),
+    )
+
+    assert list(report["arms"]) == [
+        "deterministic-code-only",
+        "fuzzy-lexical",
+        "embedding-retrieval",
+        "retrieval-llm-qwen",
+        "retrieval-llm-llama",
+    ]
+    assert report["selection"] == {"split": "held_out", "case_count": 1}
+    assert report["provenance"]["vocabulary_version"] == "test-vocabulary"
+    assert report["provenance"]["etl_run_id"] == "RUN-test"
+    assert all(
+        arm["metrics"]["overall_accuracy"] == 1.0
+        for arm in report["arms"].values()
+    )
+    for name in ("retrieval-llm-qwen", "retrieval-llm-llama"):
+        assert report["arms"][name]["performance"]["llm_calls"] == 0
+        assert report["arms"][name]["performance"]["contract_failures"] == 0

@@ -1,33 +1,35 @@
-"""
-Script to manually execute the 7D.4D Hospital Acceptance test against an isolated test environment.
-This proves that the system handles RAG retrieval and LLM mapping without touching production data.
+"""Run the isolated synthetic 7D.4D hospital acceptance gate.
+
+The acceptance test exercises mapping persistence, ingestion handoff, blinded
+review, adjudication, STCM publication, and application across all six domains.
+It deliberately uses controlled Chroma and Ollama doubles. The real local-LLM
+and Athena/Chroma evaluation is the separately versioned Phase 5 benchmark.
 """
 
-import os
+from __future__ import annotations
+
+import subprocess
+import sys
 from pathlib import Path
-import tempfile
-import duckdb
 
-from src.adapters.hospital_csv_mapping import run_hospital_csv_mapping
-from src.mapping.governance import ensure_governance_tables
-from src.utils.config import CHROMA_PATH
 
-def main():
-    FIXTURE_CSV = Path("tests/fixtures/hospital_csv/e2e_hospital_6domain.csv")
-    
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        test_db = Path(tmp_dir) / "test.duckdb"
-        ensure_governance_tables(test_db)
-        
-        print("=====================================================")
-        print("7D.4D: Execução de Aceitação em Ambiente Real Isolado")
-        print("=====================================================")
-        print(f"Base de dados (Isolada): {test_db}")
-        print(f"Chroma DB (Real): {CHROMA_PATH}")
-        print(f"Fixture: {FIXTURE_CSV}\n")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ACCEPTANCE_TEST = PROJECT_ROOT / "tests" / "test_e2e_hospital_acceptance.py"
 
-        result = run_hospital_csv_mapping(FIXTURE_CSV, db_path=test_db, chroma_path=CHROMA_PATH)
-        print(f"Result: {result}")
+
+def main() -> int:
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        str(ACCEPTANCE_TEST),
+        "-m",
+        "integration",
+        "-q",
+    ]
+    completed = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
+    return completed.returncode
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

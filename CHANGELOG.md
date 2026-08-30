@@ -7,10 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [0.2.1] - 2026-08-30
 
 ### Fixed
+
 - Fixed Phase 5 module architecture and restored evaluation script.
+- Added a CI orchestration regression test covering all five Phase 5 arms.
+- Replaced the unsafe real-resource E2E script with an isolated synthetic
+  acceptance launcher; real Athena/Chroma/Ollama evidence remains in Phase 5.
 - Restored missing roadmap documentation for design history traceability.
 - Validated LLM timeout configurations ensuring positive finite constraints.
-- Updated version tracking across pyproject.toml and release_metadata.
+- Synchronized `VERSION`, `pyproject.toml`, changelog, and release validation.
 
 ## [0.2.0] - 2026-08-29
 
@@ -39,8 +43,8 @@ All notable changes to this project are documented here. The format follows
   and a metadata-only CLI.
 - Comprehensive synthetic End-to-End Hospital Acceptance gate spanning 
   all six domains, proving isolated mapping, ingestion handoff, manual review,
-  adjudication, and final STCM logic. Includes a real-environment validation
-  script bridging automated tests and operational RAG infrastructure.
+  adjudication, and final STCM logic. Includes a repeatable isolated launcher;
+  operational RAG evidence is produced separately by the Phase 5 benchmark.
 
 ## [0.1.0] - 2026-08-28
 
@@ -66,6 +70,7 @@ All notable changes to this project are documented here. The format follows
 - Documented clinical review and institutional governance remain mandatory
   before any hospital pilot.
 
-[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrCosta77/FHIR-to-OMOP/releases/tag/v0.1.0

@@ -36,6 +36,12 @@ def test_invalid_threshold_fails_closed(value):
         load_settings({"CMF_SIMILARITY_THRESHOLD": value})
 
 
+@pytest.mark.parametrize("value", ["-1", "0", "nan", "inf", "-inf", "not-a-number"])
+def test_invalid_ollama_timeout_fails_closed(value):
+    with pytest.raises(SettingsError, match="finite positive number"):
+        load_settings({"CMF_OLLAMA_TIMEOUT_SECONDS": value})
+
+
 def test_unknown_profile_fails_closed():
     with pytest.raises(SettingsError, match="Unsupported CMF_PROFILE"):
         load_settings({"CMF_PROFILE": "typo"})

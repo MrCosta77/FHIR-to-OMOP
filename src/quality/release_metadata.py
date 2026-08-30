@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import tomllib
 from pathlib import Path
 
 
@@ -47,6 +48,17 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
     version = _read(root / "VERSION").strip()
     if not SEMVER.fullmatch(version):
         raise ReleaseMetadataError(f"VERSION is not stable SemVer: {version!r}")
+
+    try:
+        project_metadata = tomllib.loads(_read(root / "pyproject.toml"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ReleaseMetadataError(f"pyproject.toml is invalid TOML: {exc}") from exc
+    package_version = str(project_metadata.get("project", {}).get("version", ""))
+    if package_version != version:
+        raise ReleaseMetadataError(
+            "pyproject.toml project.version does not match VERSION: "
+            f"{package_version!r} != {version!r}"
+        )
 
     requirements_in = _read(root / "requirements.in")
     requirements_lock = _read(root / "requirements.lock")
