@@ -85,8 +85,8 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
     if f"## [{version}]" not in changelog:
         raise ReleaseMetadataError(f"CHANGELOG.md has no section for VERSION {version}")
 
-    licence = _read(root / "LICENSE")
-    if "Apache License" not in licence or "Version 2.0, January 2004" not in licence:
+    license = _read(root / "LICENSE")
+    if "Apache License" not in license or "Version 2.0, January 2004" not in license:
         raise ReleaseMetadataError("LICENSE is not the canonical Apache-2.0 text")
     notice = _read(root / "NOTICE")
     if "FHIR-to-OMOP" not in notice or "Copyright" not in notice:
@@ -97,15 +97,15 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
         raise ReleaseMetadataError("Quality CI does not install the hashed Python lock")
 
     if release:
-        if "Select and add the project licence" in changelog:
-            raise ReleaseMetadataError("CHANGELOG.md still marks the licence as pending")
+        if "Select and add the project license" in changelog:
+            raise ReleaseMetadataError("CHANGELOG.md still marks the license as pending")
 
     return {
         "version": version,
         "python_direct_dependencies": len(direct_python),
         "r_version": r_version,
         "r_packages": len(r_packages),
-        "licence": "Apache-2.0",
+        "license": "Apache-2.0",
         "release_ready": release,
     }
 
@@ -115,7 +115,7 @@ def main() -> int:
     parser.add_argument(
         "--release",
         action="store_true",
-        help="also require the licence and absence of pending release blockers",
+        help="also require the license and absence of pending release blockers",
     )
     args = parser.parse_args()
     print(json.dumps(validate_release_metadata(release=args.release), indent=2, sort_keys=True))

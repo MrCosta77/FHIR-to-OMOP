@@ -17,7 +17,7 @@ def test_versioned_dependency_locks_and_changelog_are_consistent():
         "python_direct_dependencies": 7,
         "r_version": "4.6.1",
         "r_packages": 71,
-        "licence": "Apache-2.0",
+        "license": "Apache-2.0",
         "release_ready": False,
     }
 
