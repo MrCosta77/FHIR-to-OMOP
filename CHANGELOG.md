@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-30
+
+### Fixed
+- Fixed Phase 5 module architecture and restored evaluation script.
+- Restored missing roadmap documentation for design history traceability.
+- Validated LLM timeout configurations ensuring positive finite constraints.
+- Updated version tracking across pyproject.toml and release_metadata.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added

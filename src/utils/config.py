@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,8 +170,10 @@ def load_settings(
 
     try:
         ollama_timeout = float(values.get("ollama_timeout", 120.0))
+        if not math.isfinite(ollama_timeout) or ollama_timeout <= 0:
+            raise ValueError()
     except (TypeError, ValueError) as exc:
-        raise SettingsError("CMF_OLLAMA_TIMEOUT_SECONDS must be numeric.") from exc
+        raise SettingsError("CMF_OLLAMA_TIMEOUT_SECONDS must be a finite positive number.") from exc
 
     model_name = str(values["model_name"]).strip()
     ollama_url = str(values["ollama_url"]).strip()
