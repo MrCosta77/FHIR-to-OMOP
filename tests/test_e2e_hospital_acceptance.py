@@ -6,11 +6,17 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from src.utils import setup_cdm_schema, setup_audit
-from src.mapping import governance
-from src.adapters import source_identity, event_binding, ingestion_handoff, hospital_csv, hospital_csv_mapping
-from src.etl import apply_stcm
+from src.adapters import (
+    event_binding,
+    hospital_csv,
+    hospital_csv_mapping,
+    ingestion_handoff,
+    source_identity,
+)
 from src.adapters.ingestion_handoff import IngestionReceipt
+from src.etl import apply_stcm
+from src.mapping import governance
+from src.utils import setup_audit, setup_cdm_schema
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "hospital_csv" / "e2e_hospital_6domain.csv"
 
@@ -64,13 +70,13 @@ class _E2EFakeOllama:
 @pytest.mark.integration
 def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
     database = tmp_path / "e2e.duckdb"
-    
+
     # 1. Monkeypatch configuration
     monkeypatch.setattr("src.utils.config.DB_PATH", str(database))
     monkeypatch.setattr(setup_cdm_schema, "DB_PATH", str(database))
     monkeypatch.setattr(setup_audit, "DB_PATH", str(database))
     monkeypatch.setattr(apply_stcm, "DB_PATH", str(database))
-    
+
     monkeypatch.setattr("src.utils.config.MODEL_NAME", "llama3.2:3b")
     monkeypatch.setattr(
         "src.adapters.hospital_csv_mapping.get_versioned_collection",
@@ -83,7 +89,7 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
 
     with duckdb.connect(str(database)) as con:
         governance.ensure_governance_tables(con)
-        
+
         # Insert vocabulary concepts
         concepts = [
             (9001, "E2E Fever", "Condition", "SNOMED", "Clinical Finding", "S", "C1"),
@@ -103,7 +109,7 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             """,
             concepts,
         )
-        
+
         # Insert person
         con.execute(
             """
@@ -113,7 +119,7 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             ) VALUES (1, 8507, 1980, 1, 1, 0, 0)
             """
         )
-        
+
         # Insert unmapped OMOP events
         events = [
             ("condition_occurrence", "condition_occurrence_id", 101, "condition_concept_id", "condition_start_date", "condition_source_value", "FEVER"),
@@ -123,7 +129,7 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             ("procedure_occurrence", "procedure_occurrence_id", 501, "procedure_concept_id", "procedure_date", "procedure_source_value", "TTE"),
             ("device_exposure", "device_exposure_id", 601, "device_concept_id", "device_exposure_start_date", "device_source_value", "CARDIAC_PACEMAKER"),
         ]
-        
+
         for table, id_col, id_val, concept_col, date_col, src_val_col, src_val in events:
             if table == "condition_occurrence":
                 con.execute(f"INSERT INTO {table} ({id_col}, person_id, {concept_col}, {date_col}, condition_type_concept_id, {src_val_col}) VALUES (?, 1, 0, '2026-06-01', 32020, ?)", (id_val, src_val))
@@ -146,9 +152,9 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             ) VALUES ('RUN-hospital-ingestion', 'SUCCESS', CURRENT_TIMESTAMP, 'fake-manifest-123', 'fake-config-123', 'fake-step-123')
             """
         )
-        
+
         source_identity.register_source_system(con, "hospital-csv-v1", "E2E_HOSP", "CMF_E2E_HOSP", actor="admin", reason="E2E test")
-        
+
     # 4. Run CSV Mapping
     result = hospital_csv_mapping.run_hospital_csv_mapping(FIXTURE_CSV, db_path=database, chroma_path=tmp_path, client=_E2EFakeOllama())
     assert result["records"] == 12
@@ -162,14 +168,14 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             FROM mapping_decision
             WHERE status = 'PRE_INGESTION' AND llm_decision = 'SELECT'
         """).fetchall()
-        
+
         records = hospital_csv.load_hospital_csv(FIXTURE_CSV)
         receipts = []
         for decision_id, key, target_table in decisions:
             rec = next(r for r in records if r.source_record_key == key)
             claim = source_identity.claim_hospital_csv_identity(rec)
             identity = source_identity.resolve_source_identity(con, claim)
-            
+
             target_id = None
             if target_table == "condition_occurrence": target_id = 101
             elif target_table == "drug_exposure": target_id = 201
@@ -177,9 +183,9 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
             elif target_table == "observation": target_id = 401
             elif target_table == "procedure_occurrence": target_id = 501
             elif target_table == "device_exposure": target_id = 601
-            
+
             event_binding.bind_pre_ingestion_decision(con, identity, decision_id, target_id, actor="binder", reason="E2E bind")
-            
+
             import hashlib
             manifest_digest = hashlib.sha256(b"fake-manifest-123").hexdigest()
             receipt = IngestionReceipt(
@@ -194,10 +200,18 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
                 target_id=target_id,
             )
             receipts.append(receipt)
-            
+
         report = ingestion_handoff.process_ingestion_handoff(con, receipts, actor="ingestor", reason="E2E handoff")
         assert len(report.outcomes) == 6
 
+        from src.mapping.governance.identity import bootstrap_identity_administrator, register_governed_actor
+        bootstrap_identity_administrator(con, "Admin", "E2E Test")
+        for actor, roles in [("Reviewer One", ["reviewer"]), ("Reviewer Two", ["reviewer"]), ("Clinical Adjudicator", ["adjudicator"]), ("binder", ["integration_engineer"])]:
+            try:
+                register_governed_actor(con, actor, roles, "Admin", "E2E Test", confirm_distinct=True)
+            except Exception:
+                pass
+                
         # 6. Adjudicate
         decisions_in_review = con.execute("SELECT mapping_decision_id FROM mapping_decision WHERE status = 'PENDING'").fetchall()
         for (decision_id,) in decisions_in_review:
@@ -207,27 +221,27 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
 
     # 7. Apply STCM Mappings
     apply_stcm.apply_stcm_mappings(db_path=str(database))
-    
+
     # 8. Verify Concept IDs
     with duckdb.connect(str(database), read_only=True) as con:
         c1 = con.execute("SELECT condition_concept_id FROM condition_occurrence WHERE condition_occurrence_id = 101").fetchone()[0]
         assert c1 == 9001
-        
+
         d1 = con.execute("SELECT drug_concept_id FROM drug_exposure WHERE drug_exposure_id = 201").fetchone()[0]
         assert d1 == 9002
-        
+
         m1 = con.execute("SELECT measurement_concept_id FROM measurement WHERE measurement_id = 301").fetchone()[0]
         assert m1 == 9003
-        
+
         o1 = con.execute("SELECT observation_concept_id FROM observation WHERE observation_id = 401").fetchone()[0]
         assert o1 == 9004
-        
+
         p1 = con.execute("SELECT procedure_concept_id FROM procedure_occurrence WHERE procedure_occurrence_id = 501").fetchone()[0]
         assert p1 == 9005
-        
+
         v1 = con.execute("SELECT device_concept_id FROM device_exposure WHERE device_exposure_id = 601").fetchone()[0]
         assert v1 == 9006
-        
+
         stcm_count = con.execute("SELECT COUNT(*) FROM source_to_concept_map").fetchone()[0]
         assert stcm_count == 6
 
