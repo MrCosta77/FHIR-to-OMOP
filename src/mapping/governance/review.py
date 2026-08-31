@@ -21,7 +21,8 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
         raise ValueError("A clinical rationale is required.")
     ensure_governance_tables(con)
     row = con.execute("""
-        SELECT status, COALESCE(publication_eligible, TRUE) FROM mapping_decision
+        SELECT status, COALESCE(publication_eligible, TRUE), proposed_by
+        FROM mapping_decision
         WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not row:
@@ -33,6 +34,8 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
         )
     if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
         raise ValueError(f"Decision is not independently reviewable: {row[0]}")
+    if row[2] and row[2].strip().casefold() == reviewer.casefold():
+        raise ValueError("A counterproposal author cannot review their own candidate.")
     existing = con.execute("""
         SELECT COUNT(*) FROM clinical_mapping_review
         WHERE mapping_decision_id = ?
@@ -74,27 +77,55 @@ def blinded_review_queue(con, reviewer):
         "model_name", "affected_events",
     ]
     rows = con.execute("""
-        SELECT d.mapping_decision_id, d.run_id, d.target_table,
-               d.source_value, d.normalized_value, d.assigned_concept_id,
-               d.mapping_method, d.score, d.model_name,
-               COUNT(DISTINCT p.target_id) AS affected_events
-        FROM mapping_decision d
-        LEFT JOIN mapping_provenance p
-          ON p.mapping_decision_id = d.mapping_decision_id
-        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
-          AND COALESCE(d.publication_eligible, TRUE)
-          AND NOT EXISTS (
-              SELECT 1 FROM clinical_mapping_review r
-              WHERE r.mapping_decision_id = d.mapping_decision_id
-                AND LOWER(TRIM(r.reviewer)) = LOWER(TRIM(?))
-          )
+        WITH review_counts AS (
+            SELECT mapping_decision_id, COUNT(DISTINCT review_id) AS review_count
+            FROM clinical_mapping_review
+            GROUP BY mapping_decision_id
+        ), provenance_counts AS (
+            SELECT mapping_decision_id,
+                   COUNT(DISTINCT target_id) AS affected_events
+            FROM mapping_provenance
+            GROUP BY mapping_decision_id
+        ), ranked AS (
+            SELECT d.mapping_decision_id, d.run_id, d.target_table,
+                   d.source_value, d.normalized_value, d.assigned_concept_id,
+                   d.mapping_method, d.score, d.model_name, d.proposed_at,
+                   d.proposed_by,
+                   COALESCE(p.affected_events, 0) AS affected_events,
+                   COALESCE(r.review_count, 0) AS review_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY d.target_table,
+                                    COALESCE(d.source_adapter, ''),
+                                    COALESCE(d.source_vocabulary_id, ''),
+                                    COALESCE(d.source_code, ''),
+                                    LOWER(TRIM(d.source_value)),
+                                    d.assigned_concept_id
+                       ORDER BY COALESCE(r.review_count, 0) DESC,
+                                d.proposed_at, d.mapping_decision_id
+                   ) AS canonical_rank
+            FROM mapping_decision d
+            LEFT JOIN review_counts r USING (mapping_decision_id)
+            LEFT JOIN provenance_counts p USING (mapping_decision_id)
+            WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+              AND COALESCE(d.publication_eligible, TRUE)
+        )
+        SELECT mapping_decision_id, run_id, target_table, source_value,
+               normalized_value, assigned_concept_id, mapping_method, score,
+               model_name, affected_events
+        FROM ranked d
+        WHERE canonical_rank = 1
+          AND review_count < 2
           AND (
-              SELECT COUNT(*) FROM clinical_mapping_review r
-              WHERE r.mapping_decision_id = d.mapping_decision_id
-          ) < 2
-        GROUP BY ALL
-        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
-    """, [reviewer]).fetchall()
+              proposed_by IS NULL
+              OR LOWER(TRIM(proposed_by)) <> LOWER(TRIM(?))
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM clinical_mapping_review own
+              WHERE own.mapping_decision_id = d.mapping_decision_id
+                AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
+          )
+        ORDER BY proposed_at, mapping_decision_id
+    """, [reviewer, reviewer]).fetchall()
     result = [dict(zip(columns, row, strict=True)) for row in rows]
     audit_security_event(
         con, "CLINICAL_REVIEW_QUEUE_ACCESS", reviewer, "ALLOWED",
@@ -115,18 +146,48 @@ def blinded_adjudication_queue(con, adjudicator):
         "model_name", "affected_events", "review_count",
     ]
     rows = con.execute("""
-        SELECT d.mapping_decision_id, d.run_id, d.target_table,
-               d.source_value, d.normalized_value, d.assigned_concept_id,
-               d.mapping_method, d.score, d.model_name,
-               COUNT(DISTINCT p.target_id) AS affected_events,
-               COUNT(DISTINCT r.review_id) AS review_count
-        FROM mapping_decision d
-        JOIN clinical_mapping_review r
-          ON r.mapping_decision_id = d.mapping_decision_id
-        LEFT JOIN mapping_provenance p
-          ON p.mapping_decision_id = d.mapping_decision_id
-        WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
-          AND COALESCE(d.publication_eligible, TRUE)
+        WITH review_counts AS (
+            SELECT mapping_decision_id, COUNT(DISTINCT review_id) AS review_count
+            FROM clinical_mapping_review
+            GROUP BY mapping_decision_id
+        ), provenance_counts AS (
+            SELECT mapping_decision_id,
+                   COUNT(DISTINCT target_id) AS affected_events
+            FROM mapping_provenance
+            GROUP BY mapping_decision_id
+        ), ranked AS (
+            SELECT d.mapping_decision_id, d.run_id, d.target_table,
+                   d.source_value, d.normalized_value, d.assigned_concept_id,
+                   d.mapping_method, d.score, d.model_name, d.proposed_at,
+                   d.proposed_by,
+                   COALESCE(p.affected_events, 0) AS affected_events,
+                   COALESCE(r.review_count, 0) AS review_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY d.target_table,
+                                    COALESCE(d.source_adapter, ''),
+                                    COALESCE(d.source_vocabulary_id, ''),
+                                    COALESCE(d.source_code, ''),
+                                    LOWER(TRIM(d.source_value)),
+                                    d.assigned_concept_id
+                       ORDER BY COALESCE(r.review_count, 0) DESC,
+                                d.proposed_at, d.mapping_decision_id
+                   ) AS canonical_rank
+            FROM mapping_decision d
+            LEFT JOIN review_counts r USING (mapping_decision_id)
+            LEFT JOIN provenance_counts p USING (mapping_decision_id)
+            WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+              AND COALESCE(d.publication_eligible, TRUE)
+        )
+        SELECT mapping_decision_id, run_id, target_table, source_value,
+               normalized_value, assigned_concept_id, mapping_method, score,
+               model_name, affected_events, review_count
+        FROM ranked d
+        WHERE canonical_rank = 1
+          AND review_count >= 2
+          AND (
+              proposed_by IS NULL
+              OR LOWER(TRIM(proposed_by)) <> LOWER(TRIM(?))
+          )
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_adjudication a
               WHERE a.mapping_decision_id = d.mapping_decision_id
@@ -136,10 +197,8 @@ def blinded_adjudication_queue(con, adjudicator):
               WHERE own.mapping_decision_id = d.mapping_decision_id
                 AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
           )
-        GROUP BY ALL
-        HAVING COUNT(DISTINCT r.review_id) >= 2
-        ORDER BY MIN(d.proposed_at), d.mapping_decision_id
-    """, [adjudicator]).fetchall()
+        ORDER BY proposed_at, mapping_decision_id
+    """, [adjudicator, adjudicator]).fetchall()
     result = [dict(zip(columns, row, strict=True)) for row in rows]
     audit_security_event(
         con, "CLINICAL_REVIEW_QUEUE_ACCESS", adjudicator, "ALLOWED",

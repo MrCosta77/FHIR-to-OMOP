@@ -14,3 +14,7 @@ from .review import (
     review_mapping_decision,
 )
 from .publication import adjudicate_mapping_decision
+from .counterproposal import (
+    counterproposal_source_queue,
+    submit_counterproposal,
+)

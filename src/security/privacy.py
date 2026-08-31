@@ -19,7 +19,7 @@ SENSITIVE_AUDIT_KEYS = {
 }
 DIRECT_IDENTIFIER_PATTERNS = (
     ("EMAIL", re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")),
-    ("PHONE", re.compile(r"(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?|\d{2,4}[\s.-])\d{3,4}[\s.-]\d{3,4}(?!\w)")),
+    ("PHONE", re.compile(r"(?<![\w-])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?|\d{2,4}[\s.-])\d{3,4}[\s.-]\d{3,4}(?![\w-])")),
     ("US_SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     ("IP_ADDRESS", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
     ("LOCAL_IDENTIFIER", re.compile(r"(?i)\b(?:MRN|NHS|NIF|SNS)\s*[:#-]?\s*[A-Z0-9-]{4,}\b")),

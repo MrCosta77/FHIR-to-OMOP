@@ -5,11 +5,13 @@ from src.mapping.governance import (
     blinded_adjudication_queue,
     blinded_review_queue,
     clinical_review_agreement,
+    counterproposal_source_queue,
     ensure_governance_tables,
     register_decision,
     rejection_policy_exists,
     review_mapping_decision,
     submit_blinded_review,
+    submit_counterproposal,
 )
 
 
@@ -27,7 +29,8 @@ def _create_stcm(con):
 def _create_concepts(con):
     con.execute("""
         CREATE TABLE concept (
-            concept_id INTEGER, vocabulary_id VARCHAR, domain_id VARCHAR,
+            concept_id INTEGER, concept_name VARCHAR, vocabulary_id VARCHAR,
+            domain_id VARCHAR,
             standard_concept VARCHAR,
             invalid_reason VARCHAR, valid_start_date VARCHAR,
             valid_end_date VARCHAR
@@ -35,10 +38,11 @@ def _create_concepts(con):
     """)
     con.execute("""
         INSERT INTO concept VALUES
-        (300, 'LOINC', 'Measurement', 'S', NULL, '20200101', '20991231'),
-        (301, 'SNOMED', 'Condition', 'S', NULL, '20200101', '20991231'),
-        (302, 'SNOMED', 'Device', 'S', NULL, '20200101', '20991231'),
-        (303, 'LOINC', 'Observation', 'S', NULL, '20200101', '20991231')
+        (300, 'Original measurement', 'LOINC', 'Measurement', 'S', NULL, '20200101', '20991231'),
+        (301, 'Condition candidate', 'SNOMED', 'Condition', 'S', NULL, '20200101', '20991231'),
+        (302, 'Device candidate', 'SNOMED', 'Device', 'S', NULL, '20200101', '20991231'),
+        (303, 'Observation candidate', 'LOINC', 'Observation', 'S', NULL, '20200101', '20991231'),
+        (304, 'Correct measurement', 'LOINC', 'Measurement', 'S', NULL, '20200101', '20991231')
     """)
 
 
@@ -264,6 +268,30 @@ def test_review_and_adjudication_queues_remain_blind():
         assert "verdict" not in adjudication[0]
 
 
+def test_review_queue_deduplicates_same_semantic_mapping_across_runs():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        first = _proposal(con, run_id="RUN-first")
+        duplicate = _proposal(con, run_id="RUN-second")
+        assert first != duplicate
+
+        queue = blinded_review_queue(con, "Reviewer One")
+        assert [row["mapping_decision_id"] for row in queue] == [first]
+
+        submit_blinded_review(
+            con, first, "REJECT", "Reviewer One", "Candidate is too broad."
+        )
+        second_queue = blinded_review_queue(con, "Reviewer Two")
+        assert [row["mapping_decision_id"] for row in second_queue] == [first]
+        submit_blinded_review(
+            con, first, "REJECT", "Reviewer Two", "A more specific concept exists."
+        )
+
+        assert blinded_review_queue(con, "Reviewer Three") == []
+        adjudication = blinded_adjudication_queue(con, "Clinical Adjudicator")
+        assert [row["mapping_decision_id"] for row in adjudication] == [first]
+
+
 def test_reviewers_and_adjudicator_must_be_distinct_and_rationales_are_required():
     with duckdb.connect(":memory:") as con:
         ensure_governance_tables(con)
@@ -324,3 +352,117 @@ def test_clinical_review_agreement_reports_raw_agreement_and_cohens_kappa():
             "reject_votes": 4,
         }
         assert agreement["by_domain"]["Measurement"]["pair_count"] == 4
+
+
+def test_counterproposal_requires_final_rejection():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _create_stcm(con)
+        _create_concepts(con)
+        decision_id = _proposal(con)
+        submit_blinded_review(
+            con, decision_id, "REJECT", "Reviewer One", "Candidate is too broad."
+        )
+
+        try:
+            submit_counterproposal(
+                con, decision_id, 304, "Reviewer One", "More precise concept."
+            )
+        except ValueError as exc:
+            assert "finally REJECTED" in str(exc)
+        else:
+            raise AssertionError("A correction bypassed final rejection")
+
+
+def test_counterproposal_is_validated_blinded_and_published_only_after_adjudication():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _create_stcm(con)
+        _create_concepts(con)
+        original = _proposal(con, run_id="RUN-first")
+        duplicate = _proposal(con, run_id="RUN-second")
+        submit_blinded_review(
+            con, original, "REJECT", "Reviewer One", "Candidate is too broad."
+        )
+        submit_blinded_review(
+            con, original, "REJECT", "Reviewer Two", "A precise concept exists."
+        )
+        adjudicate_mapping_decision(
+            con, original, "REJECT", "Clinical Adjudicator", "Rejection confirmed."
+        )
+
+        assert con.execute(
+            "SELECT status FROM mapping_decision WHERE mapping_decision_id = ?",
+            [duplicate],
+        ).fetchone()[0] == "SUPERSEDED"
+        assert [row["mapping_decision_id"] for row in counterproposal_source_queue(
+            con, "Reviewer One"
+        )] == [original]
+
+        try:
+            submit_counterproposal(
+                con, original, 301, "Reviewer One", "Wrong-domain candidate."
+            )
+        except ValueError as exc:
+            assert "Standard Measurement" in str(exc)
+        else:
+            raise AssertionError("A cross-domain counterproposal was accepted")
+
+        result = submit_counterproposal(
+            con, original, 304, "Reviewer One",
+            "This is the current Standard Measurement concept with the intended meaning.",
+        )
+        counterproposal = result["mapping_decision_id"]
+        assert result["candidate_name"] == "Correct measurement"
+        assert counterproposal_source_queue(con, "Reviewer One") == []
+        assert con.execute("""
+            SELECT status, mapping_method, score, proposed_by,
+                   supersedes_decision_id
+            FROM mapping_decision WHERE mapping_decision_id = ?
+        """, [counterproposal]).fetchone() == (
+            "PENDING", "human_counterproposal", None, "Reviewer One", original,
+        )
+        assert con.execute("""
+            SELECT assigned_concept_id, reviewed_by
+            FROM mapping_provenance WHERE mapping_decision_id = ?
+        """, [counterproposal]).fetchall() == [
+            (304, "Pending_Human_Review")
+        ]
+        assert con.execute(
+            "SELECT COUNT(*) FROM source_to_concept_map"
+        ).fetchone()[0] == 0
+
+        assert blinded_review_queue(con, "Reviewer One") == []
+        try:
+            submit_blinded_review(
+                con, counterproposal, "APPROVE", "Reviewer One", "Self review."
+            )
+        except ValueError as exc:
+            assert "own candidate" in str(exc)
+        else:
+            raise AssertionError("A counterproposal author reviewed their own candidate")
+
+        submit_blinded_review(
+            con, counterproposal, "APPROVE", "Reviewer Two", "Concept verified."
+        )
+        submit_blinded_review(
+            con, counterproposal, "APPROVE", "Reviewer Three", "Semantics verified."
+        )
+        assert blinded_adjudication_queue(con, "Reviewer One") == []
+        try:
+            adjudicate_mapping_decision(
+                con, counterproposal, "APPROVE", "Reviewer One", "Self adjudication."
+            )
+        except ValueError as exc:
+            assert "own candidate" in str(exc)
+        else:
+            raise AssertionError("A counterproposal author adjudicated their own case")
+
+        adjudicate_mapping_decision(
+            con, counterproposal, "APPROVE", "Clinical Adjudicator",
+            "Independent final confirmation.",
+        )
+        assert con.execute("""
+            SELECT source_vocabulary_id, target_concept_id
+            FROM source_to_concept_map
+        """).fetchall() == [("CMF_SYNTHEA_MEASUREMENT", 304)]

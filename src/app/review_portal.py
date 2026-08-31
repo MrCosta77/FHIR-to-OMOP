@@ -17,8 +17,10 @@ from src.mapping.governance import (
     blinded_adjudication_queue,
     blinded_review_queue,
     clinical_review_agreement,
+    counterproposal_source_queue,
     ensure_governance_tables,
     submit_blinded_review,
+    submit_counterproposal,
 )
 from src.utils.config import DB_PATH
 
@@ -38,23 +40,44 @@ def get_adjudication_queue(adjudicator):
         return pd.DataFrame(blinded_adjudication_queue(con, adjudicator))
 
 
+def get_counterproposal_queue(proposer):
+    with duckdb.connect(DB_PATH) as con:
+        return pd.DataFrame(counterproposal_source_queue(con, proposer))
+
+
 def get_dashboard_metrics():
     with duckdb.connect(DB_PATH) as con:
         ensure_governance_tables(con)
-        pending = con.execute("""
-            SELECT COUNT(*) FROM mapping_decision
-            WHERE status IN ('PENDING', 'LOW_CONFIDENCE')
-        """).fetchone()[0]
-        ready = con.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT d.mapping_decision_id
+        pending, ready = con.execute("""
+            WITH review_counts AS (
+                SELECT mapping_decision_id,
+                       COUNT(DISTINCT review_id) AS review_count
+                FROM clinical_mapping_review
+                GROUP BY mapping_decision_id
+            ), ranked AS (
+                SELECT d.mapping_decision_id,
+                       COALESCE(r.review_count, 0) AS review_count,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY d.target_table,
+                                        COALESCE(d.source_adapter, ''),
+                                        COALESCE(d.source_vocabulary_id, ''),
+                                        COALESCE(d.source_code, ''),
+                                        LOWER(TRIM(d.source_value)),
+                                        d.assigned_concept_id
+                           ORDER BY COALESCE(r.review_count, 0) DESC,
+                                    d.proposed_at, d.mapping_decision_id
+                       ) AS canonical_rank
                 FROM mapping_decision d
-                JOIN clinical_mapping_review r USING (mapping_decision_id)
+                LEFT JOIN review_counts r USING (mapping_decision_id)
                 WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
-                GROUP BY d.mapping_decision_id
-                HAVING COUNT(DISTINCT r.review_id) = 2
+                  AND COALESCE(d.publication_eligible, TRUE)
             )
-        """).fetchone()[0]
+            SELECT COUNT(*) FILTER (WHERE canonical_rank = 1),
+                   COUNT(*) FILTER (
+                       WHERE canonical_rank = 1 AND review_count >= 2
+                   )
+            FROM ranked
+        """).fetchone()
         approved = con.execute(
             "SELECT COUNT(*) FROM mapping_decision WHERE status = 'APPROVED'"
         ).fetchone()[0]
@@ -82,6 +105,20 @@ def submit_adjudication(decision_id, action, adjudicator, rationale):
     st.toast(f"Adjudication recorded: {status}")
 
 
+def submit_candidate_correction(
+    decision_id, candidate_concept_id, proposer, rationale
+):
+    with duckdb.connect(DB_PATH) as con:
+        result = submit_counterproposal(
+            con, decision_id, candidate_concept_id, proposer, rationale
+        )
+    state = "created" if result["created"] else "already recorded"
+    st.toast(
+        f"Counterproposal {state}: {result['candidate_concept_id']} "
+        f"{result['candidate_name']}"
+    )
+
+
 def render_mapping(row, identity, mode):
     columns = st.columns([1, 2, 2, 1.2, 1, 2.2])
     domain = row["target_table"].replace("_occurrence", "").capitalize()
@@ -89,8 +126,8 @@ def render_mapping(row, identity, mode):
     columns[1].write(row["source_value"])
     columns[2].write(f"✨ {row['normalized_value']}")
     columns[3].write(row["assigned_concept_id"])
-    score = float(row["score"] or 0.0)
-    columns[4].write(f"{score * 100:.1f}%")
+    score = row["score"]
+    columns[4].write("—" if pd.isna(score) else f"{float(score) * 100:.1f}%")
     rationale = columns[5].text_input(
         "Required clinical rationale",
         key=f"{mode}_reason_{row['mapping_decision_id']}",
@@ -100,7 +137,7 @@ def render_mapping(row, identity, mode):
     approve, reject = columns[5].columns(2)
     if approve.button(
         "✅ Approve", key=f"{mode}_approve_{row['mapping_decision_id']}",
-        use_container_width=True,
+        width="stretch",
     ):
         try:
             if mode == "review":
@@ -114,7 +151,7 @@ def render_mapping(row, identity, mode):
             st.error(str(exc))
     if reject.button(
         "❌ Reject", key=f"{mode}_reject_{row['mapping_decision_id']}",
-        use_container_width=True,
+        width="stretch",
     ):
         try:
             if mode == "review":
@@ -150,8 +187,11 @@ metric_columns[3].metric("Rejected", rejected)
 kappa = agreement["overall"]["cohens_kappa"]
 metric_columns[4].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
 
-review_tab, adjudication_tab, agreement_tab = st.tabs(
-    ["Independent review", "Blinded adjudication", "Agreement"]
+review_tab, adjudication_tab, correction_tab, agreement_tab = st.tabs(
+    [
+        "Independent review", "Blinded adjudication",
+        "Candidate correction", "Agreement",
+    ]
 )
 
 with review_tab:
@@ -185,6 +225,58 @@ with adjudication_tab:
                 render_mapping(mapping, identity, "adjudicate")
                 st.divider()
 
+with correction_tab:
+    if not identity.strip():
+        st.info("Enter your full professional name to propose a correction.")
+    else:
+        queue = get_counterproposal_queue(identity)
+        if queue.empty:
+            st.info(
+                "No eligible corrections. The original candidate must first be "
+                "finally rejected after two independent reviews and adjudication."
+            )
+        else:
+            st.subheader(f"Rejected candidates eligible for correction ({len(queue)})")
+            st.caption(
+                "The Athena candidate is validated before a new governed decision "
+                "is created. The author cannot review or adjudicate it."
+            )
+            for _, mapping in queue.head(50).iterrows():
+                domain = mapping["target_table"].replace(
+                    "_occurrence", ""
+                ).capitalize()
+                st.write(
+                    f"`{domain}`  {mapping['source_value']} → rejected: "
+                    f"{mapping['rejected_candidate']} "
+                    f"(`{mapping['rejected_concept_id']}`)"
+                )
+                candidate = st.text_input(
+                    "Correct Standard Athena concept_id",
+                    key=f"candidate_{mapping['mapping_decision_id']}",
+                    placeholder="e.g. 37165431",
+                )
+                rationale = st.text_area(
+                    "Clinical rationale for the counterproposal",
+                    key=f"counter_reason_{mapping['mapping_decision_id']}",
+                    placeholder=(
+                        "Explain why this concept is clinically and semantically "
+                        "more precise than the rejected candidate."
+                    ),
+                )
+                if st.button(
+                    "Submit governed counterproposal",
+                    key=f"counter_submit_{mapping['mapping_decision_id']}",
+                ):
+                    try:
+                        submit_candidate_correction(
+                            mapping["mapping_decision_id"], candidate,
+                            identity, rationale,
+                        )
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                st.divider()
+
 with agreement_tab:
     overall = agreement["overall"]
     st.write({
@@ -195,7 +287,7 @@ with agreement_tab:
     if agreement["by_domain"]:
         st.dataframe(
             pd.DataFrame.from_dict(agreement["by_domain"], orient="index"),
-            use_container_width=True,
+            width="stretch",
         )
     st.caption(
         "Agreement is descriptive until enough clinically reviewed pairs exist; "

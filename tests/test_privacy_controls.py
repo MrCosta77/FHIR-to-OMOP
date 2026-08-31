@@ -37,6 +37,13 @@ def test_direct_identifiers_are_redacted_without_destroying_clinical_values():
     }
 
 
+def test_uuid_metadata_is_not_misclassified_as_a_phone_number():
+    value = "e41dbff8-3134-5258-8461-a893dc5a7716"
+    redacted, categories = redact_direct_identifiers(value)
+    assert redacted == value
+    assert categories == []
+
+
 def test_phi_runtime_requires_explicit_approval_and_retention():
     endpoint = "http://localhost:11434/api/generate"
     with pytest.raises(PrivacyError, match="CMF_PHI_ENABLED"):

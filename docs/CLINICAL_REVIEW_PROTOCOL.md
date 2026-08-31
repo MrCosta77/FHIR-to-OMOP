@@ -25,6 +25,25 @@ Each person must use a stable professional identity. A clinical rationale is
 mandatory for every review and adjudication. A reviewer cannot submit twice or
 adjudicate a case they reviewed.
 
+## Governed candidate correction
+
+A rejected candidate is never edited in place. After two independent reviews
+and final `REJECT` adjudication, a reviewer who voted to reject it may submit a
+different Athena `concept_id` with a clinical rationale. The system then:
+
+1. validates that the candidate is current, Standard and in the expected OMOP
+   domain;
+2. creates a new `human_counterproposal` decision linked to the rejected
+   decision while preserving both histories;
+3. copies the affected-event provenance without publishing an STCM mapping;
+4. excludes the proposer from reviewing or adjudicating their own candidate;
+5. requires two new independent reviews and a distinct adjudicator before the
+   corrected mapping can be published.
+
+Semantically duplicate pending decisions are retained but marked
+`SUPERSEDED` when their canonical decision is adjudicated. This prevents a
+hidden duplicate from re-entering the queue while maintaining the audit trail.
+
 ## Blinding and audit data
 
 Independent queues expose only the mapping proposal and affected-event count.

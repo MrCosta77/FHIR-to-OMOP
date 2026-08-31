@@ -104,6 +104,9 @@ def ensure_governance_tables(con):
         ("source_code", "VARCHAR"),
         ("source_vocabulary_id", "VARCHAR"),
         ("publication_eligible", "BOOLEAN DEFAULT TRUE"),
+        ("proposed_by", "VARCHAR"),
+        ("proposal_rationale", "VARCHAR"),
+        ("supersedes_decision_id", "VARCHAR"),
     ):
         _add_column(con, "mapping_decision", name, datatype)
     con.execute("""

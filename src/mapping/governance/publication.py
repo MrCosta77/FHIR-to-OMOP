@@ -22,6 +22,16 @@ def adjudicate_mapping_decision(
     if not rationale:
         raise ValueError("An adjudication rationale is required.")
     ensure_governance_tables(con)
+    decision = con.execute("""
+        SELECT proposed_by FROM mapping_decision
+        WHERE mapping_decision_id = ?
+    """, [decision_id]).fetchone()
+    if not decision:
+        raise ValueError(f"Unknown mapping decision: {decision_id}")
+    if decision[0] and decision[0].strip().casefold() == adjudicator.casefold():
+        raise ValueError(
+            "A counterproposal author cannot adjudicate their own candidate."
+        )
     reviews = con.execute("""
         SELECT reviewer, verdict FROM clinical_mapping_review
         WHERE mapping_decision_id = ?
@@ -128,7 +138,7 @@ def _finalize_mapping_decision(
         SELECT target_table, source_value, assigned_concept_id, run_id,
                COALESCE(publication_eligible, TRUE), source_adapter,
                source_record_key, source_system, source_code,
-               source_vocabulary_id
+               source_vocabulary_id, status
         FROM mapping_decision WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not row:
@@ -136,8 +146,10 @@ def _finalize_mapping_decision(
     (
         target_table, source_value, concept_id, run_id, publication_eligible,
         source_adapter, source_record_key, source_system, explicit_source_code,
-        explicit_source_vocabulary,
+        explicit_source_vocabulary, current_status,
     ) = row
+    if current_status not in {"PENDING", "LOW_CONFIDENCE"}:
+        raise ValueError(f"Decision is not adjudication-eligible: {current_status}")
     if not publication_eligible:
         raise ValueError(
             "This pre-ingestion proposal is not adjudication-eligible; "
@@ -181,11 +193,49 @@ def _finalize_mapping_decision(
     if manage_transaction:
         con.execute("BEGIN TRANSACTION")
     try:
+        duplicate_ids = [
+            duplicate[0]
+            for duplicate in con.execute("""
+                SELECT mapping_decision_id FROM mapping_decision
+                WHERE mapping_decision_id <> ?
+                  AND status IN ('PENDING', 'LOW_CONFIDENCE')
+                  AND target_table = ?
+                  AND COALESCE(source_adapter, '') = COALESCE(?, '')
+                  AND COALESCE(source_vocabulary_id, '') = COALESCE(?, '')
+                  AND COALESCE(source_code, '') = COALESCE(?, '')
+                  AND LOWER(TRIM(source_value)) = LOWER(TRIM(?))
+                  AND assigned_concept_id = ?
+            """, [
+                decision_id, target_table, source_adapter,
+                explicit_source_vocabulary, explicit_source_code,
+                source_value, int(concept_id),
+            ]).fetchall()
+        ]
         con.execute("""
             UPDATE mapping_decision
             SET status = ?, reviewer = ?, review_reason = ?, reviewed_at = now()
             WHERE mapping_decision_id = ? AND status IN ('PENDING', 'LOW_CONFIDENCE')
         """, [new_status, reviewer, reason, decision_id])
+        if duplicate_ids:
+            supersede_reason = (
+                f"Superseded by canonical adjudication {decision_id}"
+            )
+            con.execute("""
+                UPDATE mapping_decision
+                SET status = 'SUPERSEDED', reviewer = ?, review_reason = ?,
+                    reviewed_at = now()
+                WHERE mapping_decision_id IN (SELECT UNNEST(?::VARCHAR[]))
+                  AND status IN ('PENDING', 'LOW_CONFIDENCE')
+            """, [reviewer, supersede_reason, duplicate_ids])
+            con.execute("""
+                UPDATE mapping_provenance
+                SET reviewed_by = 'Superseded_By_Canonical_Decision'
+                WHERE mapping_decision_id IN (SELECT UNNEST(?::VARCHAR[]))
+                  AND reviewed_by IN (
+                      'Pending_Human_Review', 'Below_Confidence_Threshold',
+                      'REJECTED_BY_POLICY'
+                  )
+            """, [duplicate_ids])
         legacy_status = (
             "Approved_by_Human" if action == "APPROVE" else "Rejected_by_Human"
         )
