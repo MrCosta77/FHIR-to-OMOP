@@ -1,33 +1,35 @@
+import glob
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
 from pathlib import Path
+
+import duckdb
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 # Importa a config global, como sugerido pela revisão
+from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import create_table_sql
+
 
 def extract_persons(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
-        if bundle.get('resourceType') != 'Bundle': 
+
+        if bundle.get('resourceType') != 'Bundle':
             return records
 
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
-            
+
             if resource.get('resourceType') == 'Patient':
                 patient_id = resource.get('id', '')
-                if not patient_id: 
+                if not patient_id:
                     continue
 
                 person_id = stable_person_id(patient_id)
@@ -75,22 +77,22 @@ def extract_persons(file_path):
 def run_person_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP PERSON) [PRODUCTION]")
     print("-" * 50)
-    
+
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
     all_records = []
-    
+
     # Sem try/except engolidores. Se falhar, falha de forma ruidosa e visível.
     for f in fhir_files:
         all_records.extend(extract_persons(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw person records.")
-    
+
     with duckdb.connect(DB_PATH) as con:
         # A CAUSA DO ERRO: Faltava o DROP TABLE para garantir idempotência!
         con.execute("DROP TABLE IF EXISTS person")
-        
+
         con.execute(create_table_sql("person"))
-        
+
         con.execute("DROP TABLE IF EXISTS stg_person")
         con.execute("""
             CREATE TEMPORARY TABLE stg_person (
@@ -106,9 +108,9 @@ def run_person_etl():
                 gender_source_value VARCHAR
             )
         """)
-        
+
         con.executemany("INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", all_records)
-        
+
         # Inserção com DISTINCT para garantir unicidade absoluta
         con.execute("""
             INSERT INTO person (
@@ -120,9 +122,9 @@ def run_person_etl():
                 race_concept_id, ethnicity_concept_id, person_source_value, gender_source_value
             FROM stg_person
         """)
-        
+
         count = con.execute("SELECT COUNT(*) FROM person").fetchone()[0]
-        
+
     print(f"✅ PERSON table updated! Total structured patients: {count}")
 
 if __name__ == "__main__":

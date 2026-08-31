@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 from src.security.privacy import validate_privacy_runtime
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SUPPORTED_PROFILES = {"development", "benchmark", "hospital"}

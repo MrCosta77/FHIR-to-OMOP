@@ -9,16 +9,13 @@ import platform
 import subprocess
 import time
 import tracemalloc
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import duckdb
 import ollama
 import onnxruntime
-
-from src.utils.config import SETTINGS
 
 from src.benchmark.evaluate_dirty_hospital import (
     deterministic_prediction,
@@ -38,7 +35,7 @@ from src.mapping.semantic_mapper import (
     build_prompt,
     parse_llm_decision,
 )
-
+from src.utils.config import SETTINGS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
@@ -555,7 +552,7 @@ def evaluate_phase5(
     return {
         "benchmark": "dirty-hospital-to-omop",
         "evaluator": {"name": "phase5-comparison", "version": EVALUATOR_VERSION},
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "protocol": protocol,
         "selection": {"split": "held_out", "case_count": len(cases)},
         "provenance": {

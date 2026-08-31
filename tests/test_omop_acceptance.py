@@ -8,7 +8,6 @@ import pytest
 
 from src.utils.config import DB_PATH
 
-
 pytestmark = pytest.mark.integration
 
 TABLE_KEYS = {

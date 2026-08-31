@@ -1,19 +1,21 @@
+import glob
+import hashlib
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
-import hashlib
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.mapping.governance import current_run_id
+from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 from src.utils.unit_mapping import canonical_ucum_code
-from src.omop.cdm54 import create_table_sql
-from src.mapping.governance import current_run_id
+
 
 def generate_observation_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -22,21 +24,21 @@ def generate_observation_id(unique_string):
 
 def extract_observation_candidates(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
+
         if bundle.get('resourceType') != 'Bundle':
             return records
-            
+
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
-            
+
             # 1. Caçar as "Condições" que são na verdade Observações Sociais (as nossas 1082 fugitivas)
             if resource.get('resourceType') == 'Condition':
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
                 if not person_id: continue
-                    
+
                 code = None
                 display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
@@ -49,20 +51,20 @@ def extract_observation_candidates(file_path):
                     code = codings[0].get('code')
                     display = codings[0].get('display', '')
                 if not code: continue
-                    
+
                 date = resource.get('onsetDateTime', '')[:10]
-                if not date: 
+                if not date:
                     continue
-                    
+
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
                 obs_id = generate_observation_id(base_string)
-                    
+
                 records.append((
                     obs_id, person_id, code, display, date,
                     None, None, None, None, None, None,
                 ))
-                
+
             # 2. Route every coded FHIR Observation by its Standard OMOP
             # domain. Numeric questionnaire scores can legitimately belong to
             # OBSERVATION even though FHIR represents them as valueQuantity.
@@ -70,7 +72,7 @@ def extract_observation_candidates(file_path):
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
                 if not person_id: continue
-                
+
                 code = None
                 display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
@@ -80,10 +82,10 @@ def extract_observation_candidates(file_path):
                         display = c.get('display', '')
                         break
                 if not code: continue
-                
+
                 date = resource.get('effectiveDateTime', '')[:10]
                 if not date: continue
-                
+
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
                 obs_id = generate_observation_id(base_string)
@@ -120,29 +122,29 @@ def extract_observation_candidates(file_path):
                     value_as_number, value_as_string, unit,
                     unit_system, unit_code, canonical_unit_code,
                 ))
-                
+
     return records
 
 def run_observation_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP OBSERVATION) [PRODUCTION]")
     print("-" * 50)
-    
+
     print("🔍 Extracting potential observation candidates from FHIR JSON files...")
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
-    
+
     all_records = []
     for f in fhir_files:
         all_records.extend(extract_observation_candidates(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw candidates (mixed domains).")
     print("🔌 Connecting to DuckDB for strict domain-routed insertion...")
-    
+
     with duckdb.connect(DB_PATH) as con:
         con.execute("BEGIN TRANSACTION")
         con.execute("DROP TABLE IF EXISTS observation")
-        
+
         con.execute(create_table_sql("observation"))
-        
+
         con.execute("DROP TABLE IF EXISTS stg_observation")
         con.execute("""
             CREATE TEMPORARY TABLE stg_observation (
@@ -159,7 +161,7 @@ def run_observation_etl():
                 canonical_unit_code VARCHAR
             )
         """)
-        
+
         con.executemany(
             "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
@@ -190,7 +192,7 @@ def run_observation_etl():
                 f"Observation routing found {ambiguous} events with "
                 "multiple Standard Maps to targets; explicit review is required."
             )
-        
+
         # DOMAIN ROUTING ESTRITO: O INNER JOIN garante que apenas os conceitos de Observação entram
         con.execute("""
             INSERT INTO observation (
@@ -270,10 +272,10 @@ def run_observation_etl():
                   AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
         """, [current_run_id(), current_run_id()])
-        
+
         mapped_count = con.execute("SELECT COUNT(*) FROM observation").fetchone()[0]
         con.execute("COMMIT")
-        
+
     print("\n✅ ETL Complete!")
     print(f" - Successfully routed & mapped to OMOP Observation: {mapped_count} records")
 

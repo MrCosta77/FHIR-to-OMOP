@@ -1,5 +1,6 @@
 import hashlib
 
+
 def normalise_fhir_reference(ref: str) -> str:
     """Reduce any FHIR reference form to the bare resource UUID."""
     value = str(ref or "").split("?", 1)[0].split("#", 1)[0].rstrip("/")

@@ -2,7 +2,6 @@ import pytest
 
 from src.quality.validate_dqd import validate_dqd_result
 
-
 POLICY = {
     "status": "approved",
     "max_errors": 0,

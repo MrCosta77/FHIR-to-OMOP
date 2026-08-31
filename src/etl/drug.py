@@ -1,18 +1,20 @@
+import glob
+import hashlib
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
-import hashlib
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.mapping.governance import current_run_id
+from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import create_table_sql
-from src.mapping.governance import current_run_id
+
 
 def generate_drug_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -21,9 +23,9 @@ def generate_drug_id(unique_string):
 
 def extract_drugs(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
+
         if bundle.get('resourceType') != 'Bundle':
             return records
 
@@ -44,7 +46,7 @@ def extract_drugs(file_path):
                 if not code and codings:
                     code = codings[0].get('code')
                     display = codings[0].get('display', '')
-                
+
                 if code:
                     medications[med_id] = {'code': code, 'display': display}
 
@@ -56,10 +58,10 @@ def extract_drugs(file_path):
                 person_id = stable_person_id(patient_ref)
                 if not person_id:
                     continue
-                
+
                 code = None
                 display = "Unknown"
-                
+
                 # Try inline coding first
                 med_cc = res.get('medicationCodeableConcept', {})
                 codings = med_cc.get('coding', [])
@@ -68,17 +70,17 @@ def extract_drugs(file_path):
                         code = c.get('code')
                         display = c.get('display', '')
                         break
-                        
+
                 # If not inline, use two-pass medicationReference lookup
                 if not code:
                     med_ref = res.get('medicationReference', {}).get('reference', '')
                     if med_ref in medications:
                         code = medications[med_ref]['code']
                         display = medications[med_ref]['display']
-                        
+
                 if not code:
                     continue
-                    
+
                 start_date = res.get('authoredOn', '')[:10]
                 if not start_date:
                     continue
@@ -90,9 +92,9 @@ def extract_drugs(file_path):
                 else:
                     # Fallback à prova de bala: transformar o recurso inteiro numa string e fazer o hash
                     base_string = json.dumps(res, sort_keys=True)
-                    
+
                 drug_id = generate_drug_id(base_string)
-                
+
                 records.append((
                     drug_id,
                     person_id,
@@ -100,28 +102,28 @@ def extract_drugs(file_path):
                     display,
                     start_date
                 ))
-                
+
     return records
 
 def run_drug_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP DRUG) [PRODUCTION]")
     print("-" * 50)
-    
+
     print("🔍 Extracting medications from FHIR JSON files...")
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
-    
+
     all_records = []
     for f in fhir_files:
         all_records.extend(extract_drugs(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw medication records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
-    
+
     with duckdb.connect(DB_PATH) as con:
         con.execute("DROP TABLE IF EXISTS drug_exposure")
-        
+
         con.execute(create_table_sql("drug_exposure"))
-        
+
         con.execute("DROP TABLE IF EXISTS stg_drug")
         con.execute("""
             CREATE TEMPORARY TABLE stg_drug (
@@ -132,9 +134,9 @@ def run_drug_etl():
                 start_date DATE
             )
         """)
-        
+
         con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?)", all_records)
-        
+
         con.execute("""
             INSERT INTO drug_exposure (
                 drug_exposure_id, person_id, drug_concept_id,
@@ -201,10 +203,10 @@ def run_drug_etl():
                   AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
         """, [current_run_id(), current_run_id()])
-        
+
         mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]
-        
+
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (OMOP Standard): {mapped_count} medications")
     print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} medications")

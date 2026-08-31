@@ -5,7 +5,6 @@ import pytest
 
 from src.quality.release_metadata import ReleaseMetadataError, validate_release_metadata
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_FILES = [
     "VERSION",

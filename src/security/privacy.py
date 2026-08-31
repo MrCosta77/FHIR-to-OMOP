@@ -11,7 +11,6 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = PROJECT_ROOT / "config" / "privacy_policy.json"
 SENSITIVE_AUDIT_KEYS = {

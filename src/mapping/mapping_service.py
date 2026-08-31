@@ -6,14 +6,13 @@ import re
 
 import chromadb
 
-from src.omop.mapping_targets import TARGETS
-from src.utils.config import MODEL_NAME, SIMILARITY_THRESHOLD
 from src.mapping.governance import (
     current_run_id,
     register_decision,
     rejection_policy_exists,
 )
-
+from src.omop.mapping_targets import TARGETS
+from src.utils.config import MODEL_NAME, SIMILARITY_THRESHOLD
 
 INDEX_SCHEMA_VERSION = "omop-rag-index-v1"
 

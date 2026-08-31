@@ -1,12 +1,13 @@
-import os
 import sys
-import duckdb
 from pathlib import Path
+
+import duckdb
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH
+
 
 def generate_report():
     print("\n📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊")
@@ -21,7 +22,7 @@ def generate_report():
             SELECT AVG(DATEDIFF('year', observation_period_start_date, observation_period_end_date)) 
             FROM observation_period
         """).fetchone()[0]
-        
+
         print(f"Total Patients in Cohort: {pop_count}")
         print(f"Average Observation Time per Patient: {avg_obs:.1f} years\n")
 
@@ -36,7 +37,7 @@ def generate_report():
             ORDER BY occurrences DESC
             LIMIT 5
         """).fetchall()
-        
+
         for name, count in top_conditions:
             print(f" - {name[:40]:<40} | {count} occurrences")
         print("\n")
@@ -47,7 +48,7 @@ def generate_report():
             SELECT COUNT(DISTINCT person_id) FROM condition_occurrence 
             WHERE condition_concept_id = 320128 -- Essential hypertension
         """).fetchone()[0]
-        
+
         ht_meds = con.execute("""
             SELECT COUNT(DISTINCT de.person_id) 
             FROM drug_exposure de
@@ -55,14 +56,14 @@ def generate_report():
             WHERE co.condition_concept_id = 320128
             AND de.drug_concept_id IN (1308216, 1319998, 1341927) -- ACE Inhibitors / ARBs
         """).fetchone()[0]
-        
+
         print(f"Patients Diagnosed with Hypertension: {ht_patients}")
         pct = (ht_meds / ht_patients * 100) if ht_patients > 0 else 0
         print(f"Patients on Target Medication:        {ht_meds} ({pct:.1f}%)\n")
 
         # 4. HIERARCHICAL PHENOTYPING (THE POWER OF CONCEPT_ANCESTOR)
         print("4. HIERARCHICAL PHENOTYPING (Using CONCEPT_ANCESTOR)\n" + "-"*50)
-        
+
         def get_hierarchical_count(ancestor_id, group_name):
             count = con.execute(f"""
                 SELECT COUNT(DISTINCT co.person_id)

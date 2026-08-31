@@ -3,14 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from src.quality.validate_fhir import validate_bundle, validate_directory
 from src.etl.condition import extract_conditions
 from src.etl.drug import extract_drugs
 from src.etl.measurement import extract_measurements
 from src.etl.observation import extract_observation_candidates
 from src.etl.person import extract_persons
 from src.etl.procedure import extract_procedures
-
+from src.quality.validate_fhir import validate_bundle, validate_directory
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden_fhir_bundle.json"
 

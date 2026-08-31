@@ -13,7 +13,6 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.helpers import normalise_fhir_reference
 
-
 CLINICAL_TYPES = {
     "Condition", "Encounter", "MedicationRequest", "Observation", "Procedure"
 }

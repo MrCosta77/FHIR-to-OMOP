@@ -9,15 +9,15 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from src.utils.config import SETTINGS, load_settings
 from src.quality.run_report import (
     build_run_report,
     publish_staged_report,
     stage_immutable_report,
 )
+from src.utils.config import SETTINGS, load_settings
 
 PROJECT_ROOT = SETTINGS.project_root
 
@@ -100,7 +100,7 @@ PIPELINE_STEPS.append({
 
 
 def utc_now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_run_id():

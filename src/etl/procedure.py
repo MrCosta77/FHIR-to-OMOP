@@ -1,18 +1,20 @@
+import glob
+import hashlib
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
-import hashlib
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.mapping.governance import current_run_id
+from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import create_table_sql, ensure_table_columns
-from src.mapping.governance import current_run_id
+
 
 def generate_procedure_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -21,74 +23,74 @@ def generate_procedure_id(unique_string):
 
 def extract_procedures(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
+
         if bundle.get('resourceType') != 'Bundle':
             return records
-            
+
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
-            
+
             # Capturar Procedimentos
             if resource.get('resourceType') == 'Procedure':
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
-                
+
                 if not person_id: continue
-                    
+
                 code = None
                 display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
-                
+
                 for c in codings:
                     if c.get('system') == 'http://snomed.info/sct':
                         code = c.get('code')
                         display = c.get('display', '')
                         break
-                        
+
                 if not code and codings:
                     code = codings[0].get('code')
                     display = codings[0].get('display', '')
-                    
+
                 if not code: continue
-                    
+
                 # FHIR procedures can have performedDateTime or performedPeriod
                 date = resource.get('performedDateTime', '')[:10]
                 if not date:
                     date = resource.get('performedPeriod', {}).get('start', '')[:10]
                 if not date: continue
-                    
+
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
                 procedure_id = generate_procedure_id(base_string)
-                    
+
                 records.append((procedure_id, person_id, code, display, date))
-                
+
     return records
 
 def run_procedure_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP PROCEDURE) [PRODUCTION]")
     print("-" * 50)
-    
+
     print("🔍 Extracting procedures from FHIR JSON files...")
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
-    
+
     all_records = []
     for f in fhir_files:
         all_records.extend(extract_procedures(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw procedure records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
-    
+
     with duckdb.connect(DB_PATH) as con:
         # Every native and cross-domain publication below is atomic. Closing
         # the connection after an exception rolls the active transaction back.
         con.execute("BEGIN TRANSACTION")
         con.execute("DROP TABLE IF EXISTS procedure_occurrence")
-        
+
         con.execute(create_table_sql("procedure_occurrence"))
-        
+
         con.execute("DROP TABLE IF EXISTS stg_procedure")
         con.execute("""
             CREATE TEMPORARY TABLE stg_procedure (
@@ -99,7 +101,7 @@ def run_procedure_etl():
                 date DATE
             )
         """)
-        
+
         con.executemany("INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?)", all_records)
 
         ambiguous = con.execute("""
@@ -149,7 +151,7 @@ def run_procedure_etl():
              AND c_std.standard_concept = 'S'
              AND c_std.invalid_reason IS NULL
         """)
-        
+
         # DOMAIN ROUTING ESTRITO
         con.execute("""
             INSERT INTO procedure_occurrence (
@@ -270,7 +272,7 @@ def run_procedure_etl():
                 device_source_value = EXCLUDED.device_source_value,
                 device_source_concept_id = EXCLUDED.device_source_concept_id
         """)
-        
+
         # Registar na Auditoria
         con.execute("""
             INSERT INTO mapping_provenance (
@@ -330,14 +332,14 @@ def run_procedure_etl():
                         AND COALESCE(p.run_id, '') = COALESCE(?, '')
                   )
             """, [target_table, current_run_id(), domain, target_table, current_run_id()])
-        
+
         mapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0").fetchone()[0]
         routed_measurements = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Measurement'").fetchone()[0]
         routed_observations = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Observation'").fetchone()[0]
         routed_devices = con.execute("SELECT COUNT(*) FROM stg_procedure_routed WHERE target_domain = 'Device'").fetchone()[0]
         con.execute("COMMIT")
-        
+
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (OMOP Standard): {mapped_count} procedures")
     print(f" - Routed to OMOP Measurement: {routed_measurements}")

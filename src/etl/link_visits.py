@@ -20,7 +20,6 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_event_id
 from src.utils.quarantine import ensure_quarantine_table
 
-
 EVENT_TABLES = {
     "condition_occurrence": ("condition_occurrence_id", "condition_start_date"),
     "drug_exposure": ("drug_exposure_id", "drug_exposure_start_date"),
@@ -102,7 +101,7 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
     """Extract event IDs and Encounter references without using clinical labels."""
     contexts: dict[tuple[str, int], tuple] = {}
     for file_path in sorted(glob.glob(os.path.join(str(fhir_dir), "*.json"))):
-        with open(file_path, "r", encoding="utf-8") as handle:
+        with open(file_path, encoding="utf-8") as handle:
             bundle = json.load(handle)
         if bundle.get("resourceType") != "Bundle":
             continue

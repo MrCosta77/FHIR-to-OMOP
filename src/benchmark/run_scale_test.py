@@ -9,13 +9,12 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
 from src.utils.config import load_settings
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SYNTHEA_ROOT = PROJECT_ROOT / "synthea"
@@ -152,7 +151,7 @@ def run_scale_test(output_root: Path, population: int, seed: int) -> dict:
         raise RuntimeError("Published database changed during isolated scale test.")
     return {
         "benchmark": "synthea-isolated-scale-test",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "configuration": {"requested_population": population, "seed": seed},
         "provenance": {
             "git_commit": git_commit,
@@ -191,7 +190,7 @@ def main():
     parser.add_argument("--seed", type=int, default=6062026)
     parser.add_argument("--output-root", type=Path)
     args = parser.parse_args()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     output_root = args.output_root or DEFAULT_ROOT / f"p{args.population}-{stamp}"
     report = run_scale_test(output_root, args.population, args.seed)
     report_path = output_root / "scale_report.json"

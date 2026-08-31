@@ -9,15 +9,15 @@ import duckdb
 import ollama
 
 from src.clinical_mapping_core import (
-    Candidate,
     DECISION_SCHEMA,
+    PROMPT_VERSION,
+    Candidate,
     MappingRequest,
     ModelProvenance,
-    PROMPT_VERSION,
     parse_mapping_decision,
     render_mapping_prompt,
 )
-
+from src.mapping.governance import current_run_id
 from src.mapping.mapping_service import (
     TARGETS,
     get_few_shot_prompt,
@@ -27,14 +27,12 @@ from src.mapping.mapping_service import (
     record_mapping_proposal,
     selected_candidate,
 )
-from src.mapping.governance import current_run_id
 from src.security.privacy import (
     audit_security_event,
     redact_direct_identifiers,
     validate_privacy_runtime,
 )
-from src.utils.config import CHROMA_PATH, DB_PATH, MODEL_NAME, OLLAMA_URL, OLLAMA_TIMEOUT
-
+from src.utils.config import CHROMA_PATH, DB_PATH, MODEL_NAME, OLLAMA_TIMEOUT, OLLAMA_URL
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GENERATION_PARAMETERS = {"temperature": 0.0, "seed": 0, "num_predict": 512}

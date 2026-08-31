@@ -6,7 +6,7 @@ import argparse
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -35,7 +35,6 @@ from src.mapping.semantic_mapper import (
     OLLAMA_TIMEOUT,
     PROMPT_VERSION,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROTOCOL = (
@@ -203,7 +202,7 @@ def calibrate(
     calls = [row for row in telemetry if row.get("llm_called")]
     return {
         "calibration": "phase6-development-thresholds",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "status": "PROVISIONAL_TECHNICAL",
         "deployment_authorized": False,
         "selection": {"split": "development", "case_count": len(cases)},

@@ -1,24 +1,25 @@
-import os
 import sys
-import duckdb
 from pathlib import Path
+
+import duckdb
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH
 from src.omop.cdm54 import (
     CDM_RELEASE,
     CDM_VERSION,
     ensure_complete_cdm_schema,
     record_schema_manifest,
 )
+from src.utils.config import DB_PATH
+
 
 def create_omop_skeleton():
     print(f"⚙️ INSTALLING OMOP CDM {CDM_VERSION} SCHEMA ({CDM_RELEASE})")
     print("-" * 50)
-    
+
     with duckdb.connect(DB_PATH) as con:
         ensure_complete_cdm_schema(con)
         record_schema_manifest(con)
@@ -159,11 +160,11 @@ def create_omop_skeleton():
                 invalid_reason VARCHAR(1)
             );
         """)
-        
+
         # 2. Garantir os Tipos Obrigatórios nas tabelas que o nosso ETL já cria
         # O DQD exige que as chaves estrangeiras estejam estritamente definidas
         con.execute("CREATE SEQUENCE IF NOT EXISTS seq_location_id START 1")
-        
+
         print("✅ The non-destructive 39-table OMOP CDM contract is installed.")
 
 if __name__ == "__main__":

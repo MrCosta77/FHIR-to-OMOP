@@ -1,13 +1,15 @@
-import sys
-import duckdb
 import random
+import sys
 from pathlib import Path
+
+import duckdb
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, SIMULATE_LIS_NOISE
+
 
 def run_noise_injection():
     # 1. O Portão de Segurança (Só corre se o utilizador pedir explicitamente)
@@ -18,7 +20,7 @@ def run_noise_injection():
 
     print("🧪 STARTING SIMULATION: INJECTING LEGACY LIS NOISE")
     print("-" * 50)
-    
+
     # 2. Garantir reprodutibilidade absoluta
     random.seed(42)
 
@@ -35,7 +37,7 @@ def run_noise_injection():
 
         total_measurements = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         limit = int(total_measurements * 0.10)
-        
+
         if limit == 0:
             print("⚠️ No valid measurements found to corrupt.")
             return
@@ -65,7 +67,7 @@ def run_noise_injection():
         for row in candidates:
             m_id, true_concept, true_text = row
             clean_text = true_text.split('(')[0].strip() if true_text else "Lab"
-            
+
             if clean_text in noise_map:
                 messy_text = random.choice(noise_map[clean_text])
             else:

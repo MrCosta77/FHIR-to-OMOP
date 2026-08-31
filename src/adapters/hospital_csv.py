@@ -8,15 +8,14 @@ import hashlib
 import json
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterable
 
 from src.clinical_mapping_core import Candidate, MappingRequest
 from src.omop.mapping_targets import TARGETS
 from src.security.privacy import redact_direct_identifiers
-
 
 SCHEMA_VERSION = "hospital-csv-v1"
 REQUIRED_COLUMNS = {"schema_version", "record_id", "domain", "source_value"}

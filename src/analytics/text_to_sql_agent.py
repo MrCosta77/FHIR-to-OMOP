@@ -1,9 +1,9 @@
-import os
-import sys
 import re
+import sys
+from pathlib import Path
+
 import duckdb
 import ollama
-from pathlib import Path
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -45,16 +45,16 @@ def generate_sql_query(question):
             ],
             options={'temperature': 0.0} # We want exact and deterministic responses
         )
-        
+
         raw_output = response['message']['content'].strip()
-        
+
         # Regex to strip markdown formatting if the LLM includes it (e.g., ```sql ... ```)
         sql_match = re.search(r'```(?:sql)?\n(.*?)\n```', raw_output, re.DOTALL | re.IGNORECASE)
         if sql_match:
             return sql_match.group(1).strip()
-            
+
         return raw_output.replace('```', '').strip()
-        
+
     except Exception as e:
         print(f"❌ LLM Error: {e}")
         return None
@@ -65,33 +65,33 @@ def run_agent():
     print("🤖"*25 + "\n")
     print("Welcome to your autonomous Real-World Evidence assistant.")
     print("Type your clinical question in English (or 'exit' to quit).")
-    
+
     # Open the database in read_only mode for safety (prevents the LLM from accidentally deleting data)
     with duckdb.connect(DB_PATH, read_only=True) as con:
         while True:
             print("-" * 50)
             question = input("🩺 Ask a question: ")
-            
+
             if question.lower() in ['exit', 'quit', 'sair', 'q']:
                 print("\nShutting down AI agent. Goodbye! 👋")
                 break
-                
+
             if not question.strip():
                 continue
-                
+
             print("\n🧠 Thinking (translating natural language to SQL)...")
             sql_query = generate_sql_query(question)
-            
+
             if not sql_query:
                 continue
-                
+
             print(f"📝 Generated SQL:\n\033[94m{sql_query}\033[0m\n") # \033[94m adds blue color to the terminal
-            
+
             try:
                 print("⚙️ Executing query in DuckDB...")
                 result = con.execute(sql_query).fetchall()
                 columns = [desc[0] for desc in con.description]
-                
+
                 print("\n📊 RESULT:")
                 if not result:
                     print("No data found.")
@@ -102,7 +102,7 @@ def run_agent():
                     for row in result:
                         print(" | ".join(str(val) for val in row))
                 print("\n")
-                
+
             except duckdb.Error as e:
                 print(f"❌ SQL Execution Error: The generated query had a syntax issue.\nDetails: {e}\n")
 

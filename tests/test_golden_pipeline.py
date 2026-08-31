@@ -19,7 +19,6 @@ from src.etl import (
 )
 from src.utils import setup_audit, setup_cdm_schema
 
-
 GOLDEN = Path(__file__).parent / "fixtures" / "golden_fhir_bundle.json"
 
 

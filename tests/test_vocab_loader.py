@@ -1,5 +1,6 @@
-import duckdb
 from datetime import date
+
+import duckdb
 
 from src.utils.setup_vocab import _load_next_table
 

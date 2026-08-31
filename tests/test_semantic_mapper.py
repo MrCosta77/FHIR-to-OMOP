@@ -16,7 +16,6 @@ from src.mapping.semantic_mapper import (
 )
 from src.utils.config import MODEL_NAME
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

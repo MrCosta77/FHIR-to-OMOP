@@ -1,18 +1,20 @@
+import glob
+import hashlib
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
-import hashlib
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.mapping.governance import current_run_id
+from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.omop.cdm54 import create_table_sql
-from src.mapping.governance import current_run_id
+
 
 def generate_condition_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -21,56 +23,56 @@ def generate_condition_id(unique_string):
 
 def extract_conditions(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
+
         if bundle.get('resourceType') != 'Bundle':
             return records
-            
+
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
-            
+
             if resource.get('resourceType') == 'Condition':
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
-                
+
                 if not person_id:
                     continue
-                    
+
                 code = None
                 display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
-                
+
                 for c in codings:
                     if c.get('system') == 'http://snomed.info/sct':
                         code = c.get('code')
                         display = c.get('display', '')
                         break
-                        
+
                 if not code and codings:
                     code = codings[0].get('code')
                     display = codings[0].get('display', '')
-                    
+
                 if not code:
                     continue
-                    
+
                 start_date = resource.get('onsetDateTime', '')[:10]
                 if not start_date:
-                    continue 
-                    
+                    continue
+
                 end_date = resource.get('abatementDateTime', '')[:10]
                 if not end_date:
                     end_date = start_date
-                    
+
                 # A forma mais segura de identificar um recurso num Bundle FHIR
                 full_url = entry.get('fullUrl', '')
                 if full_url:
                     base_string = full_url
                 else:
                     base_string = json.dumps(resource, sort_keys=True)
-                    
+
                 condition_id = generate_condition_id(base_string)
-                    
+
                 records.append((
                     condition_id,
                     person_id,
@@ -84,23 +86,23 @@ def extract_conditions(file_path):
 def run_condition_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP CONDITION) [PRODUCTION]")
     print("-" * 50)
-    
+
     print("🔍 Extracting conditions from FHIR JSON files...")
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
-    
+
     all_records = []
     for f in fhir_files:
         all_records.extend(extract_conditions(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw condition records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
-    
+
     with duckdb.connect(DB_PATH) as con:
         # FORÇA A ELIMINAÇÃO DA TABELA ANTIGA PARA ATUALIZAR O SCHEMA
         con.execute("DROP TABLE IF EXISTS condition_occurrence")
-        
+
         con.execute(create_table_sql("condition_occurrence"))
-        
+
         # Temporary staging table
         con.execute("DROP TABLE IF EXISTS stg_condition")
         con.execute("""
@@ -113,11 +115,11 @@ def run_condition_etl():
                 end_date DATE
             )
         """)
-        
+
         con.executemany("INSERT INTO stg_condition VALUES (?, ?, ?, ?, ?, ?)", all_records)
-        
+
         con.execute("DELETE FROM condition_occurrence")
-        
+
         # THE OMOP TRIPLE-JOIN: Source -> Relationship -> Standard
         con.execute("""
             INSERT INTO condition_occurrence (
@@ -164,7 +166,7 @@ def run_condition_etl():
                     c_std.concept_id ASC
             ) = 1
         """)
-        
+
         con.execute("""
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
@@ -197,7 +199,7 @@ def run_condition_etl():
 
         mapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM condition_occurrence WHERE condition_concept_id = 0").fetchone()[0]
-        
+
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (OMOP Standard): {mapped_count} conditions")
     print(f" - Sent to AI Fallback / Observation Queue (ID 0): {unmapped_count} conditions")

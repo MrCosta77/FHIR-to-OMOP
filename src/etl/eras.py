@@ -7,13 +7,11 @@ from pathlib import Path
 
 import duckdb
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from src.omop.cdm54 import ensure_table_columns
 from src.utils.config import DB_PATH
-
 
 PERSISTENCE_DAYS = 30
 

@@ -2,18 +2,9 @@ from .core import (
     TARGET_GOVERNANCE,
     current_run_id,
     decision_id_for,
-    rejection_policy_exists,
     register_decision,
+    rejection_policy_exists,
 )
-from .schema import ensure_governance_tables
-from .review import (
-    submit_blinded_review,
-    blinded_review_queue,
-    blinded_adjudication_queue,
-    clinical_review_agreement,
-    review_mapping_decision,
-)
-from .publication import adjudicate_mapping_decision
 from .counterproposal import (
     counterproposal_source_queue,
     submit_counterproposal,
@@ -26,3 +17,12 @@ from .identity import (
     resolve_governed_actor,
     suggest_actor_matches,
 )
+from .publication import adjudicate_mapping_decision
+from .review import (
+    blinded_adjudication_queue,
+    blinded_review_queue,
+    clinical_review_agreement,
+    review_mapping_decision,
+    submit_blinded_review,
+)
+from .schema import ensure_governance_tables

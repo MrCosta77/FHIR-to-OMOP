@@ -10,7 +10,6 @@ from src.clinical_mapping_core.contracts import (
     MappingRequest,
 )
 
-
 PROMPT_VERSION = "mapping-json-v2"
 DECISION_SCHEMA = {
     "type": "object",

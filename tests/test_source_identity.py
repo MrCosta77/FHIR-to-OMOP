@@ -15,7 +15,6 @@ from src.adapters.source_identity import (
 )
 from src.security.privacy import PrivacyError
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "hospital_csv" / "golden_hospital.csv"
 
 

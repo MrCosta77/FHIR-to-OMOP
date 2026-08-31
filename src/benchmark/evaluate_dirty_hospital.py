@@ -8,9 +8,9 @@ import json
 import platform
 import subprocess
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 import duckdb
 
@@ -216,7 +216,7 @@ def evaluate(fixture_path: Path, database_path: Path, split: str = "all") -> dic
     return {
         "benchmark": "dirty-hospital-to-omop",
         "evaluator": {"name": "deterministic-code-only", "version": EVALUATOR_VERSION},
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "selection": {"split": split, "case_count": len(cases)},
         "provenance": {
             "fixture": str(fixture_path.resolve()),

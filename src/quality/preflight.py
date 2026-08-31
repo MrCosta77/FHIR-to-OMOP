@@ -14,9 +14,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import FHIR_DIR, MODEL_NAME, OLLAMA_URL, VOCAB_DIR
 from src.security.privacy import PrivacyError, validate_privacy_runtime
-
+from src.utils.config import FHIR_DIR, MODEL_NAME, OLLAMA_URL, VOCAB_DIR
 
 ATHENA_FILES = (
     "CONCEPT.csv",

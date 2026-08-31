@@ -1,11 +1,10 @@
 from pathlib import Path
 
-from src.benchmark.evaluate_dirty_hospital import load_cases
 from src.benchmark.calibrate_development import (
     load_development_protocol,
     select_domain_thresholds,
 )
-
+from src.benchmark.evaluate_dirty_hospital import load_cases
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"

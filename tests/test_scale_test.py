@@ -1,8 +1,7 @@
+import sys
 from pathlib import Path
 
 import pytest
-
-import sys
 
 from src.benchmark.run_scale_test import _file_identity, _run_logged, synthea_command
 
@@ -49,6 +48,7 @@ def test_file_identity_detects_changes_without_reading_contents(tmp_path):
 def test_fhir_directory_can_be_overridden_for_isolated_scale_run(monkeypatch, tmp_path):
     monkeypatch.setenv("CMF_FHIR_DIR", str(tmp_path / "fhir"))
     from importlib import reload
+
     from src.utils import config
 
     try:

@@ -13,7 +13,6 @@ from src.clinical_mapping_core import (
     render_mapping_prompt,
 )
 
-
 CORE_DIR = Path(__file__).resolve().parents[1] / "src" / "clinical_mapping_core"
 
 

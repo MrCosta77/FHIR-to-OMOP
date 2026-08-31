@@ -8,9 +8,11 @@ from src.security.privacy import (
     authorize_actor,
     canonical_actor_key,
 )
-from .schema import ensure_governance_tables
+
 from .core import TARGET_GOVERNANCE
 from .identity import resolve_governed_actor
+from .schema import ensure_governance_tables
+
 
 def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     """Record one independent review without exposing or publishing peer votes."""

@@ -7,9 +7,9 @@ from src.quality.run_report import (
     build_run_report,
     dqd_evidence,
     load_and_verify_report,
+    publish_staged_report,
     seal_report,
     stage_immutable_report,
-    publish_staged_report,
     verify_report,
     write_immutable_report,
 )

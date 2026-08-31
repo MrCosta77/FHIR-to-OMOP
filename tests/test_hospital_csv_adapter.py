@@ -10,7 +10,6 @@ from src.adapters.hospital_csv import (
 )
 from src.clinical_mapping_core import Candidate, render_mapping_prompt
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "hospital_csv" / "golden_hospital.csv"
 HEADER = (
     "schema_version,record_id,domain,source_value,source_system,source_code,"

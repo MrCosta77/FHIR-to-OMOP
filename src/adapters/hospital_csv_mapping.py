@@ -12,10 +12,10 @@ import ollama
 
 from src.adapters.hospital_csv import SCHEMA_VERSION, load_hospital_csv
 from src.clinical_mapping_core import (
-    Candidate,
     DECISION_SCHEMA,
-    ModelProvenance,
     PROMPT_VERSION,
+    Candidate,
+    ModelProvenance,
     parse_mapping_decision,
     render_mapping_prompt,
 )

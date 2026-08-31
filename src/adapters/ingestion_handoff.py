@@ -7,9 +7,9 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from src.adapters.event_binding import EventBindingError, bind_pre_ingestion_decision
 from src.adapters.source_identity import (
@@ -23,7 +23,6 @@ from src.security.privacy import (
     authorize_actor,
     redact_direct_identifiers,
 )
-
 
 RECEIPT_SCHEMA_VERSION = "cmf-ingestion-receipt-v1"
 REPORT_SCHEMA_VERSION = "cmf-ingestion-handoff-report-v1"
@@ -111,7 +110,7 @@ class IngestionReceipt:
         return hashlib.sha256(_canonical_json(payload)).hexdigest()
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, object]) -> "IngestionReceipt":
+    def from_mapping(cls, payload: Mapping[str, object]) -> IngestionReceipt:
         if not isinstance(payload, Mapping):
             raise IngestionHandoffError("Each ingestion receipt must be an object")
         fields = set(payload)

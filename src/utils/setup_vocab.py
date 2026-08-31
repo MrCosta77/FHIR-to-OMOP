@@ -8,13 +8,11 @@ from pathlib import Path
 
 import duckdb
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from src.omop.cdm54 import create_table_sql, duckdb_type, load_table_specs
 from src.utils.config import DB_PATH, VOCAB_DIR
-
 
 VOCABULARY_FILES = {
     "concept": "CONCEPT.csv",

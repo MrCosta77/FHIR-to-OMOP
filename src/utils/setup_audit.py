@@ -1,20 +1,21 @@
-import os
 import sys
-import duckdb
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import duckdb
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH
 from src.mapping.governance import ensure_governance_tables
+from src.utils.config import DB_PATH
+
 
 def setup_audit_tables():
     print("⚙️ STARTING AUDIT & METADATA SETUP")
     print("-" * 50)
-    
+
     with duckdb.connect(DB_PATH) as con:
         # 1. Proveniência, execuções e decisões humanas
         ensure_governance_tables(con)
@@ -42,7 +43,7 @@ def setup_audit_tables():
                 vocabulary_version VARCHAR(20) NOT NULL
             )
         """)
-        
+
         # Tentar ler a versão do vocabulário dinamicamente da tabela 'vocabulary'
         vocab_version = "Unknown_Vocab_Version"
         try:
@@ -54,7 +55,7 @@ def setup_audit_tables():
 
         current_date = datetime.now().strftime('%Y-%m-%d')
         con.execute("DELETE FROM cdm_source")
-        
+
         con.execute("""
             INSERT INTO cdm_source (
                 cdm_source_name, cdm_source_abbreviation, cdm_holder,
@@ -71,7 +72,7 @@ def setup_audit_tables():
                 ?, ?, '5.4', 756265, ?
             )
         """, (current_date, current_date, vocab_version))
-        
+
         print("✅ 'cdm_source' table verified/created successfully!")
 
 if __name__ == "__main__":

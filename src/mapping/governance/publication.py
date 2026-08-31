@@ -7,9 +7,11 @@ from src.security.privacy import (
     audit_security_event,
     authorize_actor,
 )
-from .schema import ensure_governance_tables
+
 from .core import TARGET_GOVERNANCE
 from .identity import resolve_governed_actor
+from .schema import ensure_governance_tables
+
 
 def adjudicate_mapping_decision(
     con, decision_id, action, adjudicator, rationale

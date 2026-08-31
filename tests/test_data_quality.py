@@ -1,6 +1,7 @@
+import os
+
 import duckdb
 import pytest
-import os
 
 from src.utils.config import DB_PATH
 
@@ -25,7 +26,7 @@ def test_person_ids_are_unique(db_connection):
         GROUP BY person_id 
         HAVING COUNT(*) > 1
     """).fetchall()
-    
+
     assert len(result) == 0, f"Found {len(result)} duplicate person_ids!"
 
 def test_condition_person_fk_integrity(db_connection):
@@ -36,7 +37,7 @@ def test_condition_person_fk_integrity(db_connection):
         LEFT JOIN person p ON c.person_id = p.person_id
         WHERE p.person_id IS NULL
     """).fetchone()[0]
-    
+
     assert result == 0, f"Found {result} orphan conditions without a valid person_id!"
 
 def test_drug_person_fk_integrity(db_connection):
@@ -47,7 +48,7 @@ def test_drug_person_fk_integrity(db_connection):
         LEFT JOIN person p ON d.person_id = p.person_id
         WHERE p.person_id IS NULL
     """).fetchone()[0]
-    
+
     assert result == 0, f"Found {result} orphan drug records without a valid person_id!"
 
 def test_no_future_dates_in_conditions(db_connection):
@@ -57,7 +58,7 @@ def test_no_future_dates_in_conditions(db_connection):
         FROM condition_occurrence
         WHERE condition_start_date > CURRENT_DATE
     """).fetchone()[0]
-    
+
     assert result == 0, f"Found {result} condition records with future dates!"
 
 
@@ -83,7 +84,7 @@ def test_person_source_value_is_unique(db_connection):
         GROUP BY person_source_value 
         HAVING COUNT(*) > 1
     """).fetchall()
-    
+
     # The test fails if the duplicate list is not empty
     assert len(duplicates) == 0, f"❌ Integrity Failure: Found duplicate patients: {duplicates}"
 
@@ -99,7 +100,7 @@ def test_measurement_person_fk(db_connection):
         LEFT JOIN person p ON m.person_id = p.person_id
         WHERE p.person_id IS NULL
     """).fetchone()[0]
-    
+
     # The test fails if the orphan count is greater than zero
     assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan measurements without a valid associated patient."
 
@@ -181,7 +182,7 @@ def test_visit_person_fk(db_connection):
         LEFT JOIN person p ON v.person_id = p.person_id
         WHERE p.person_id IS NULL
     """).fetchone()[0]
-    
+
     assert orphans == 0, f"❌ Integrity Failure: Found {orphans} orphan visits without a valid associated patient."
 
 def test_observation_person_fk(db_connection):

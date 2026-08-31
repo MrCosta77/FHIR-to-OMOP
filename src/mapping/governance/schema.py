@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .core import TARGET_GOVERNANCE, decision_id_for
 
+
 def _columns(con, table):
     return {
         row[0]

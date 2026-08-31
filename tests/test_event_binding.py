@@ -27,7 +27,6 @@ from src.mapping.governance import (
     submit_blinded_review,
 )
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "hospital_csv" / "golden_hospital.csv"
 
 

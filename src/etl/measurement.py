@@ -1,20 +1,22 @@
+import glob
+import hashlib
+import json
 import os
 import sys
-import json
-import glob
-import duckdb
-import hashlib
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.mapping.governance import current_run_id
+from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
-from src.utils.unit_mapping import canonical_ucum_code
 from src.utils.quarantine import ensure_quarantine_table
-from src.omop.cdm54 import create_table_sql
-from src.mapping.governance import current_run_id
+from src.utils.unit_mapping import canonical_ucum_code
+
 
 def generate_measurement_id(unique_string):
     """Generates a stable, deterministic ID from a unique string."""
@@ -23,45 +25,45 @@ def generate_measurement_id(unique_string):
 
 def extract_measurements(file_path):
     records = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         bundle = json.load(f)
-        
+
         if bundle.get('resourceType') != 'Bundle':
             return records
-            
+
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
-            
+
             if resource.get('resourceType') == 'Observation':
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
-                
+
                 if not person_id:
                     continue
-                    
+
                 code = None
                 display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
-                
+
                 for c in codings:
                     if c.get('system') == 'http://loinc.org':
                         code = c.get('code')
                         display = c.get('display', '')
                         break
-                        
+
                 if not code:
                     continue
-                    
+
                 date = resource.get('effectiveDateTime', '')[:10]
                 if not date:
                     continue
-                    
+
                 value = None
                 unit = None
                 unit_system = None
                 unit_code = None
                 canonical_unit_code = None
-                
+
                 if 'valueQuantity' in resource:
                     value = resource['valueQuantity'].get('value')
                     quantity = resource['valueQuantity']
@@ -71,10 +73,10 @@ def extract_measurements(file_path):
                     canonical_unit_code = canonical_ucum_code(
                         unit_system, unit_code
                     )
-                
+
                 if value is None:
                     continue
-                    
+
                 # Identificador Único Universal do Bundle FHIR
                 full_url = entry.get('fullUrl', '')
                 if full_url:
@@ -86,9 +88,9 @@ def extract_measurements(file_path):
                     source_event_key = (
                         f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
                     )
-                    
+
                 measurement_id = generate_measurement_id(base_string)
-                
+
                 records.append((
                     measurement_id,
                     person_id,
@@ -107,24 +109,24 @@ def extract_measurements(file_path):
 def run_measurement_etl():
     print("⚙️ STARTING ETL PIPELINE (FHIR -> OMOP MEASUREMENT) [PRODUCTION]")
     print("-" * 50)
-    
+
     print("🔍 Extracting laboratory results from FHIR JSON files...")
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
-    
+
     all_records = []
     for f in fhir_files:
         all_records.extend(extract_measurements(f))
-        
+
     print(f"📊 Extracted {len(all_records)} raw measurement records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
-    
+
     with duckdb.connect(DB_PATH) as con:
         con.execute("BEGIN TRANSACTION")
         ensure_quarantine_table(con)
         con.execute("DROP TABLE IF EXISTS measurement")
-        
+
         con.execute(create_table_sql("measurement"))
-        
+
         con.execute("DROP TABLE IF EXISTS stg_measurement")
         con.execute("""
             CREATE TEMPORARY TABLE stg_measurement (
@@ -141,7 +143,7 @@ def run_measurement_etl():
                 source_event_key VARCHAR
             )
         """)
-        
+
         con.executemany(
             "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
@@ -205,7 +207,7 @@ def run_measurement_etl():
                 f"Measurement routing found {ambiguous} events with "
                 "multiple Standard Maps to targets; explicit review is required."
             )
-        
+
         con.execute("""
             INSERT INTO measurement (
                 measurement_id, person_id, measurement_concept_id,
@@ -314,7 +316,7 @@ def run_measurement_etl():
         mapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id = 0").fetchone()[0]
         con.execute("COMMIT")
-        
+
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (Clean Data): {mapped_count} records")
     print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} records")

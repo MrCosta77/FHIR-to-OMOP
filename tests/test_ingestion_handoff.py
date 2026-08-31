@@ -8,12 +8,14 @@ import pytest
 
 from src.adapters.hospital_csv import load_hospital_csv
 from src.adapters.ingestion_handoff import (
+    RECEIPT_SCHEMA_VERSION,
     IngestionHandoffError,
     IngestionReceipt,
-    RECEIPT_SCHEMA_VERSION,
     load_ingestion_receipts,
-    main as handoff_main,
     process_ingestion_handoff,
+)
+from src.adapters.ingestion_handoff import (
+    main as handoff_main,
 )
 from src.adapters.source_identity import (
     SourceIdentityError,
@@ -22,7 +24,6 @@ from src.adapters.source_identity import (
 )
 from src.mapping.governance import ensure_governance_tables, register_decision
 from src.security.privacy import PrivacyError
-
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hospital_csv" / "golden_hospital.csv"
 INGESTION_RUN_ID = "RUN-hospital-ingestion"

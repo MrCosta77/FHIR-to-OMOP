@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from benchmarks.dirty_hospital.build_fixture import build_cases, write_fixture
-from src.benchmark.evaluate_dirty_hospital import evaluate, load_cases, score_predictions, validate_cases
+from src.benchmark.evaluate_dirty_hospital import (
+    evaluate,
+    load_cases,
+    score_predictions,
+    validate_cases,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"

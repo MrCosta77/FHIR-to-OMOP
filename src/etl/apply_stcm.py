@@ -1,7 +1,7 @@
-import os
 import sys
-import duckdb
 from pathlib import Path
+
+import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
@@ -21,7 +21,7 @@ TARGET_MAPPINGS = {
 def apply_stcm_mappings(db_path=DB_PATH):
     print("⚙️ STARTING STCM APPLICATION (Approved mappings only)")
     print("-" * 50)
-    
+
     with duckdb.connect(db_path) as con:
         has_event_binding = bool(con.execute("""
             SELECT COUNT(*) FROM information_schema.tables
@@ -34,9 +34,9 @@ def apply_stcm_mappings(db_path=DB_PATH):
             expected_domain,
             source_vocabulary,
         ) in TARGET_MAPPINGS.items():
-            
-            # A Magia da Governança: 
-            # Cruzamos a STCM com a tabela 'concept' para garantir que o 'domain_id' 
+
+            # A Magia da Governança:
+            # Cruzamos a STCM com a tabela 'concept' para garantir que o 'domain_id'
             # do mapeamento da IA corresponde estritamente à tabela onde o vamos inserir.
             before = con.execute(f"""
                 SELECT COUNT(*) FROM {table} WHERE {concept_col} <> 0
@@ -101,18 +101,18 @@ def apply_stcm_mappings(db_path=DB_PATH):
                           TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE
                       )
             """
-            
+
             parameters = [table, source_vocabulary]
             if has_event_binding:
                 parameters.append(table)
             con.execute(query, parameters)
-            
+
             # Para reportar o impacto visualmente no terminal
             after = con.execute(f"""
                 SELECT COUNT(*) FROM {table} WHERE {concept_col} <> 0
             """).fetchone()[0]
             mapped_count = after - before
-            
+
             print(f"✅ Applied {mapped_count} approved STCM mappings to '{table}' (Domain locked: {expected_domain})")
 
 if __name__ == "__main__":

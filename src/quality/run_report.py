@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
-import copy
 import argparse
+import copy
 import hashlib
 import json
 import os
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
 from src.quality.validate_dqd import DEFAULT_POLICY, validate_dqd_file
-
 
 REPORT_SCHEMA_VERSION = "cmf-run-report-v1"
 REPORT_BUILDER_VERSION = "1.0.0"
@@ -195,7 +194,7 @@ def build_run_report(
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "report_builder_version": REPORT_BUILDER_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "run": {
             "run_id": run_id,
             "status": "SUCCESS",
