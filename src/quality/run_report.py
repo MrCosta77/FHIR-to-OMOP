@@ -137,7 +137,7 @@ def mapping_metrics(con, run_id: str) -> dict:
         review_count = con.execute("""
             SELECT COUNT(*) FROM clinical_mapping_review r
             JOIN mapping_decision d USING (mapping_decision_id)
-            WHERE d.run_id = ?
+            WHERE d.run_id = ? AND COALESCE(r.active, TRUE)
         """, [run_id]).fetchone()[0]
     adjudication_count = 0
     if _table_exists(con, "clinical_mapping_adjudication") and _table_exists(con, "mapping_decision"):

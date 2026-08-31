@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import re
+import unicodedata
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -29,6 +30,16 @@ DIRECT_IDENTIFIER_PATTERNS = (
 
 class PrivacyError(ValueError):
     """Raised when a privacy or access control fails closed."""
+
+
+def canonical_actor_key(actor: str) -> str:
+    """Normalize a governed identity without treating accents as new people."""
+    decomposed = unicodedata.normalize("NFKD", (actor or "").strip())
+    without_accents = "".join(
+        character for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    return " ".join(without_accents.casefold().split())
 
 
 def load_policy(path: Path = POLICY_PATH) -> dict:

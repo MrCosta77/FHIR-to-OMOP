@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 
-from src.security.privacy import audit_security_event, authorize_actor
+from src.security.privacy import (
+    audit_security_event,
+    authorize_actor,
+)
 
 from .core import TARGET_GOVERNANCE, decision_id_for
+from .identity import resolve_governed_actor
 from .schema import ensure_governance_tables
 
 
@@ -31,6 +35,9 @@ def counterproposal_source_queue(con, proposer):
     """Return finally rejected mappings this actor may correct."""
     proposer = authorize_actor((proposer or "").strip(), "reviewer")
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, proposer, "reviewer")
+    proposer_actor_id = actor["actor_id"]
+    proposer = actor["display_name"]
     columns = [
         "mapping_decision_id", "target_table", "source_value",
         "rejected_concept_id", "rejected_candidate", "reviewed_at",
@@ -46,7 +53,8 @@ def counterproposal_source_queue(con, proposer):
           AND EXISTS (
               SELECT 1 FROM clinical_mapping_review r
               WHERE r.mapping_decision_id = d.mapping_decision_id
-                AND LOWER(TRIM(r.reviewer)) = LOWER(TRIM(?))
+                AND COALESCE(r.active, TRUE)
+                AND r.reviewer_actor_id = ?
                 AND r.verdict = 'REJECT'
           )
           AND NOT EXISTS (
@@ -57,7 +65,7 @@ def counterproposal_source_queue(con, proposer):
           )
         ORDER BY d.reviewed_at, d.mapping_decision_id
         """,
-        [proposer],
+        [proposer_actor_id],
     ).fetchall()
     return [dict(zip(columns, row)) for row in rows]
 
@@ -76,6 +84,9 @@ def submit_counterproposal(
         raise ValueError("Candidate concept_id must be an integer.") from exc
 
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, proposer, "reviewer")
+    proposer_actor_id = actor["actor_id"]
+    proposer = actor["display_name"]
     original = con.execute(
         """
         SELECT mapping_decision_id, target_table, source_value,
@@ -109,10 +120,11 @@ def submit_counterproposal(
         """
         SELECT COUNT(*) FROM clinical_mapping_review
         WHERE mapping_decision_id IN (SELECT UNNEST(?::VARCHAR[]))
-          AND LOWER(TRIM(reviewer)) = LOWER(TRIM(?))
+          AND COALESCE(active, TRUE)
+          AND reviewer_actor_id = ?
           AND verdict = 'REJECT'
         """,
-        [duplicate_ids, proposer],
+        [duplicate_ids, proposer_actor_id],
     ).fetchone()[0]
     if not reviewed_reject:
         raise ValueError(
@@ -154,13 +166,13 @@ def submit_counterproposal(
     )
     existing = con.execute(
         """
-        SELECT proposed_by FROM mapping_decision
+        SELECT proposed_by_actor_id FROM mapping_decision
         WHERE mapping_decision_id = ?
         """,
         [decision_id],
     ).fetchone()
     if existing:
-        if (existing[0] or "").strip().casefold() != proposer.casefold():
+        if existing[0] != proposer_actor_id:
             raise ValueError("This counterproposal already exists under another proposer.")
         return {
             "mapping_decision_id": decision_id,
@@ -179,16 +191,17 @@ def submit_counterproposal(
                 model_name, prompt_version, vocabulary_version, status,
                 source_system, source_code, source_vocabulary_id,
                 publication_eligible, proposed_by, proposal_rationale,
-                supersedes_decision_id
+                supersedes_decision_id, proposed_by_actor_id
             ) VALUES (?, 'HUMAN-CURATION', ?, ?, ?, ?,
                       'human_counterproposal', NULL, 'human-curation',
                       'human-counterproposal-v1', ?, 'PENDING', ?, ?, ?, TRUE,
-                      ?, ?, ?)
+                      ?, ?, ?, ?)
             """,
             [
                 decision_id, original[1], original[2], candidate[0],
                 candidate_concept_id, original[6], original[10], original[11],
                 original[12], proposer, rationale, original_decision_id,
+                proposer_actor_id,
             ],
         )
         con.execute(

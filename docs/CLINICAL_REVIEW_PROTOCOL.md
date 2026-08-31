@@ -21,9 +21,30 @@ must never be represented as clinical validation.
    `source_to_concept_map`, activate a rejection policy or change event-level
    provenance status.
 
-Each person must use a stable professional identity. A clinical rationale is
-mandatory for every review and adjudication. A reviewer cannot submit twice or
-adjudicate a case they reviewed.
+Each person has a stable `actor_id`; names are display attributes and never the
+key used to establish independence. A clinical rationale is mandatory for
+every review and adjudication. A reviewer cannot submit twice or adjudicate a
+case they reviewed.
+
+## Governed professional identities
+
+`governed_actor` records the immutable person identifier and active state;
+`governed_actor_role` grants reviewer, adjudicator or identity-administrator
+capability; and `governed_actor_alias` contains explicitly approved name
+variants. Accents, case and whitespace normalize deterministically. Shortened
+names and spelling errors are accepted only after an administrator attaches
+them to the correct actor.
+
+Similarity detection is a warning and blocking control, never proof of
+identity. A possible match must be resolved as either an approved alias or an
+explicitly confirmed distinct person. Reviews, counterproposals and
+adjudications store the relevant `actor_id`; separation-of-duty checks use that
+identifier across semantically duplicate decisions.
+
+The first identity administrator is established by a one-time audited
+bootstrap, available only while no active `source_admin` exists. Thereafter,
+actor registration, role grants and aliases require an active administrator
+`actor_id`; the bootstrap cannot be repeated.
 
 ## Governed candidate correction
 
@@ -68,7 +89,8 @@ clinical team approves a sample-size and interpretation plan.
 
 ## Current limitation
 
-The portal records a named identity but does not itself authenticate a person.
-Before any PHI pilot it must run behind institution-managed authentication and
-role-based access control. Until that control and the privacy policy are active,
-the workflow is suitable only for synthetic or approved de-identified data.
+The portal maintains a governed identity registry but does not itself prove who
+is operating the browser. Before any PHI pilot, its `actor_id` resolution must
+be bound to institution-managed authentication and role claims rather than a
+typed name. Until that control and the privacy policy are active, the workflow
+is suitable only for synthetic or approved de-identified data.

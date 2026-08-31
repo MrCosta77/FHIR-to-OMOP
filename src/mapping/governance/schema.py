@@ -107,6 +107,7 @@ def ensure_governance_tables(con):
         ("proposed_by", "VARCHAR"),
         ("proposal_rationale", "VARCHAR"),
         ("supersedes_decision_id", "VARCHAR"),
+        ("proposed_by_actor_id", "VARCHAR"),
     ):
         _add_column(con, "mapping_decision", name, datatype)
     con.execute("""
@@ -179,6 +180,15 @@ def ensure_governance_tables(con):
             UNIQUE (mapping_decision_id, reviewer)
         )
     """)
+    for name, datatype in (
+        ("reviewer_key", "VARCHAR"),
+        ("active", "BOOLEAN DEFAULT TRUE"),
+        ("invalidated_at", "TIMESTAMP"),
+        ("invalidated_by", "VARCHAR"),
+        ("invalidation_reason", "VARCHAR"),
+        ("reviewer_actor_id", "VARCHAR"),
+    ):
+        _add_column(con, "clinical_mapping_review", name, datatype)
     con.execute("""
         CREATE TABLE IF NOT EXISTS clinical_mapping_adjudication (
             adjudication_id VARCHAR PRIMARY KEY,
@@ -191,6 +201,48 @@ def ensure_governance_tables(con):
             adjudicated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    _add_column(
+        con, "clinical_mapping_adjudication", "adjudicator_actor_id", "VARCHAR"
+    )
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS governed_actor (
+            actor_id VARCHAR PRIMARY KEY,
+            display_name VARCHAR NOT NULL,
+            canonical_name VARCHAR NOT NULL UNIQUE,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            registered_by VARCHAR NOT NULL,
+            registration_reason VARCHAR NOT NULL,
+            registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            deactivated_at TIMESTAMP,
+            deactivated_by VARCHAR,
+            deactivation_reason VARCHAR
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS governed_actor_alias (
+            alias_key VARCHAR PRIMARY KEY,
+            actor_id VARCHAR NOT NULL,
+            alias_name VARCHAR NOT NULL,
+            source VARCHAR NOT NULL,
+            approved_by VARCHAR NOT NULL,
+            approval_reason VARCHAR NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            approved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS governed_actor_role (
+            actor_id VARCHAR NOT NULL,
+            role VARCHAR NOT NULL,
+            granted_by VARCHAR NOT NULL,
+            grant_reason VARCHAR NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (actor_id, role)
+        )
+    """)
+    _migrate_governed_actors(con)
+    _normalize_and_deduplicate_reviews(con)
     con.execute("""
         CREATE TABLE IF NOT EXISTS source_identity_registry (
             source_adapter VARCHAR NOT NULL,
@@ -237,6 +289,145 @@ def ensure_governance_tables(con):
         _add_column(con, "source_event_binding", name, datatype)
     _copy_legacy_publication_policy(con)
     _migrate_legacy_decisions(con)
+
+
+def _normalize_and_deduplicate_reviews(con):
+    """Keep the earliest vote per person and semantic proposal active."""
+    from src.security.privacy import canonical_actor_key
+
+    missing_keys = con.execute("""
+        SELECT review_id, reviewer FROM clinical_mapping_review
+        WHERE reviewer_key IS NULL OR TRIM(reviewer_key) = ''
+    """).fetchall()
+    for review_id, reviewer in missing_keys:
+        con.execute("""
+            UPDATE clinical_mapping_review SET reviewer_key = ?
+            WHERE review_id = ?
+        """, [canonical_actor_key(reviewer), review_id])
+
+    rows = con.execute("""
+        SELECT r.review_id,
+               COALESCE(r.reviewer_actor_id, r.reviewer_key), d.target_table,
+               COALESCE(d.source_adapter, ''),
+               COALESCE(d.source_vocabulary_id, ''),
+               COALESCE(d.source_code, ''), LOWER(TRIM(d.source_value)),
+               d.assigned_concept_id
+        FROM clinical_mapping_review r
+        JOIN mapping_decision d USING (mapping_decision_id)
+        WHERE COALESCE(r.active, TRUE)
+        ORDER BY r.submitted_at, r.review_id
+    """).fetchall()
+    seen = set()
+    redundant = []
+    for row in rows:
+        semantic_actor = tuple(row[1:])
+        if semantic_actor in seen:
+            redundant.append(row[0])
+        else:
+            seen.add(semantic_actor)
+    if redundant:
+        con.execute("""
+            UPDATE clinical_mapping_review
+            SET active = FALSE, invalidated_at = now(),
+                invalidated_by = 'SYSTEM_IDENTITY_DEDUP',
+                invalidation_reason =
+                    'Duplicate vote by the same normalized actor on a semantic duplicate'
+            WHERE review_id IN (SELECT UNNEST(?::VARCHAR[]))
+        """, [redundant])
+
+
+def _migrate_governed_actors(con):
+    """Assign deterministic actor IDs to existing governed actions."""
+    import uuid
+
+    from src.security.privacy import canonical_actor_key
+
+    identities = []
+    identities.extend(
+        (name, "reviewer")
+        for (name,) in con.execute("""
+            SELECT DISTINCT reviewer FROM clinical_mapping_review
+            WHERE reviewer IS NOT NULL AND TRIM(reviewer) <> ''
+        """).fetchall()
+    )
+    identities.extend(
+        (name, "adjudicator")
+        for (name,) in con.execute("""
+            SELECT DISTINCT adjudicator FROM clinical_mapping_adjudication
+            WHERE adjudicator IS NOT NULL AND TRIM(adjudicator) <> ''
+        """).fetchall()
+    )
+    identities.extend(
+        (name, "reviewer")
+        for (name,) in con.execute("""
+            SELECT DISTINCT proposed_by FROM mapping_decision
+            WHERE proposed_by IS NOT NULL AND TRIM(proposed_by) <> ''
+        """).fetchall()
+    )
+    actor_ids = {}
+    for display_name, role in identities:
+        key = canonical_actor_key(display_name)
+        actor_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:governed-actor:{key}")
+        )
+        actor_ids[key] = actor_id
+        con.execute("""
+            INSERT INTO governed_actor (
+                actor_id, display_name, canonical_name, registered_by,
+                registration_reason
+            ) VALUES (?, ?, ?, 'SYSTEM_LEGACY_MIGRATION',
+                      'Migrated from an existing governed action')
+            ON CONFLICT DO NOTHING
+        """, [actor_id, display_name, key])
+        con.execute("""
+            INSERT INTO governed_actor_alias (
+                alias_key, actor_id, alias_name, source, approved_by,
+                approval_reason
+            ) VALUES (?, ?, ?, 'legacy_migration', 'SYSTEM_LEGACY_MIGRATION',
+                      'Canonical alias migrated from governed history')
+            ON CONFLICT DO NOTHING
+        """, [key, actor_id, display_name])
+        con.execute("""
+            INSERT INTO governed_actor_role (
+                actor_id, role, granted_by, grant_reason
+            ) VALUES (?, ?, 'SYSTEM_LEGACY_MIGRATION',
+                      'Role inferred from governed history')
+            ON CONFLICT DO NOTHING
+        """, [actor_id, role])
+
+    for key, actor_id in actor_ids.items():
+        con.execute("""
+            UPDATE clinical_mapping_review SET reviewer_actor_id = ?
+            WHERE reviewer_key = ? AND reviewer_actor_id IS NULL
+        """, [actor_id, key])
+        for review_id, reviewer in con.execute("""
+            SELECT review_id, reviewer FROM clinical_mapping_review
+            WHERE reviewer_actor_id IS NULL
+        """).fetchall():
+            if canonical_actor_key(reviewer) == key:
+                con.execute("""
+                    UPDATE clinical_mapping_review SET reviewer_actor_id = ?
+                    WHERE review_id = ?
+                """, [actor_id, review_id])
+        for adjudication_id, adjudicator in con.execute("""
+            SELECT adjudication_id, adjudicator
+            FROM clinical_mapping_adjudication
+            WHERE adjudicator_actor_id IS NULL
+        """).fetchall():
+            if canonical_actor_key(adjudicator) == key:
+                con.execute("""
+                    UPDATE clinical_mapping_adjudication
+                    SET adjudicator_actor_id = ? WHERE adjudication_id = ?
+                """, [actor_id, adjudication_id])
+        for decision_id, proposer in con.execute("""
+            SELECT mapping_decision_id, proposed_by FROM mapping_decision
+            WHERE proposed_by_actor_id IS NULL AND proposed_by IS NOT NULL
+        """).fetchall():
+            if canonical_actor_key(proposer) == key:
+                con.execute("""
+                    UPDATE mapping_decision SET proposed_by_actor_id = ?
+                    WHERE mapping_decision_id = ?
+                """, [actor_id, decision_id])
 
 def _copy_legacy_publication_policy(con):
     """Non-destructively seed vocabulary-scoped policy from legacy tables."""

@@ -6,6 +6,9 @@ import pytest
 from src.adapters.hospital_csv_mapping import run_hospital_csv_mapping
 from src.mapping.governance import (
     blinded_review_queue,
+    bootstrap_identity_administrator,
+    ensure_governance_tables,
+    register_governed_actor,
     submit_blinded_review,
 )
 from src.mapping.mapping_service import record_external_mapping_decision
@@ -69,6 +72,15 @@ class _FakeOllama:
 
 def _database(path):
     with duckdb.connect(str(path)) as con:
+        ensure_governance_tables(con)
+        bootstrap_identity_administrator(
+            con, "Test Identity Administrator",
+            "One-time hospital CSV test identity bootstrap.",
+        )
+        register_governed_actor(
+            con, "Reviewer One", {"reviewer"}, "Test Identity Administrator",
+            "Explicit governed hospital CSV test identity.",
+        )
         con.execute(
             "CREATE TABLE vocabulary (vocabulary_id VARCHAR, vocabulary_version VARCHAR)"
         )

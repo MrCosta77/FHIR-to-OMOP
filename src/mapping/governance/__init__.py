@@ -18,3 +18,11 @@ from .counterproposal import (
     counterproposal_source_queue,
     submit_counterproposal,
 )
+from .identity import (
+    add_governed_actor_alias,
+    bootstrap_identity_administrator,
+    list_governed_actors,
+    register_governed_actor,
+    resolve_governed_actor,
+    suggest_actor_matches,
+)

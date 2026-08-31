@@ -3,9 +3,13 @@ from __future__ import annotations
 import uuid
 
 from src.omop.mapping_targets import TARGETS
-from src.security.privacy import audit_security_event, authorize_actor
+from src.security.privacy import (
+    audit_security_event,
+    authorize_actor,
+)
 from .schema import ensure_governance_tables
 from .core import TARGET_GOVERNANCE
+from .identity import resolve_governed_actor
 
 def adjudicate_mapping_decision(
     con, decision_id, action, adjudicator, rationale
@@ -22,27 +26,30 @@ def adjudicate_mapping_decision(
     if not rationale:
         raise ValueError("An adjudication rationale is required.")
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, adjudicator, "adjudicator")
+    adjudicator_actor_id = actor["actor_id"]
+    adjudicator = actor["display_name"]
     decision = con.execute("""
-        SELECT proposed_by FROM mapping_decision
+        SELECT proposed_by_actor_id FROM mapping_decision
         WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
     if not decision:
         raise ValueError(f"Unknown mapping decision: {decision_id}")
-    if decision[0] and decision[0].strip().casefold() == adjudicator.casefold():
+    if decision[0] and decision[0] == adjudicator_actor_id:
         raise ValueError(
             "A counterproposal author cannot adjudicate their own candidate."
         )
     reviews = con.execute("""
-        SELECT reviewer, verdict FROM clinical_mapping_review
-        WHERE mapping_decision_id = ?
+        SELECT reviewer_actor_id, verdict FROM clinical_mapping_review
+        WHERE mapping_decision_id = ? AND COALESCE(active, TRUE)
         ORDER BY submitted_at, review_id
     """, [decision_id]).fetchall()
     if len(reviews) != 2:
         raise ValueError("Exactly two independent reviews are required before adjudication.")
-    reviewer_keys = {reviewer.strip().casefold() for reviewer, _ in reviews}
-    if len(reviewer_keys) != 2:
+    reviewer_actor_ids = {actor_id for actor_id, _ in reviews}
+    if len(reviewer_actor_ids) != 2 or None in reviewer_actor_ids:
         raise ValueError("Clinical reviews must come from two distinct reviewers.")
-    if adjudicator.casefold() in reviewer_keys:
+    if adjudicator_actor_id in reviewer_actor_ids:
         raise ValueError("The adjudicator must be distinct from both reviewers.")
     unanimous = reviews[0][1] == reviews[1][1]
 
@@ -55,11 +62,12 @@ def adjudicate_mapping_decision(
         con.execute("""
             INSERT INTO clinical_mapping_adjudication (
                 adjudication_id, mapping_decision_id, adjudicator,
-                final_action, rationale, reviewer_count, unanimous
-            ) VALUES (?, ?, ?, ?, ?, 2, ?)
+                adjudicator_actor_id, final_action, rationale,
+                reviewer_count, unanimous
+            ) VALUES (?, ?, ?, ?, ?, ?, 2, ?)
         """, [
-            str(uuid.uuid4()), decision_id, adjudicator, action, rationale,
-            unanimous,
+            str(uuid.uuid4()), decision_id, adjudicator, adjudicator_actor_id,
+            action, rationale, unanimous,
         ])
         audit_security_event(
             con, "CLINICAL_MAPPING_ADJUDICATION", adjudicator, status,

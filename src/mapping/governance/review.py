@@ -3,9 +3,14 @@ from __future__ import annotations
 import uuid
 from collections import Counter, defaultdict
 
-from src.security.privacy import audit_security_event, authorize_actor
+from src.security.privacy import (
+    audit_security_event,
+    authorize_actor,
+    canonical_actor_key,
+)
 from .schema import ensure_governance_tables
 from .core import TARGET_GOVERNANCE
+from .identity import resolve_governed_actor
 
 def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     """Record one independent review without exposing or publishing peer votes."""
@@ -20,8 +25,14 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     if not rationale:
         raise ValueError("A clinical rationale is required.")
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, reviewer, "reviewer")
+    reviewer_actor_id = actor["actor_id"]
+    reviewer = actor["display_name"]
     row = con.execute("""
-        SELECT status, COALESCE(publication_eligible, TRUE), proposed_by
+        SELECT status, COALESCE(publication_eligible, TRUE), proposed_by,
+               target_table, source_adapter, source_vocabulary_id,
+               source_code, source_value, assigned_concept_id,
+               proposed_by_actor_id
         FROM mapping_decision
         WHERE mapping_decision_id = ?
     """, [decision_id]).fetchone()
@@ -34,25 +45,42 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
         )
     if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
         raise ValueError(f"Decision is not independently reviewable: {row[0]}")
-    if row[2] and row[2].strip().casefold() == reviewer.casefold():
+    if row[9] and row[9] == reviewer_actor_id:
         raise ValueError("A counterproposal author cannot review their own candidate.")
     existing = con.execute("""
         SELECT COUNT(*) FROM clinical_mapping_review
-        WHERE mapping_decision_id = ?
+        WHERE mapping_decision_id = ? AND COALESCE(active, TRUE)
     """, [decision_id]).fetchone()[0]
     if existing >= 2:
         raise ValueError("Two independent reviews already exist; adjudication is required.")
     duplicate = con.execute("""
-        SELECT COUNT(*) FROM clinical_mapping_review
-        WHERE mapping_decision_id = ? AND LOWER(TRIM(reviewer)) = LOWER(TRIM(?))
-    """, [decision_id, reviewer]).fetchone()[0]
+        SELECT COUNT(*)
+        FROM clinical_mapping_review r
+        JOIN mapping_decision prior USING (mapping_decision_id)
+        WHERE COALESCE(r.active, TRUE) AND r.reviewer_actor_id = ?
+          AND prior.target_table = ?
+          AND COALESCE(prior.source_adapter, '') = COALESCE(?, '')
+          AND COALESCE(prior.source_vocabulary_id, '') = COALESCE(?, '')
+          AND COALESCE(prior.source_code, '') = COALESCE(?, '')
+          AND LOWER(TRIM(prior.source_value)) = LOWER(TRIM(?))
+          AND prior.assigned_concept_id = ?
+    """, [
+        reviewer_actor_id, row[3], row[4], row[5], row[6], row[7], int(row[8]),
+    ]).fetchone()[0]
     if duplicate:
-        raise ValueError("The same reviewer cannot review a decision twice.")
+        raise ValueError(
+            "The same person cannot review a semantic mapping twice, including "
+            "duplicate decisions or identity variants."
+        )
     con.execute("""
         INSERT INTO clinical_mapping_review (
-            review_id, mapping_decision_id, reviewer, verdict, rationale
-        ) VALUES (?, ?, ?, ?, ?)
-    """, [str(uuid.uuid4()), decision_id, reviewer, action, rationale])
+            review_id, mapping_decision_id, reviewer, reviewer_key,
+            reviewer_actor_id, verdict, rationale, active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+    """, [
+        str(uuid.uuid4()), decision_id, reviewer, canonical_actor_key(reviewer),
+        reviewer_actor_id, action, rationale,
+    ])
     audit_security_event(
         con, "CLINICAL_MAPPING_REVIEW", reviewer, "RECORDED",
         {"mapping_decision_id": decision_id, "verdict": action},
@@ -71,6 +99,9 @@ def blinded_review_queue(con, reviewer):
         raise ValueError("A reviewer name is required.")
     reviewer = authorize_actor(reviewer, "reviewer")
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, reviewer, "reviewer")
+    reviewer_actor_id = actor["actor_id"]
+    reviewer = actor["display_name"]
     columns = [
         "mapping_decision_id", "run_id", "target_table", "source_value",
         "normalized_value", "assigned_concept_id", "mapping_method", "score",
@@ -80,6 +111,7 @@ def blinded_review_queue(con, reviewer):
         WITH review_counts AS (
             SELECT mapping_decision_id, COUNT(DISTINCT review_id) AS review_count
             FROM clinical_mapping_review
+            WHERE COALESCE(active, TRUE)
             GROUP BY mapping_decision_id
         ), provenance_counts AS (
             SELECT mapping_decision_id,
@@ -90,7 +122,9 @@ def blinded_review_queue(con, reviewer):
             SELECT d.mapping_decision_id, d.run_id, d.target_table,
                    d.source_value, d.normalized_value, d.assigned_concept_id,
                    d.mapping_method, d.score, d.model_name, d.proposed_at,
-                   d.proposed_by,
+                   d.proposed_by, d.proposed_by_actor_id,
+                   d.source_adapter, d.source_vocabulary_id,
+                   d.source_code,
                    COALESCE(p.affected_events, 0) AS affected_events,
                    COALESCE(r.review_count, 0) AS review_count,
                    ROW_NUMBER() OVER (
@@ -117,15 +151,25 @@ def blinded_review_queue(con, reviewer):
           AND review_count < 2
           AND (
               proposed_by IS NULL
-              OR LOWER(TRIM(proposed_by)) <> LOWER(TRIM(?))
+              OR proposed_by_actor_id <> ?
           )
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_review own
-              WHERE own.mapping_decision_id = d.mapping_decision_id
-                AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
+              JOIN mapping_decision peer
+                ON peer.mapping_decision_id = own.mapping_decision_id
+              WHERE COALESCE(own.active, TRUE)
+                AND own.reviewer_actor_id = ?
+                AND peer.target_table = d.target_table
+                AND COALESCE(peer.source_adapter, '') =
+                    COALESCE(d.source_adapter, '')
+                AND COALESCE(peer.source_vocabulary_id, '') =
+                    COALESCE(d.source_vocabulary_id, '')
+                AND COALESCE(peer.source_code, '') = COALESCE(d.source_code, '')
+                AND LOWER(TRIM(peer.source_value)) = LOWER(TRIM(d.source_value))
+                AND peer.assigned_concept_id = d.assigned_concept_id
           )
         ORDER BY proposed_at, mapping_decision_id
-    """, [reviewer, reviewer]).fetchall()
+    """, [reviewer_actor_id, reviewer_actor_id]).fetchall()
     result = [dict(zip(columns, row, strict=True)) for row in rows]
     audit_security_event(
         con, "CLINICAL_REVIEW_QUEUE_ACCESS", reviewer, "ALLOWED",
@@ -140,6 +184,9 @@ def blinded_adjudication_queue(con, adjudicator):
         raise ValueError("An adjudicator name is required.")
     adjudicator = authorize_actor(adjudicator, "adjudicator")
     ensure_governance_tables(con)
+    actor = resolve_governed_actor(con, adjudicator, "adjudicator")
+    adjudicator_actor_id = actor["actor_id"]
+    adjudicator = actor["display_name"]
     columns = [
         "mapping_decision_id", "run_id", "target_table", "source_value",
         "normalized_value", "assigned_concept_id", "mapping_method", "score",
@@ -149,6 +196,7 @@ def blinded_adjudication_queue(con, adjudicator):
         WITH review_counts AS (
             SELECT mapping_decision_id, COUNT(DISTINCT review_id) AS review_count
             FROM clinical_mapping_review
+            WHERE COALESCE(active, TRUE)
             GROUP BY mapping_decision_id
         ), provenance_counts AS (
             SELECT mapping_decision_id,
@@ -159,7 +207,7 @@ def blinded_adjudication_queue(con, adjudicator):
             SELECT d.mapping_decision_id, d.run_id, d.target_table,
                    d.source_value, d.normalized_value, d.assigned_concept_id,
                    d.mapping_method, d.score, d.model_name, d.proposed_at,
-                   d.proposed_by,
+                   d.proposed_by, d.proposed_by_actor_id,
                    COALESCE(p.affected_events, 0) AS affected_events,
                    COALESCE(r.review_count, 0) AS review_count,
                    ROW_NUMBER() OVER (
@@ -186,7 +234,7 @@ def blinded_adjudication_queue(con, adjudicator):
           AND review_count >= 2
           AND (
               proposed_by IS NULL
-              OR LOWER(TRIM(proposed_by)) <> LOWER(TRIM(?))
+              OR proposed_by_actor_id <> ?
           )
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_adjudication a
@@ -195,10 +243,13 @@ def blinded_adjudication_queue(con, adjudicator):
           AND NOT EXISTS (
               SELECT 1 FROM clinical_mapping_review own
               WHERE own.mapping_decision_id = d.mapping_decision_id
-                AND LOWER(TRIM(own.reviewer)) = LOWER(TRIM(?))
+                AND COALESCE(own.active, TRUE)
+                AND own.reviewer_actor_id = ?
           )
         ORDER BY proposed_at, mapping_decision_id
-    """, [adjudicator, adjudicator]).fetchall()
+    """, [
+        adjudicator_actor_id, adjudicator_actor_id,
+    ]).fetchall()
     result = [dict(zip(columns, row, strict=True)) for row in rows]
     audit_security_event(
         con, "CLINICAL_REVIEW_QUEUE_ACCESS", adjudicator, "ALLOWED",
@@ -214,6 +265,7 @@ def clinical_review_agreement(con):
         FROM mapping_decision d
         JOIN clinical_mapping_review r
           ON r.mapping_decision_id = d.mapping_decision_id
+        WHERE COALESCE(r.active, TRUE)
         ORDER BY d.mapping_decision_id, r.submitted_at, r.review_id
     """).fetchall()
     grouped = defaultdict(list)

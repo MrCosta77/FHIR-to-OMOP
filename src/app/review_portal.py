@@ -13,12 +13,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.mapping.governance import (
+    add_governed_actor_alias,
     adjudicate_mapping_decision,
     blinded_adjudication_queue,
     blinded_review_queue,
+    bootstrap_identity_administrator,
     clinical_review_agreement,
     counterproposal_source_queue,
     ensure_governance_tables,
+    list_governed_actors,
+    register_governed_actor,
     submit_blinded_review,
     submit_counterproposal,
 )
@@ -45,6 +49,34 @@ def get_counterproposal_queue(proposer):
         return pd.DataFrame(counterproposal_source_queue(con, proposer))
 
 
+def get_governed_actors():
+    with duckdb.connect(DB_PATH) as con:
+        return list_governed_actors(con)
+
+
+def register_actor(display_name, roles, administrator, reason, confirm_distinct):
+    with duckdb.connect(DB_PATH) as con:
+        return register_governed_actor(
+            con, display_name, roles, administrator, reason,
+            confirm_distinct=confirm_distinct,
+        )
+
+
+def register_alias(
+    actor_id, alias_name, administrator, reason, confirm_owner
+):
+    with duckdb.connect(DB_PATH) as con:
+        return add_governed_actor_alias(
+            con, actor_id, alias_name, administrator, reason,
+            confirm_owner=confirm_owner,
+        )
+
+
+def bootstrap_identity_admin(display_name, reason):
+    with duckdb.connect(DB_PATH) as con:
+        return bootstrap_identity_administrator(con, display_name, reason)
+
+
 def get_dashboard_metrics():
     with duckdb.connect(DB_PATH) as con:
         ensure_governance_tables(con)
@@ -53,6 +85,7 @@ def get_dashboard_metrics():
                 SELECT mapping_decision_id,
                        COUNT(DISTINCT review_id) AS review_count
                 FROM clinical_mapping_review
+                WHERE COALESCE(active, TRUE)
                 GROUP BY mapping_decision_id
             ), ranked AS (
                 SELECT d.mapping_decision_id,
@@ -172,7 +205,7 @@ st.caption(
 )
 authenticated_identity = os.environ.get("CMF_AUTHENTICATED_USER", "").strip()
 identity = st.text_input(
-    "Named reviewer/adjudicator",
+    "Registered professional identity",
     value=authenticated_identity,
     disabled=bool(authenticated_identity),
     placeholder="Full professional name",
@@ -187,10 +220,10 @@ metric_columns[3].metric("Rejected", rejected)
 kappa = agreement["overall"]["cohens_kappa"]
 metric_columns[4].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
 
-review_tab, adjudication_tab, correction_tab, agreement_tab = st.tabs(
+review_tab, adjudication_tab, correction_tab, agreement_tab, identity_tab = st.tabs(
     [
         "Independent review", "Blinded adjudication",
-        "Candidate correction", "Agreement",
+        "Candidate correction", "Agreement", "Identity administration",
     ]
 )
 
@@ -198,10 +231,14 @@ with review_tab:
     if not identity.strip():
         st.info("Enter your full professional name to receive a blinded queue.")
     else:
-        queue = get_review_queue(identity)
-        if queue.empty:
+        try:
+            queue = get_review_queue(identity)
+        except ValueError as exc:
+            st.warning(str(exc))
+            queue = None
+        if queue is not None and queue.empty:
             st.success("No independently reviewable mappings remain for this reviewer.")
-        else:
+        elif queue is not None:
             st.subheader(f"Independent queue ({len(queue)} decisions)")
             st.caption("Peer identities, votes, and rationales are intentionally hidden.")
             for _, mapping in queue.head(50).iterrows():
@@ -212,10 +249,14 @@ with adjudication_tab:
     if not identity.strip():
         st.info("Enter your full professional name to receive an adjudication queue.")
     else:
-        queue = get_adjudication_queue(identity)
-        if queue.empty:
+        try:
+            queue = get_adjudication_queue(identity)
+        except ValueError as exc:
+            st.warning(str(exc))
+            queue = None
+        if queue is not None and queue.empty:
             st.success("No decisions are ready for this adjudicator.")
-        else:
+        elif queue is not None:
             st.subheader(f"Adjudication queue ({len(queue)} decisions)")
             st.caption(
                 "Two reviews are complete. Their identities, votes, and rationales "
@@ -229,13 +270,17 @@ with correction_tab:
     if not identity.strip():
         st.info("Enter your full professional name to propose a correction.")
     else:
-        queue = get_counterproposal_queue(identity)
-        if queue.empty:
+        try:
+            queue = get_counterproposal_queue(identity)
+        except ValueError as exc:
+            st.warning(str(exc))
+            queue = None
+        if queue is not None and queue.empty:
             st.info(
                 "No eligible corrections. The original candidate must first be "
                 "finally rejected after two independent reviews and adjudication."
             )
-        else:
+        elif queue is not None:
             st.subheader(f"Rejected candidates eligible for correction ({len(queue)})")
             st.caption(
                 "The Athena candidate is validated before a new governed decision "
@@ -293,3 +338,88 @@ with agreement_tab:
         "Agreement is descriptive until enough clinically reviewed pairs exist; "
         "no minimum κ is claimed from synthetic or technically curated labels."
     )
+
+with identity_tab:
+    st.subheader("Governed identity registry")
+    st.caption(
+        "Only an authorized identity administrator should register people or "
+        "approve aliases. Similar names are never merged automatically."
+    )
+    actors = get_governed_actors()
+    has_identity_admin = any(
+        "source_admin" in actor["roles"].split(", ") for actor in actors
+    )
+    if actors:
+        st.dataframe(pd.DataFrame(actors), width="stretch", hide_index=True)
+    if not identity.strip():
+        st.info("Enter the administrator's named identity above to make changes.")
+    else:
+        if not has_identity_admin:
+            with st.form("bootstrap_identity_administrator"):
+                st.warning(
+                    "No identity administrator exists. This one-time operation "
+                    "grants source_admin to the named identity above."
+                )
+                bootstrap_reason = st.text_area(
+                    "Bootstrap authorization evidence/reason"
+                )
+                if st.form_submit_button("Bootstrap first identity administrator"):
+                    try:
+                        result = bootstrap_identity_admin(
+                            identity, bootstrap_reason
+                        )
+                        st.success(
+                            f"Identity administrator enabled for "
+                            f"{result['display_name']}."
+                        )
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+        with st.form("register_governed_actor"):
+            st.write("Register a new person")
+            display_name = st.text_input("Full professional display name")
+            roles = st.multiselect(
+                "Governed roles", ["reviewer", "adjudicator", "source_admin"]
+            )
+            registration_reason = st.text_area("Registration evidence/reason")
+            confirm_distinct = st.checkbox(
+                "I verified this is a different person from any similar match"
+            )
+            if st.form_submit_button("Register governed actor"):
+                try:
+                    result = register_actor(
+                        display_name, roles, identity, registration_reason,
+                        confirm_distinct,
+                    )
+                    st.success(
+                        f"Registered {result['display_name']} as {result['actor_id']}."
+                    )
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+
+        if actors:
+            actor_labels = {
+                f"{actor['display_name']} — {actor['roles']}": actor["actor_id"]
+                for actor in actors
+            }
+            with st.form("add_governed_actor_alias"):
+                st.write("Approve an alias for an existing person")
+                selected = st.selectbox("Governed actor", list(actor_labels))
+                alias_name = st.text_input("Approved name variant or historical typo")
+                alias_reason = st.text_area("Alias verification evidence/reason")
+                confirm_owner = st.checkbox(
+                    "I verified this alias belongs to the selected person"
+                )
+                if st.form_submit_button("Add approved alias"):
+                    try:
+                        result = register_alias(
+                            actor_labels[selected], alias_name, identity,
+                            alias_reason, confirm_owner,
+                        )
+                        state = "added" if result["created"] else "already present"
+                        st.success(f"Alias {state}: {result['alias_name']}.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))

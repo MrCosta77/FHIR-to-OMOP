@@ -19,8 +19,10 @@ from src.etl.apply_stcm import apply_stcm_mappings
 from src.mapping.governance import (
     adjudicate_mapping_decision,
     blinded_review_queue,
+    bootstrap_identity_administrator,
     ensure_governance_tables,
     register_decision,
+    register_governed_actor,
     rejection_policy_exists,
     submit_blinded_review,
 )
@@ -68,6 +70,20 @@ def _clinical_tables(con):
 def _database(path):
     with duckdb.connect(str(path)) as con:
         ensure_governance_tables(con)
+        bootstrap_identity_administrator(
+            con, "Test Identity Administrator",
+            "One-time event-binding test identity bootstrap.",
+        )
+        for name, roles in (
+            ("Reviewer One", {"reviewer"}),
+            ("Reviewer Two", {"reviewer"}),
+            ("Adjudicator", {"adjudicator"}),
+        ):
+            register_governed_actor(
+                con, name, roles, "Test Identity Administrator",
+                "Explicit governed event-binding test identity.",
+                confirm_distinct=True,
+            )
         con.execute(
             "CREATE TABLE vocabulary (vocabulary_id VARCHAR, vocabulary_version VARCHAR)"
         )

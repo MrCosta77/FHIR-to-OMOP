@@ -8,6 +8,7 @@ from src.security.privacy import (
     assert_local_llm_endpoint,
     audit_security_event,
     authorize_actor,
+    canonical_actor_key,
     redact_direct_identifiers,
     validate_privacy_runtime,
 )
@@ -42,6 +43,11 @@ def test_uuid_metadata_is_not_misclassified_as_a_phone_number():
     redacted, categories = redact_direct_identifiers(value)
     assert redacted == value
     assert categories == []
+
+
+def test_governed_actor_identity_ignores_accents_case_and_extra_spaces():
+    assert canonical_actor_key("  Mário  Luís COSTA ") == "mario luis costa"
+    assert canonical_actor_key("Mario Luis Costa") == "mario luis costa"
 
 
 def test_phi_runtime_requires_explicit_approval_and_retention():

@@ -4,15 +4,47 @@ from src.mapping.governance import (
     adjudicate_mapping_decision,
     blinded_adjudication_queue,
     blinded_review_queue,
+    bootstrap_identity_administrator,
     clinical_review_agreement,
     counterproposal_source_queue,
     ensure_governance_tables,
     register_decision,
     rejection_policy_exists,
+    register_governed_actor,
     review_mapping_decision,
     submit_blinded_review,
     submit_counterproposal,
 )
+
+
+def _register_test_actors(con):
+    actors = {
+        "Reviewer One": {"reviewer", "adjudicator"},
+        "Reviewer Two": {"reviewer", "adjudicator"},
+        "Reviewer Three": {"reviewer", "adjudicator"},
+        "Clinical Adjudicator": {"adjudicator"},
+    }
+    existing = {
+        row[0] for row in con.execute(
+            "SELECT canonical_name FROM governed_actor WHERE active"
+        ).fetchall()
+    }
+    if not con.execute("""
+        SELECT COUNT(*) FROM governed_actor_role
+        WHERE role = 'source_admin' AND active
+    """).fetchone()[0]:
+        bootstrap_identity_administrator(
+            con, "Test Identity Administrator",
+            "One-time governed test identity bootstrap.",
+        )
+    for display_name, roles in actors.items():
+        key = display_name.casefold()
+        if key not in existing:
+            register_governed_actor(
+                con, display_name, roles, "Test Identity Administrator",
+                "Deterministic governed test fixture.", confirm_distinct=True,
+            )
+            existing.add(key)
 
 
 def _create_stcm(con):
@@ -46,9 +78,12 @@ def _create_concepts(con):
     """)
 
 
-def _proposal(con, concept_id=300, run_id="RUN-test"):
+def _proposal(
+    con, concept_id=300, run_id="RUN-test", source_value="Legacy"
+):
+    _register_test_actors(con)
     decision_id = register_decision(
-        con, "measurement", "Legacy", concept_id, "Candidate",
+        con, "measurement", source_value, concept_id, "Candidate",
         "llm_rag_few_shot", 0.95, "test-model", "v-test", "PENDING",
         run_id=run_id,
     )
@@ -58,17 +93,18 @@ def _proposal(con, concept_id=300, run_id="RUN-test"):
             assigned_concept_id, mapping_method, score, model_name,
             vocabulary_version, reviewed_by, run_id, mapping_decision_id
         ) VALUES (
-            'measurement', 1, 'Legacy', 'Candidate', ?,
+            'measurement', 1, ?, 'Candidate', ?,
             'llm_rag_few_shot', 0.95, 'test-model', 'v-test',
             'Pending_Human_Review', ?, ?
         )
-    """, [concept_id, run_id, decision_id])
+    """, [source_value, concept_id, run_id, decision_id])
     return decision_id
 
 
 def _adjudicate(
     con, decision_id, final_action, *, first="APPROVE", second="APPROVE"
 ):
+    _register_test_actors(con)
     submit_blinded_review(
         con, decision_id, first, "Reviewer One", "Independent rationale one"
     )
@@ -292,6 +328,49 @@ def test_review_queue_deduplicates_same_semantic_mapping_across_runs():
         assert [row["mapping_decision_id"] for row in adjudication] == [first]
 
 
+def test_semantic_duplicate_votes_from_identity_variants_count_once():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        first = _proposal(con, run_id="RUN-first")
+        duplicate = _proposal(con, run_id="RUN-second")
+        con.execute("""
+            INSERT INTO clinical_mapping_review (
+                review_id, mapping_decision_id, reviewer, verdict, rationale
+            ) VALUES
+                ('review-accented', ?, 'Mário Luís Gonçalves da Costa',
+                 'REJECT', 'First review before semantic deduplication.'),
+                ('review-unaccented', ?, 'Mario Luís Gonçalves da Costa',
+                 'REJECT', 'Duplicate review before semantic deduplication.')
+        """, [first, duplicate])
+
+        ensure_governance_tables(con)
+
+        assert con.execute("""
+            SELECT COUNT(*) FROM clinical_mapping_review
+            WHERE COALESCE(active, TRUE)
+        """).fetchone()[0] == 1
+        invalidated = con.execute("""
+            SELECT invalidated_by, invalidation_reason
+            FROM clinical_mapping_review WHERE NOT active
+        """).fetchone()
+        assert invalidated[0] == "SYSTEM_IDENTITY_DEDUP"
+        assert "normalized actor" in invalidated[1]
+        assert blinded_review_queue(
+            con, "Mario Luis Goncalves da Costa"
+        ) == []
+        assert blinded_adjudication_queue(con, "Clinical Adjudicator") == []
+
+        try:
+            submit_blinded_review(
+                con, first, "REJECT", "MARIO LUIS GONCALVES DA COSTA",
+                "Attempted duplicate identity variant.",
+            )
+        except ValueError as exc:
+            assert "same person" in str(exc)
+        else:
+            raise AssertionError("An identity variant created a second active vote")
+
+
 def test_reviewers_and_adjudicator_must_be_distinct_and_rationales_are_required():
     with duckdb.connect(":memory:") as con:
         ensure_governance_tables(con)
@@ -310,7 +389,7 @@ def test_reviewers_and_adjudicator_must_be_distinct_and_rationales_are_required(
                 con, decision_id, "APPROVE", " reviewer one ", "Duplicate"
             )
         except ValueError as exc:
-            assert "same reviewer" in str(exc)
+            assert "same person" in str(exc)
         else:
             raise AssertionError("Duplicate reviewer was accepted")
         submit_blinded_review(
@@ -336,7 +415,10 @@ def test_clinical_review_agreement_reports_raw_agreement_and_cohens_kappa():
             ("REJECT", "APPROVE"),
         ]
         for index, (first, second) in enumerate(patterns):
-            decision_id = _proposal(con, run_id=f"RUN-kappa-{index}")
+            decision_id = _proposal(
+                con, run_id=f"RUN-kappa-{index}",
+                source_value=f"Legacy-{index}",
+            )
             submit_blinded_review(
                 con, decision_id, first, "Reviewer One", "First rationale"
             )
