@@ -6,6 +6,22 @@ Licensed under the [Apache License 2.0](LICENSE). Copyright and attribution are
 recorded in [`NOTICE`](NOTICE). Third-party libraries, models, vocabularies and
 datasets retain their own licences and terms.
 
+## Portfolio evidence — 30-second review
+
+| Question | Evidence in this repository |
+|---|---|
+| **What problem does it address?** | Converts heterogeneous FHIR clinical events into governed OMOP CDM records without treating an LLM suggestion as an approved mapping; the same mapping core also supports a bounded hospital-CSV pre-ingestion contract. |
+| **What goes in?** | Contract-validated synthetic FHIR bundles and a locally supplied official OHDSI Athena vocabulary export. The versioned [`hospital-csv-v1`](docs/HOSPITAL_CSV_ADAPTER.md) boundary can create non-publishable pre-ingestion proposals that require later event binding. |
+| **What comes out?** | The FHIR path atomically publishes `data/omop_clinical.duckdb` across six mapped clinical domains, with source identity, event binding, mapping decisions, provenance, run reports, and DQD evidence. |
+| **How is it verified?** | The [automated suite](tests/) exercises contracts, mapping, privacy, governance, publication, DQD, scale, and end-to-end acceptance; [CI](.github/workflows/quality.yml) and [release checks](.github/workflows/release.yml) enforce repeatable gates. |
+| **What measures mapping behaviour?** | Versioned [dirty-hospital](benchmarks/dirty_hospital/) and held-out Phase 5 benchmarks report coverage, accepted precision, abstention behaviour, and retrieval limitations instead of assuming that the local LLM improves the result. |
+| **What are the limits?** | Portfolio/reference implementation with synthetic data by default. It is not a validated clinical production system; PHI use requires institution-managed identity, security, retention, and approval controls described in the [`PHI control policy`](docs/PHI_CONTROL_POLICY.md). |
+
+Start with [Results & Validation](#results--validation) for measured outcomes or
+[Advanced Execution & Evaluation](#advanced-execution--evaluation) to reproduce
+the relevant checks. Passing tests and synthetic acceptance scenarios establish
+behaviour under their stated conditions—not clinical or regulatory fitness.
+
 ```mermaid
 flowchart TD
     %% Define Styles
@@ -55,7 +71,7 @@ Standard OMOP vocabularies handle the majority of clinical data, but real-world 
 2. **LLM Adjudication:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed.
 3. **Blinded Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Governed `actor_id` values—not typed names—enforce two distinct reviewers and a third adjudicator; approved aliases handle accents and verified name variants without weakening separation of duties. Rejections become active policy and suppress identical future proposals.
 4. **Fail-closed privacy boundary:** The default classification is synthetic. PHI mode requires explicit institutional approval and retention configuration, authenticated role allowlists, a loopback-only Ollama endpoint, direct-identifier redaction before prompting, and metadata-only security audit logs. The standalone portal is not an identity provider and must not be used with PHI without institution-managed authentication.
-4. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
+5. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
 
 The retrieval layer is reproducible: the configured Chroma collections for
 Condition, Drug, Measurement, and Procedure carry
@@ -207,7 +223,7 @@ records the evidence bounds and derivation method for every run.
 
 ### 6. Real-World Hospital Acceptance Testing
 
-The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`scripts/run_e2e_evaluation.py`) is provided to validate the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts, proving production readiness without generating PHI.
+The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`scripts/run_e2e_evaluation.py`) measures the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts without generating PHI. This is an environment-specific evaluation, not proof of production readiness.
 
 ## 🛠️ Advanced Execution & Evaluation
 
