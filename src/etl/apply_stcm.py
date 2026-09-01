@@ -29,6 +29,11 @@ def apply_stcm_mappings(db_path=DB_PATH):
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema = 'main' AND table_name = 'source_event_binding'
             """).fetchone()[0])
+            has_fhir_coding = bool(con.execute("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = 'main'
+                  AND table_name = 'fhir_event_source_coding'
+            """).fetchone()[0])
             for table, (
                 id_col,
                 concept_col,
@@ -65,6 +70,26 @@ def apply_stcm_mappings(db_path=DB_PATH):
                           AND CURRENT_DATE BETWEEN stcm.valid_start_date
                                                AND stcm.valid_end_date
                 """ if has_event_binding else ""
+                fhir_coding_union = """
+                        UNION
+                        SELECT DISTINCT stcm.source_code, stcm.target_concept_id,
+                                        coding.target_id
+                        FROM source_to_concept_map stcm
+                        JOIN fhir_event_source_coding coding
+                          ON coding.target_table = ?
+                         AND coding.source_vocabulary_id = stcm.source_vocabulary_id
+                         AND coding.source_code = stcm.source_code
+                        JOIN mapping_provenance p
+                          ON p.target_table = coding.target_table
+                         AND p.target_id = coding.target_id
+                         AND p.source_vocabulary_id = stcm.source_vocabulary_id
+                         AND p.source_code = stcm.source_code
+                         AND p.assigned_concept_id = stcm.target_concept_id
+                         AND p.reviewed_by = 'Approved_by_Human'
+                        WHERE stcm.invalid_reason IS NULL
+                          AND CURRENT_DATE BETWEEN stcm.valid_start_date
+                                               AND stcm.valid_end_date
+                """ if has_fhir_coding else ""
                 query = f"""
                     UPDATE {table}
                     SET {concept_col} = approved.target_concept_id
@@ -82,6 +107,7 @@ def apply_stcm_mappings(db_path=DB_PATH):
                           AND CURRENT_DATE BETWEEN stcm.valid_start_date
                                                AND stcm.valid_end_date
                         {event_binding_union}
+                        {fhir_coding_union}
                     ) approved
                     JOIN concept c ON approved.target_concept_id = c.concept_id
                     WHERE (
@@ -106,6 +132,8 @@ def apply_stcm_mappings(db_path=DB_PATH):
 
                 parameters = [table, source_vocabulary]
                 if has_event_binding:
+                    parameters.append(table)
+                if has_fhir_coding:
                     parameters.append(table)
                 con.execute(query, parameters)
 

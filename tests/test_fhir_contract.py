@@ -100,7 +100,9 @@ def test_golden_bundle_reconciles_to_deterministic_extractor_counts():
         "person": (extract_persons, 1),
         "condition": (extract_conditions, 1),
         "drug": (extract_drugs, 1),
-        "measurement": (extract_measurements, 1),
+        # Both numeric and categorical Observation values are candidates;
+        # Athena domain routing decides their final OMOP destination.
+        "measurement": (extract_measurements, 2),
         "observation_candidate": (extract_observation_candidates, 3),
         "procedure": (extract_procedures, 1),
     }

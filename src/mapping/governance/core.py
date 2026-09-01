@@ -16,7 +16,14 @@ def current_run_id() -> str | None:
     return os.environ.get("CMF_RUN_ID") or None
 
 def decision_id_for(
-    run_id, target_table, source_value, concept_id, *, source_record_key=None
+    run_id,
+    target_table,
+    source_value,
+    concept_id,
+    *,
+    source_record_key=None,
+    source_vocabulary_id=None,
+    source_code=None,
 ):
     identity_parts = [
         run_id or "UNTRACKED", target_table, source_value.strip().lower(),
@@ -24,6 +31,11 @@ def decision_id_for(
     ]
     if source_record_key:
         identity_parts.append(source_record_key)
+    if source_vocabulary_id or source_code:
+        identity_parts.extend([
+            source_vocabulary_id or "",
+            (source_code or "").strip(),
+        ])
     identity = "|".join(identity_parts)
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:mapping-decision:{identity}"))
 
@@ -73,6 +85,9 @@ def register_decision(
     index_signature=None,
     source_adapter=None,
     source_record_key=None,
+    source_system=None,
+    source_code=None,
+    source_vocabulary_id=None,
     publication_eligible=True,
 ):
     from .schema import ensure_governance_tables
@@ -81,6 +96,8 @@ def register_decision(
     decision_id = decision_id_for(
         run_id, target_table, source_value, concept_id,
         source_record_key=source_record_key,
+        source_vocabulary_id=source_vocabulary_id,
+        source_code=source_code,
     )
     con.execute("""
         INSERT INTO mapping_decision (
@@ -89,8 +106,9 @@ def register_decision(
             model_name, prompt_version, vocabulary_version, status,
             llm_decision, llm_confidence, llm_reason, clinical_signals,
             model_digest, generation_parameters, index_signature,
-            source_adapter, source_record_key, publication_eligible
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source_adapter, source_record_key, source_system, source_code,
+            source_vocabulary_id, publication_eligible
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (mapping_decision_id) DO UPDATE SET
             normalized_value = EXCLUDED.normalized_value,
             score = EXCLUDED.score,
@@ -106,6 +124,9 @@ def register_decision(
             index_signature = EXCLUDED.index_signature,
             source_adapter = EXCLUDED.source_adapter,
             source_record_key = EXCLUDED.source_record_key,
+            source_system = EXCLUDED.source_system,
+            source_code = EXCLUDED.source_code,
+            source_vocabulary_id = EXCLUDED.source_vocabulary_id,
             publication_eligible = EXCLUDED.publication_eligible,
             status = CASE
                 WHEN mapping_decision.status IN ('APPROVED', 'REJECTED')
@@ -116,6 +137,7 @@ def register_decision(
         prompt_version, vocabulary_version, status, llm_decision,
         llm_confidence, llm_reason, clinical_signals, model_digest,
         generation_parameters, index_signature,
-        source_adapter, source_record_key, bool(publication_eligible),
+        source_adapter, source_record_key, source_system, source_code,
+        source_vocabulary_id, bool(publication_eligible),
     ])
     return decision_id

@@ -7,6 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from src.adapters.fhir_coding import replace_fhir_source_codings
 from src.mapping.governance import ensure_governance_tables
 from src.mapping.semantic_mapper import (
     PROMPT_VERSION,
@@ -114,6 +115,16 @@ class _FakeOllama:
         return {"message": {"content": self.content}}
 
 
+class _CountingFakeOllama(_FakeOllama):
+    def __init__(self, content):
+        super().__init__(content)
+        self.calls = 0
+
+    def chat(self, **kwargs):
+        self.calls += 1
+        return super().chat(**kwargs)
+
+
 def _procedure_database(path, source_value="legacy appendectomy"):
     with duckdb.connect(str(path)) as con:
         ensure_governance_tables(con)
@@ -160,6 +171,62 @@ def test_procedure_adapter_persists_governed_proposal_without_publishing(monkeyp
         assert con.execute("""
             SELECT reviewed_by FROM mapping_provenance
         """).fetchone()[0] == "Pending_Human_Review"
+
+
+def test_semantic_mapper_processes_homonymous_fhir_identities_separately(
+    monkeypatch, tmp_path,
+):
+    database = tmp_path / "scoped-procedure.duckdb"
+    _procedure_database(database, "Shared procedure")
+    with duckdb.connect(str(database)) as con:
+        con.execute(
+            "INSERT INTO procedure_occurrence VALUES (2, 0, 9002, ?)",
+            ["Shared procedure"],
+        )
+        replace_fhir_source_codings(
+            con,
+            "procedure_occurrence",
+            [
+                (
+                    "procedure_occurrence", 1, "Procedure/1", None,
+                    "https://hospital-a.example/procedures", "FHIR_A", "X1",
+                    "Shared procedure", None, "R1",
+                ),
+                (
+                    "procedure_occurrence", 2, "Procedure/2", None,
+                    "https://hospital-b.example/procedures", "FHIR_B", "X1",
+                    "Shared procedure", None, "R1",
+                ),
+            ],
+            source_adapter="FHIR_R4_Procedure",
+        )
+    monkeypatch.setattr(
+        "src.mapping.semantic_mapper.get_versioned_collection",
+        lambda con, path, target: _FakeCollection(),
+    )
+    client = _CountingFakeOllama(_decision())
+
+    result = run_semantic_mapping(
+        "procedure_occurrence",
+        db_path=database,
+        chroma_path=tmp_path,
+        client=client,
+    )
+
+    assert result["terms"] == 2
+    assert result["proposals"] == 2
+    assert client.calls == 2
+    with duckdb.connect(str(database), read_only=True) as con:
+        assert con.execute("""
+            SELECT target_id, source_vocabulary_id, source_code
+            FROM mapping_provenance ORDER BY target_id
+        """).fetchall() == [
+            (1, "FHIR_A", "X1"),
+            (2, "FHIR_B", "X1"),
+        ]
+        assert con.execute(
+            "SELECT COUNT(DISTINCT mapping_decision_id) FROM mapping_decision"
+        ).fetchone()[0] == 2
 
 
 def test_procedure_adapter_persists_abstention_as_non_publishable(monkeypatch, tmp_path):

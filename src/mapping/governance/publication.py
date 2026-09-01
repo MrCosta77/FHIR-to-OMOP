@@ -279,7 +279,7 @@ def _finalize_mapping_decision(
                 target_table, source_vocabulary, source_code, source_value,
                 int(concept_id), decision_id, run_id, reviewer, reason,
             ])
-            if not source_adapter:
+            if not source_adapter and not explicit_source_vocabulary:
                 con.execute("""
                     INSERT INTO approved_mapping_set (
                         target_table, source_value, assigned_concept_id,
@@ -319,7 +319,7 @@ def _finalize_mapping_decision(
             """, [
                 target_table, source_vocabulary, source_code, int(concept_id),
             ])
-            if not source_adapter:
+            if not source_adapter and not explicit_source_vocabulary:
                 con.execute("""
                     UPDATE mapping_rejection_policy SET active = FALSE
                     WHERE target_table = ? AND source_value = ?
@@ -351,7 +351,7 @@ def _finalize_mapping_decision(
             """, [
                 target_table, source_vocabulary, source_code, int(concept_id),
             ])
-            if not source_adapter:
+            if not source_adapter and not explicit_source_vocabulary:
                 con.execute("""
                     INSERT INTO mapping_rejection_policy (
                         target_table, source_value, assigned_concept_id,

@@ -10,6 +10,11 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.adapters.fhir_coding import (
+    SNOMED_URI,
+    replace_fhir_source_codings,
+    select_source_coding,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -39,21 +44,11 @@ def extract_conditions(file_path):
                 if not person_id:
                     continue
 
-                code = None
-                display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
-
-                for c in codings:
-                    if c.get('system') == 'http://snomed.info/sct':
-                        code = c.get('code')
-                        display = c.get('display', '')
-                        break
-
-                if not code and codings:
-                    code = codings[0].get('code')
-                    display = codings[0].get('display', '')
-
-                if not code:
+                coding = select_source_coding(
+                    codings, preferred_systems=(SNOMED_URI,)
+                )
+                if coding is None:
                     continue
 
                 start_date = resource.get('onsetDateTime', '')[:10]
@@ -68,18 +63,27 @@ def extract_conditions(file_path):
                 full_url = entry.get('fullUrl', '')
                 if full_url:
                     base_string = full_url
+                    source_event_key = full_url
                 else:
                     base_string = json.dumps(resource, sort_keys=True)
+                    source_event_key = (
+                        f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                    )
 
                 condition_id = generate_condition_id(base_string)
 
                 records.append((
                     condition_id,
                     person_id,
-                    code,
-                    display,
+                    coding.code,
+                    coding.source_value,
                     start_date,
-                    end_date
+                    end_date,
+                    coding.system_uri,
+                    coding.athena_vocabulary_id,
+                    coding.source_vocabulary_id,
+                    coding.version,
+                    source_event_key,
                 ))
     return records
 
@@ -114,11 +118,19 @@ def run_condition_etl():
                     snomed_code VARCHAR,
                     display_text VARCHAR,
                     start_date DATE,
-                    end_date DATE
+                    end_date DATE,
+                    source_system_uri VARCHAR,
+                    athena_vocabulary_id VARCHAR,
+                    source_vocabulary_id VARCHAR,
+                    source_version VARCHAR,
+                    source_event_key VARCHAR
                 )
             """)
 
-            con.executemany("INSERT INTO stg_condition VALUES (?, ?, ?, ?, ?, ?)", all_records)
+            con.executemany(
+                "INSERT INTO stg_condition VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                all_records,
+            )
 
             con.execute("DELETE FROM condition_occurrence")
 
@@ -148,7 +160,7 @@ def run_condition_etl():
                 FROM stg_condition stg
                 LEFT JOIN concept c_src 
                     ON stg.snomed_code = c_src.concept_code 
-                    AND c_src.vocabulary_id = 'SNOMED'
+                    AND stg.athena_vocabulary_id = c_src.vocabulary_id
                     AND c_src.invalid_reason IS NULL
                 LEFT JOIN concept_relationship cr 
                     ON c_src.concept_id = cr.concept_id_1 
@@ -169,11 +181,26 @@ def run_condition_etl():
                 ) = 1
             """)
 
+            replace_fhir_source_codings(
+                con,
+                "condition_occurrence",
+                [
+                    (
+                        "condition_occurrence", record[0], record[10], None,
+                        record[6], record[8], record[2], record[3], record[9],
+                        current_run_id(),
+                    )
+                    for record in all_records
+                ],
+                source_adapter="FHIR_R4_Condition",
+            )
+
             con.execute("""
                 INSERT INTO mapping_provenance (
                     target_table, target_id, source_value, normalized_value,
                     assigned_concept_id, mapping_method, score, model_name,
-                    vocabulary_version, reviewed_by, run_id
+                    vocabulary_version, reviewed_by, run_id, source_system,
+                    source_code, source_vocabulary_id, source_record_key
                 )
                 SELECT 
                     'condition_occurrence',
@@ -185,15 +212,18 @@ def run_condition_etl():
                     1.0, -- Confiança total
                     'N/A',
                     'Athena_v5.4',
-                    'System',
-                    ?
-                FROM condition_occurrence
+                    'System', ?, coding.source_system_uri, coding.source_code,
+                    coding.source_vocabulary_id, coding.source_event_key
+                FROM condition_occurrence event
+                JOIN fhir_event_source_coding coding
+                  ON coding.target_table = 'condition_occurrence'
+                 AND coding.target_id = event.condition_occurrence_id
                 WHERE condition_concept_id != 0
                 -- Evita duplicar registos se correres o script várias vezes
                 AND NOT EXISTS (
                     SELECT 1 FROM mapping_provenance p
                     WHERE p.target_table = 'condition_occurrence'
-                      AND p.target_id = condition_occurrence.condition_occurrence_id
+                      AND p.target_id = event.condition_occurrence_id
                       AND p.mapping_method = 'deterministic_maps_to'
                       AND COALESCE(p.run_id, '') = COALESCE(?, '')
                 )

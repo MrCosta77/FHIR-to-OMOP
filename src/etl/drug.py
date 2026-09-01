@@ -10,10 +10,15 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.adapters.fhir_coding import (
+    RXNORM_URI,
+    replace_fhir_source_codings,
+    select_source_coding,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_person_id
+from src.utils.helpers import normalise_fhir_reference, stable_person_id
 
 
 def generate_drug_id(unique_string):
@@ -34,21 +39,13 @@ def extract_drugs(file_path):
         for entry in bundle.get('entry', []):
             res = entry.get('resource', {})
             if res.get('resourceType') == 'Medication':
-                med_id = "urn:uuid:" + res.get('id', '')
-                code = None
-                display = "Unknown"
+                med_id = normalise_fhir_reference(res.get('id', ''))
                 codings = res.get('code', {}).get('coding', [])
-                for c in codings:
-                    if c.get('system') == 'http://www.nlm.nih.gov/research/umls/rxnorm':
-                        code = c.get('code')
-                        display = c.get('display', '')
-                        break
-                if not code and codings:
-                    code = codings[0].get('code')
-                    display = codings[0].get('display', '')
-
-                if code:
-                    medications[med_id] = {'code': code, 'display': display}
+                coding = select_source_coding(
+                    codings, preferred_systems=(RXNORM_URI,)
+                )
+                if med_id and coding:
+                    medications[med_id] = coding
 
         # Pass 2: Process MedicationRequests
         for entry in bundle.get('entry', []):
@@ -59,26 +56,22 @@ def extract_drugs(file_path):
                 if not person_id:
                     continue
 
-                code = None
-                display = "Unknown"
+                coding = None
 
                 # Try inline coding first
                 med_cc = res.get('medicationCodeableConcept', {})
                 codings = med_cc.get('coding', [])
-                for c in codings:
-                    if c.get('system') == 'http://www.nlm.nih.gov/research/umls/rxnorm':
-                        code = c.get('code')
-                        display = c.get('display', '')
-                        break
+                if codings:
+                    coding = select_source_coding(
+                        codings, preferred_systems=(RXNORM_URI,)
+                    )
 
                 # If not inline, use two-pass medicationReference lookup
-                if not code:
+                if coding is None:
                     med_ref = res.get('medicationReference', {}).get('reference', '')
-                    if med_ref in medications:
-                        code = medications[med_ref]['code']
-                        display = medications[med_ref]['display']
+                    coding = medications.get(normalise_fhir_reference(med_ref))
 
-                if not code:
+                if coding is None:
                     continue
 
                 start_date = res.get('authoredOn', '')[:10]
@@ -89,18 +82,27 @@ def extract_drugs(file_path):
                 full_url = entry.get('fullUrl', '')
                 if full_url:
                     base_string = full_url
+                    source_event_key = full_url
                 else:
                     # Fallback à prova de bala: transformar o recurso inteiro numa string e fazer o hash
                     base_string = json.dumps(res, sort_keys=True)
+                    source_event_key = (
+                        f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                    )
 
                 drug_id = generate_drug_id(base_string)
 
                 records.append((
                     drug_id,
                     person_id,
-                    code,
-                    display,
-                    start_date
+                    coding.code,
+                    coding.source_value,
+                    start_date,
+                    coding.system_uri,
+                    coding.athena_vocabulary_id,
+                    coding.source_vocabulary_id,
+                    coding.version,
+                    source_event_key,
                 ))
 
     return records
@@ -133,11 +135,19 @@ def run_drug_etl():
                     person_id BIGINT,
                     rxnorm_code VARCHAR,
                     display_text VARCHAR,
-                    start_date DATE
+                    start_date DATE,
+                    source_system_uri VARCHAR,
+                    athena_vocabulary_id VARCHAR,
+                    source_vocabulary_id VARCHAR,
+                    source_version VARCHAR,
+                    source_event_key VARCHAR
                 )
             """)
 
-            con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?)", all_records)
+            con.executemany(
+                "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                all_records,
+            )
 
             con.execute("""
                 INSERT INTO drug_exposure (
@@ -163,7 +173,7 @@ def run_drug_etl():
                 FROM stg_drug stg
                 LEFT JOIN concept c_src 
                     ON stg.rxnorm_code = c_src.concept_code 
-                    AND c_src.vocabulary_id = 'RxNorm'
+                    AND stg.athena_vocabulary_id = c_src.vocabulary_id
                     AND c_src.invalid_reason IS NULL -- Evita duplicados de conceitos descontinuados
                 LEFT JOIN concept_relationship cr 
                     ON c_src.concept_id = cr.concept_id_1 
@@ -177,11 +187,25 @@ def run_drug_etl():
                 QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.drug_exposure_id ORDER BY c_std.concept_id DESC) = 1
             """)
 
+            replace_fhir_source_codings(
+                con,
+                "drug_exposure",
+                [
+                    (
+                        "drug_exposure", record[0], record[9], None, record[5],
+                        record[7], record[2], record[3], record[8], current_run_id(),
+                    )
+                    for record in all_records
+                ],
+                source_adapter="FHIR_R4_MedicationRequest",
+            )
+
             con.execute("""
                 INSERT INTO mapping_provenance (
                     target_table, target_id, source_value, normalized_value,
                     assigned_concept_id, mapping_method, score, model_name,
-                    vocabulary_version, reviewed_by, run_id
+                    vocabulary_version, reviewed_by, run_id, source_system,
+                    source_code, source_vocabulary_id, source_record_key
                 )
                 SELECT 
                     'drug_exposure',
@@ -193,14 +217,17 @@ def run_drug_etl():
                     1.0,
                     'N/A',
                     'Athena_v5.4',
-                    'System',
-                    ?
-                FROM drug_exposure
+                    'System', ?, coding.source_system_uri, coding.source_code,
+                    coding.source_vocabulary_id, coding.source_event_key
+                FROM drug_exposure event
+                JOIN fhir_event_source_coding coding
+                  ON coding.target_table = 'drug_exposure'
+                 AND coding.target_id = event.drug_exposure_id
                 WHERE drug_concept_id != 0
                 AND NOT EXISTS (
                     SELECT 1 FROM mapping_provenance p
                     WHERE p.target_table = 'drug_exposure'
-                      AND p.target_id = drug_exposure.drug_exposure_id
+                      AND p.target_id = event.drug_exposure_id
                       AND p.mapping_method = 'deterministic_maps_to'
                       AND COALESCE(p.run_id, '') = COALESCE(?, '')
                 )

@@ -10,6 +10,11 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.adapters.fhir_coding import (
+    SNOMED_URI,
+    replace_fhir_source_codings,
+    select_source_coding,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -39,21 +44,12 @@ def extract_procedures(file_path):
 
                 if not person_id: continue
 
-                code = None
-                display = "Unknown"
                 codings = resource.get('code', {}).get('coding', [])
-
-                for c in codings:
-                    if c.get('system') == 'http://snomed.info/sct':
-                        code = c.get('code')
-                        display = c.get('display', '')
-                        break
-
-                if not code and codings:
-                    code = codings[0].get('code')
-                    display = codings[0].get('display', '')
-
-                if not code: continue
+                coding = select_source_coding(
+                    codings, preferred_systems=(SNOMED_URI,)
+                )
+                if coding is None:
+                    continue
 
                 # FHIR procedures can have performedDateTime or performedPeriod
                 date = resource.get('performedDateTime', '')[:10]
@@ -63,9 +59,17 @@ def extract_procedures(file_path):
 
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
+                source_event_key = full_url or (
+                    f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                )
                 procedure_id = generate_procedure_id(base_string)
 
-                records.append((procedure_id, person_id, code, display, date))
+                records.append((
+                    procedure_id, person_id, coding.code, coding.source_value,
+                    date, coding.system_uri, coding.athena_vocabulary_id,
+                    coding.source_vocabulary_id, coding.version,
+                    source_event_key,
+                ))
 
     return records
 
@@ -98,11 +102,19 @@ def run_procedure_etl():
                 person_id BIGINT,
                 code VARCHAR,
                 display_text VARCHAR,
-                date DATE
+                date DATE,
+                source_system_uri VARCHAR,
+                athena_vocabulary_id VARCHAR,
+                source_vocabulary_id VARCHAR,
+                source_version VARCHAR,
+                source_event_key VARCHAR
             )
         """)
 
-        con.executemany("INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?)", all_records)
+        con.executemany(
+            "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            all_records,
+        )
 
         ambiguous = con.execute("""
             SELECT COUNT(*)
@@ -111,7 +123,7 @@ def run_procedure_etl():
                 FROM stg_procedure stg
                 JOIN concept c_src
                   ON stg.code = c_src.concept_code
-                 AND c_src.vocabulary_id = 'SNOMED'
+                 AND stg.athena_vocabulary_id = c_src.vocabulary_id
                 JOIN concept_relationship cr
                   ON c_src.concept_id = cr.concept_id_1
                  AND cr.relationship_id = 'Maps to'
@@ -141,7 +153,7 @@ def run_procedure_etl():
             FROM stg_procedure stg
             LEFT JOIN concept c_src
               ON stg.code = c_src.concept_code
-             AND c_src.vocabulary_id = 'SNOMED'
+             AND stg.athena_vocabulary_id = c_src.vocabulary_id
             LEFT JOIN concept_relationship cr
               ON c_src.concept_id = cr.concept_id_1
              AND cr.relationship_id = 'Maps to'
@@ -173,6 +185,41 @@ def run_procedure_etl():
             WHERE stg.target_domain = 'Procedure'
                OR stg.target_concept_id IS NULL
         """)
+
+        source_rows = {
+            record[0]: (
+                record[9], record[5], record[7], record[2], record[3], record[8]
+            )
+            for record in all_records
+        }
+        for target_table, _id_column, domain in (
+            ('procedure_occurrence', 'procedure_occurrence_id', 'Procedure'),
+            ('measurement', 'measurement_id', 'Measurement'),
+            ('observation', 'observation_id', 'Observation'),
+            ('device_exposure', 'device_exposure_id', 'Device'),
+        ):
+            target_ids = {
+                row[0]
+                for row in con.execute(
+                    "SELECT procedure_occurrence_id FROM stg_procedure_routed "
+                    "WHERE target_domain = ? OR (? = 'Procedure' AND target_domain IS NULL)",
+                    [domain, domain],
+                ).fetchall()
+            }
+            replace_fhir_source_codings(
+                con,
+                target_table,
+                [
+                    (
+                        target_table, target_id, source_rows[target_id][0], None,
+                        source_rows[target_id][1], source_rows[target_id][2],
+                        source_rows[target_id][3], source_rows[target_id][4],
+                        source_rows[target_id][5], current_run_id(),
+                    )
+                    for target_id in target_ids
+                ],
+                source_adapter="FHIR_R4_Procedure",
+            )
 
         ensure_table_columns(con, "measurement")
         ensure_table_columns(con, "observation")
@@ -278,7 +325,8 @@ def run_procedure_etl():
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by, run_id
+                vocabulary_version, reviewed_by, run_id, source_system,
+                source_code, source_vocabulary_id, source_record_key
             )
             SELECT 
                 'procedure_occurrence',
@@ -290,14 +338,17 @@ def run_procedure_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System',
-                ?
-            FROM procedure_occurrence
+                'System', ?, coding.source_system_uri, coding.source_code,
+                coding.source_vocabulary_id, coding.source_event_key
+            FROM procedure_occurrence event
+            JOIN fhir_event_source_coding coding
+              ON coding.target_table = 'procedure_occurrence'
+             AND coding.target_id = event.procedure_occurrence_id
             WHERE procedure_concept_id != 0
             AND NOT EXISTS (
                 SELECT 1 FROM mapping_provenance p
                 WHERE p.target_table = 'procedure_occurrence'
-                  AND p.target_id = procedure_occurrence.procedure_occurrence_id
+                  AND p.target_id = event.procedure_occurrence_id
                   AND p.mapping_method = 'deterministic_maps_to'
                   AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
@@ -313,15 +364,21 @@ def run_procedure_etl():
                 INSERT INTO mapping_provenance (
                     target_table, target_id, source_value, normalized_value,
                     assigned_concept_id, mapping_method, score, model_name,
-                    vocabulary_version, reviewed_by, run_id
+                    vocabulary_version, reviewed_by, run_id, source_system,
+                    source_code, source_vocabulary_id, source_record_key
                 )
                 SELECT ?, event.{id_column}, stg.display_text,
                        stg.display_text, event.{concept_column},
                        'deterministic_maps_to_domain_routed', 1.0, 'N/A',
-                       'Athena_v5.4', 'System', ?
+                       'Athena_v5.4', 'System', ?, coding.source_system_uri,
+                       coding.source_code, coding.source_vocabulary_id,
+                       coding.source_event_key
                 FROM {target_table} event
                 JOIN stg_procedure_routed stg
                   ON event.{id_column} = stg.procedure_occurrence_id
+                JOIN fhir_event_source_coding coding
+                  ON coding.target_table = ?
+                 AND coding.target_id = event.{id_column}
                 WHERE stg.target_domain = ?
                   AND NOT EXISTS (
                       SELECT 1 FROM mapping_provenance p
@@ -331,7 +388,10 @@ def run_procedure_etl():
                         AND p.mapping_method = 'deterministic_maps_to_domain_routed'
                         AND COALESCE(p.run_id, '') = COALESCE(?, '')
                   )
-            """, [target_table, current_run_id(), domain, target_table, current_run_id()])
+            """, [
+                target_table, current_run_id(), target_table, domain,
+                target_table, current_run_id(),
+            ])
 
         mapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id != 0").fetchone()[0]
         unmapped_count = con.execute("SELECT COUNT(*) FROM procedure_occurrence WHERE procedure_concept_id = 0").fetchone()[0]

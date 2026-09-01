@@ -1,7 +1,9 @@
 import duckdb
 
+from src.adapters.fhir_coding import replace_fhir_source_codings
 from src.etl.apply_stcm import apply_stcm_mappings
 from src.mapping.mapping_service import (
+    MappingSourceTerm,
     _vocabulary_stats,
     get_few_shot_prompt,
     get_versioned_collection,
@@ -231,6 +233,81 @@ def test_proposal_persists_model_name_from_portable_provenance():
         ).fetchone()[0] == "model-from-contract"
 
 
+def test_scoped_proposals_do_not_merge_homonymous_fhir_codes():
+    with duckdb.connect(":memory:") as con:
+        _create_provenance(con)
+        con.execute(
+            "CREATE TABLE vocabulary "
+            "(vocabulary_id VARCHAR, vocabulary_version VARCHAR)"
+        )
+        con.execute("INSERT INTO vocabulary VALUES ('None', 'v-test')")
+        con.execute("""
+            CREATE TABLE measurement (
+                measurement_id BIGINT, measurement_concept_id INTEGER,
+                measurement_source_value VARCHAR
+            )
+        """)
+        con.execute("""
+            INSERT INTO measurement VALUES
+                (1, 0, 'Shared label'), (2, 0, 'Shared label')
+        """)
+        replace_fhir_source_codings(
+            con,
+            "measurement",
+            [
+                (
+                    "measurement", 1, "Observation/1", None,
+                    "https://hospital-a.example/codes", "FHIR_A", "X1",
+                    "Shared label", None, "R1",
+                ),
+                (
+                    "measurement", 2, "Observation/2", None,
+                    "https://hospital-b.example/codes", "FHIR_B", "X1",
+                    "Shared label", None, "R1",
+                ),
+            ],
+            source_adapter="FHIR_R4_Observation",
+        )
+
+        for source_term, concept_id in (
+            (
+                MappingSourceTerm(
+                    "Shared label", "https://hospital-a.example/codes",
+                    "FHIR_A", "X1",
+                ),
+                300,
+            ),
+            (
+                MappingSourceTerm(
+                    "Shared label", "https://hospital-b.example/codes",
+                    "FHIR_B", "X1",
+                ),
+                301,
+            ),
+        ):
+            status, count = record_mapping_proposal(
+                con,
+                "measurement",
+                source_term.source_value,
+                (concept_id, "Candidate", 0.05, 0.95),
+                source_term=source_term,
+            )
+            assert (status, count) == ("Pending_Human_Review", 1)
+
+        assert con.execute("""
+            SELECT target_id, source_vocabulary_id, source_code,
+                   assigned_concept_id
+            FROM mapping_provenance
+            ORDER BY target_id
+        """).fetchall() == [
+            (1, "FHIR_A", "X1", 300),
+            (2, "FHIR_B", "X1", 301),
+        ]
+        assert con.execute(
+            "SELECT COUNT(DISTINCT mapping_decision_id) FROM mapping_decision"
+        ).fetchone()[0] == 2
+
+
 def test_deterministic_mapping_supersedes_pending_event_proposal():
     with duckdb.connect(":memory:") as con:
         _create_provenance(con)
@@ -316,3 +393,87 @@ def test_stcm_application_requires_human_approval(tmp_path):
     apply_stcm_mappings(db_path)
     with duckdb.connect(str(db_path), read_only=True) as con:
         assert con.execute("SELECT measurement_concept_id FROM measurement").fetchone()[0] == 300
+
+
+def test_stcm_application_uses_fhir_vocabulary_and_code_identity(tmp_path):
+    db_path = tmp_path / "scoped-fhir.duckdb"
+    with duckdb.connect(str(db_path)) as con:
+        _create_stcm(con)
+        _create_provenance(con)
+        for column in (
+            "source_system VARCHAR",
+            "source_code VARCHAR",
+            "source_vocabulary_id VARCHAR",
+            "mapping_decision_id VARCHAR",
+        ):
+            con.execute(f"ALTER TABLE mapping_provenance ADD COLUMN {column}")
+        con.execute("""
+            CREATE TABLE concept (
+                concept_id INTEGER, domain_id VARCHAR,
+                standard_concept VARCHAR, invalid_reason VARCHAR,
+                valid_start_date VARCHAR, valid_end_date VARCHAR
+            )
+        """)
+        con.execute("""
+            INSERT INTO concept VALUES (
+                300, 'Measurement', 'S', NULL, '19700101', '20991231'
+            )
+        """)
+        con.execute("""
+            INSERT INTO source_to_concept_map VALUES (
+                'X1', 0, 'FHIR_A', 'Shared label', 300, 'LOINC',
+                '2020-01-01', '2099-12-31', NULL
+            )
+        """)
+        for table, id_col, concept_col, source_col in [
+            ("condition_occurrence", "condition_occurrence_id", "condition_concept_id", "condition_source_value"),
+            ("drug_exposure", "drug_exposure_id", "drug_concept_id", "drug_source_value"),
+            ("measurement", "measurement_id", "measurement_concept_id", "measurement_source_value"),
+            ("observation", "observation_id", "observation_concept_id", "observation_source_value"),
+            ("procedure_occurrence", "procedure_occurrence_id", "procedure_concept_id", "procedure_source_value"),
+            ("device_exposure", "device_exposure_id", "device_concept_id", "device_source_value"),
+        ]:
+            con.execute(
+                f"CREATE TABLE {table} "
+                f"({id_col} BIGINT, {concept_col} INTEGER, {source_col} VARCHAR)"
+            )
+        con.execute("""
+            INSERT INTO measurement VALUES
+                (1, 0, 'Shared label'), (2, 0, 'Shared label')
+        """)
+        replace_fhir_source_codings(
+            con,
+            "measurement",
+            [
+                (
+                    "measurement", 1, "Observation/1", None,
+                    "https://hospital-a.example/codes", "FHIR_A", "X1",
+                    "Shared label", None, "R1",
+                ),
+                (
+                    "measurement", 2, "Observation/2", None,
+                    "https://hospital-b.example/codes", "FHIR_B", "X1",
+                    "Shared label", None, "R1",
+                ),
+            ],
+            source_adapter="FHIR_R4_Observation",
+        )
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value, assigned_concept_id,
+                mapping_method, reviewed_by, source_system, source_code,
+                source_vocabulary_id
+            ) VALUES (
+                'measurement', 1, 'Shared label', 300,
+                'llm_rag_json', 'Approved_by_Human',
+                'https://hospital-a.example/codes', 'X1', 'FHIR_A'
+            )
+        """)
+
+    apply_stcm_mappings(db_path)
+
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        assert con.execute("""
+            SELECT measurement_id, measurement_concept_id
+            FROM measurement ORDER BY measurement_id
+        """).fetchall() == [(1, 300), (2, 0)]

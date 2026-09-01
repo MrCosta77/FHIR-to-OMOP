@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 
 import chromadb
 
@@ -15,6 +16,20 @@ from src.omop.mapping_targets import TARGETS
 from src.utils.config import MODEL_NAME, SIMILARITY_THRESHOLD
 
 INDEX_SCHEMA_VERSION = "omop-rag-index-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class MappingSourceTerm:
+    """One semantically scoped source term presented to the mapping engine."""
+
+    source_value: str
+    source_system: str | None = None
+    source_vocabulary_id: str | None = None
+    source_code: str | None = None
+
+    @property
+    def is_scoped(self) -> bool:
+        return bool(self.source_vocabulary_id and self.source_code)
 
 
 def _valid_date(field):
@@ -325,14 +340,34 @@ def record_external_mapping_decision(
     return decision_status, after - before
 
 
-def record_mapping_proposal(con, target_table, source_value, match, decision_metadata=None):
-    """Persist an event-level candidate without publishing it before review."""
-    if not match:
-        return "UNRESOLVED", 0
-    concept_id, concept_name, _distance, score = match
+def _target_ids_for_source(
+    con,
+    target_table,
+    source_value,
+    source_term: MappingSourceTerm | None,
+):
     config = TARGETS[target_table]
-    mapping_method = "llm_rag_json" if decision_metadata else "llm_rag_few_shot"
-    target_ids = [
+    if source_term and source_term.is_scoped:
+        return [
+            int(row[0])
+            for row in con.execute(f"""
+                SELECT event.{config['id_column']}
+                FROM {target_table} event
+                JOIN fhir_event_source_coding coding
+                  ON coding.target_table = ?
+                 AND coding.target_id = event.{config['id_column']}
+                WHERE event.{config['concept_column']} = 0
+                  AND event.{config['source_column']} = ?
+                  AND coding.source_vocabulary_id = ?
+                  AND coding.source_code = ?
+                  AND COALESCE(coding.source_system_uri, '') = COALESCE(?, '')
+                ORDER BY event.{config['id_column']}
+            """, [
+                target_table, source_value, source_term.source_vocabulary_id,
+                source_term.source_code, source_term.source_system,
+            ]).fetchall()
+        ]
+    return [
         int(row[0])
         for row in con.execute(f"""
             SELECT {config['id_column']}
@@ -342,6 +377,25 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
             ORDER BY {config['id_column']}
         """, [source_value]).fetchall()
     ]
+
+
+def record_mapping_proposal(
+    con,
+    target_table,
+    source_value,
+    match,
+    decision_metadata=None,
+    *,
+    source_term: MappingSourceTerm | None = None,
+):
+    """Persist an event-level candidate without publishing it before review."""
+    if not match:
+        return "UNRESOLVED", 0
+    concept_id, concept_name, _distance, score = match
+    mapping_method = "llm_rag_json" if decision_metadata else "llm_rag_few_shot"
+    target_ids = _target_ids_for_source(
+        con, target_table, source_value, source_term
+    )
     review_status = (
         "Pending_Human_Review"
         if score >= SIMILARITY_THRESHOLD
@@ -353,7 +407,16 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
     """).fetchone()
     vocabulary_version = vocabulary_version[0] if vocabulary_version else "Unknown"
 
-    if rejection_policy_exists(con, target_table, source_value, concept_id):
+    if rejection_policy_exists(
+        con,
+        target_table,
+        source_value,
+        concept_id,
+        source_vocabulary_id=(
+            source_term.source_vocabulary_id if source_term else None
+        ),
+        source_code=source_term.source_code if source_term else None,
+    ):
         review_status = "REJECTED_BY_POLICY"
 
     decision_status = {
@@ -367,6 +430,11 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
         con, target_table, source_value, concept_id, concept_name,
         mapping_method, score, decision_model_name, vocabulary_version,
         decision_status,
+        source_system=source_term.source_system if source_term else None,
+        source_vocabulary_id=(
+            source_term.source_vocabulary_id if source_term else None
+        ),
+        source_code=source_term.source_code if source_term else None,
         **metadata_kwargs,
     )
 
@@ -385,8 +453,9 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by, run_id, mapping_decision_id
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                vocabulary_version, reviewed_by, run_id, mapping_decision_id,
+                source_system, source_code, source_vocabulary_id
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
                 SELECT 1 FROM mapping_provenance
                 WHERE target_table = ? AND target_id = ?
@@ -398,24 +467,26 @@ def record_mapping_proposal(con, target_table, source_value, match, decision_met
             target_table, target_id, source_value, concept_name, concept_id,
             mapping_method, score, decision_model_name, vocabulary_version, review_status,
             current_run_id(), decision_id,
+            source_term.source_system if source_term else None,
+            source_term.source_code if source_term else None,
+            source_term.source_vocabulary_id if source_term else None,
             target_table, target_id, concept_id, mapping_method, current_run_id(),
         ])
     return review_status, len(target_ids)
 
 
-def record_mapping_abstention(con, target_table, source_value, decision_metadata):
+def record_mapping_abstention(
+    con,
+    target_table,
+    source_value,
+    decision_metadata,
+    *,
+    source_term: MappingSourceTerm | None = None,
+):
     """Persist an event-level, non-publishable LLM abstention."""
-    config = TARGETS[target_table]
-    target_ids = [
-        int(row[0])
-        for row in con.execute(f"""
-            SELECT {config['id_column']}
-            FROM {target_table}
-            WHERE {config['concept_column']} = 0
-              AND {config['source_column']} = ?
-            ORDER BY {config['id_column']}
-        """, [source_value]).fetchall()
-    ]
+    target_ids = _target_ids_for_source(
+        con, target_table, source_value, source_term
+    )
     vocabulary_version = con.execute("""
         SELECT vocabulary_version FROM vocabulary
         WHERE vocabulary_id = 'None' LIMIT 1
@@ -427,16 +498,23 @@ def record_mapping_abstention(con, target_table, source_value, decision_metadata
     decision_id = register_decision(
         con, target_table, source_value, 0, None,
         "llm_rag_json", confidence, decision_model_name, vocabulary_version,
-        "ABSTAINED", **metadata_kwargs,
+        "ABSTAINED",
+        source_system=source_term.source_system if source_term else None,
+        source_vocabulary_id=(
+            source_term.source_vocabulary_id if source_term else None
+        ),
+        source_code=source_term.source_code if source_term else None,
+        **metadata_kwargs,
     )
     for target_id in target_ids:
         con.execute("""
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by, run_id, mapping_decision_id
+                vocabulary_version, reviewed_by, run_id, mapping_decision_id,
+                source_system, source_code, source_vocabulary_id
             ) SELECT ?, ?, ?, NULL, 0, 'llm_rag_json', ?, ?, ?,
-                     'LLM_ABSTAIN', ?, ?
+                     'LLM_ABSTAIN', ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
                 SELECT 1 FROM mapping_provenance
                 WHERE target_table = ? AND target_id = ?
@@ -446,6 +524,9 @@ def record_mapping_abstention(con, target_table, source_value, decision_metadata
         """, [
             target_table, target_id, source_value, confidence, decision_model_name,
             vocabulary_version, current_run_id(), decision_id,
+            source_term.source_system if source_term else None,
+            source_term.source_code if source_term else None,
+            source_term.source_vocabulary_id if source_term else None,
             target_table, target_id, current_run_id(),
         ])
     return "ABSTAINED", len(target_ids)

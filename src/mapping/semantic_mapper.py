@@ -20,6 +20,7 @@ from src.clinical_mapping_core import (
 from src.mapping.governance import current_run_id
 from src.mapping.mapping_service import (
     TARGETS,
+    MappingSourceTerm,
     get_few_shot_prompt,
     get_versioned_collection,
     reconcile_resolved_proposals,
@@ -118,10 +119,34 @@ def _model_digest(client, model_name: str) -> str | None:
     return None
 
 
-def _unmapped_terms(con, target_table: str) -> list[str]:
+def _unmapped_terms(con, target_table: str) -> list[MappingSourceTerm]:
     config = TARGETS[target_table]
+    has_fhir_identity = bool(con.execute("""
+        SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = 'main'
+          AND table_name = 'fhir_event_source_coding'
+    """).fetchone()[0])
+    if has_fhir_identity:
+        return [
+            MappingSourceTerm(*row)
+            for row in con.execute(f"""
+                SELECT DISTINCT event.{config['source_column']},
+                       coding.source_system_uri,
+                       coding.source_vocabulary_id,
+                       coding.source_code
+                FROM {target_table} event
+                LEFT JOIN fhir_event_source_coding coding
+                  ON coding.target_table = ?
+                 AND coding.target_id = event.{config['id_column']}
+                WHERE event.{config['concept_column']} = 0
+                  AND event.{config['source_column']} IS NOT NULL
+                ORDER BY LOWER(TRIM(event.{config['source_column']})),
+                         COALESCE(coding.source_vocabulary_id, ''),
+                         COALESCE(coding.source_code, '')
+            """, [target_table]).fetchall()
+        ]
     return [
-        row[0]
+        MappingSourceTerm(row[0])
         for row in con.execute(f"""
             SELECT DISTINCT {config['source_column']}
             FROM {target_table}
@@ -175,7 +200,8 @@ def run_semantic_mapping(
             index_signature=index_signature,
         )
 
-        for position, source_value in enumerate(terms, start=1):
+        for position, source_term in enumerate(terms, start=1):
+            source_value = source_term.source_value
             search = collection.query(query_texts=[source_value], n_results=5)
             ids = search.get("ids", [[]])[0]
             documents = search.get("documents", [[]])[0]
@@ -185,7 +211,17 @@ def run_semantic_mapping(
                 {"concept_id": int(concept_id), "concept_name": documents[index]}
                 for index, concept_id in enumerate(ids)
             ]
-            prompt_source, redaction_categories = redact_direct_identifiers(source_value)
+            prompt_input = source_value
+            if source_term.is_scoped:
+                prompt_input = (
+                    f"{source_value}\nSource terminology: "
+                    f"{source_term.source_vocabulary_id}; "
+                    f"system={source_term.source_system}; "
+                    f"code={source_term.source_code}"
+                )
+            prompt_source, redaction_categories = redact_direct_identifiers(
+                prompt_input
+            )
             prompt = build_prompt(target_table, prompt_source, candidates, few_shot)
             response = client.chat(
                 model=MODEL_NAME,
@@ -215,7 +251,11 @@ def run_semantic_mapping(
             metadata = provenance.decision_metadata(decision_contract)
             if decision["decision"] == "ABSTAIN":
                 status, event_count = record_mapping_abstention(
-                    con, target_table, source_value, metadata
+                    con,
+                    target_table,
+                    source_value,
+                    metadata,
+                    source_term=source_term,
                 )
                 result["abstentions"] += 1
             else:
@@ -230,6 +270,7 @@ def run_semantic_mapping(
                 status, event_count = record_mapping_proposal(
                     con, target_table, source_value,
                     (concept_id, concept_name, distance, governed_score), metadata,
+                    source_term=source_term,
                 )
                 result["proposals"] += 1
             audit_security_event(

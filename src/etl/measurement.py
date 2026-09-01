@@ -10,6 +10,13 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.adapters.fhir_coding import (
+    LOINC_URI,
+    SNOMED_URI,
+    iter_observation_elements,
+    replace_fhir_source_codings,
+    select_source_coding,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -41,69 +48,64 @@ def extract_measurements(file_path):
                 if not person_id:
                     continue
 
-                code = None
-                display = "Unknown"
-                codings = resource.get('code', {}).get('coding', [])
-
-                for c in codings:
-                    if c.get('system') == 'http://loinc.org':
-                        code = c.get('code')
-                        display = c.get('display', '')
-                        break
-
-                if not code:
-                    continue
-
                 date = resource.get('effectiveDateTime', '')[:10]
                 if not date:
                     continue
+                full_url = entry.get('fullUrl', '')
+                if full_url:
+                    source_event_key = full_url
+                else:
+                    resource_json = json.dumps(resource, sort_keys=True)
+                    source_event_key = (
+                        f"sha256:{hashlib.sha256(resource_json.encode('utf-8')).hexdigest()}"
+                    )
 
-                value = None
-                unit = None
-                unit_system = None
-                unit_code = None
-                canonical_unit_code = None
-
-                if 'valueQuantity' in resource:
-                    value = resource['valueQuantity'].get('value')
-                    quantity = resource['valueQuantity']
-                    unit_system = quantity.get('system')
-                    unit_code = quantity.get('code')
-                    unit = quantity.get('unit') or unit_code
+                for component_path, codeable, value_holder in (
+                    iter_observation_elements(resource)
+                ):
+                    coding = select_source_coding(
+                        codeable.get('coding', []),
+                        preferred_systems=(LOINC_URI,),
+                    )
+                    quantity = value_holder.get('valueQuantity')
+                    value_coding = select_source_coding(
+                        value_holder.get('valueCodeableConcept', {}).get(
+                            'coding', []
+                        ),
+                        preferred_systems=(SNOMED_URI, LOINC_URI),
+                    )
+                    if coding is None or (
+                        not isinstance(quantity, dict) and value_coding is None
+                    ):
+                        continue
+                    value = quantity.get('value') if quantity else None
+                    if value is None and value_coding is None:
+                        continue
+                    unit_system = quantity.get('system') if quantity else None
+                    unit_code = quantity.get('code') if quantity else None
+                    unit = (quantity.get('unit') or unit_code) if quantity else None
                     canonical_unit_code = canonical_ucum_code(
                         unit_system, unit_code
                     )
-
-                if value is None:
-                    continue
-
-                # Identificador Único Universal do Bundle FHIR
-                full_url = entry.get('fullUrl', '')
-                if full_url:
-                    base_string = full_url
-                    source_event_key = full_url
-                else:
-                    # Fallback de segurança: transformar o JSON do lab resource numa string
-                    base_string = json.dumps(resource, sort_keys=True)
-                    source_event_key = (
-                        f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
-                    )
-
-                measurement_id = generate_measurement_id(base_string)
-
-                records.append((
-                    measurement_id,
-                    person_id,
-                    code,
-                    display,
-                    float(value),
-                    unit,
-                    unit_system,
-                    unit_code,
-                    canonical_unit_code,
-                    date,
-                    source_event_key,
-                ))
+                    base_string = full_url or resource_json
+                    if component_path:
+                        base_string = f"{base_string}::{component_path}"
+                    measurement_id = generate_measurement_id(base_string)
+                    records.append((
+                        measurement_id, person_id, coding.code,
+                        coding.source_value,
+                        float(value) if value is not None else None,
+                        unit, unit_system, unit_code, canonical_unit_code, date,
+                        coding.system_uri, coding.athena_vocabulary_id,
+                        coding.source_vocabulary_id, coding.version,
+                        source_event_key, component_path,
+                        value_coding.system_uri if value_coding else None,
+                        value_coding.athena_vocabulary_id if value_coding else None,
+                        value_coding.source_vocabulary_id if value_coding else None,
+                        value_coding.code if value_coding else None,
+                        value_coding.source_value if value_coding else None,
+                        value_coding.version if value_coding else None,
+                    ))
     return records
 
 def run_measurement_etl():
@@ -140,12 +142,23 @@ def run_measurement_etl():
                 unit_code VARCHAR,
                 canonical_unit_code VARCHAR,
                 date DATE,
-                source_event_key VARCHAR
+                source_system_uri VARCHAR,
+                athena_vocabulary_id VARCHAR,
+                source_vocabulary_id VARCHAR,
+                source_version VARCHAR,
+                source_event_key VARCHAR,
+                component_path VARCHAR,
+                value_source_system_uri VARCHAR,
+                value_athena_vocabulary_id VARCHAR,
+                value_source_vocabulary_id VARCHAR,
+                value_source_code VARCHAR,
+                value_source_value VARCHAR,
+                value_source_version VARCHAR
             )
         """)
 
         con.executemany(
-            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
         )
 
@@ -171,6 +184,7 @@ def run_measurement_etl():
                    TRUE
             FROM stg_measurement
             WHERE loinc_code = '788-0'
+              AND athena_vocabulary_id = 'LOINC'
               AND canonical_unit_code IS DISTINCT FROM '%'
             ON CONFLICT (target_table, target_id, reason_code) DO UPDATE SET
                 source_event_key = EXCLUDED.source_event_key,
@@ -189,7 +203,7 @@ def run_measurement_etl():
                 FROM stg_measurement stg
                 JOIN concept c_src
                   ON stg.loinc_code = c_src.concept_code
-                 AND c_src.vocabulary_id = 'LOINC'
+                 AND stg.athena_vocabulary_id = c_src.vocabulary_id
                 JOIN concept_relationship cr
                   ON c_src.concept_id = cr.concept_id_1
                  AND cr.relationship_id = 'Maps to'
@@ -213,6 +227,7 @@ def run_measurement_etl():
                 measurement_id, person_id, measurement_concept_id,
                 measurement_date, measurement_datetime,
                 measurement_type_concept_id, value_as_number,
+                value_as_concept_id,
                 measurement_source_value, measurement_source_concept_id,
                 unit_concept_id, unit_source_value, unit_source_concept_id,
                 value_source_value
@@ -228,6 +243,14 @@ def run_measurement_etl():
                 stg.date::TIMESTAMP,
                 32817 AS measurement_type_concept_id,
                 stg.value AS value_as_number,
+                CASE
+                    WHEN stg.value_source_code IS NULL THEN NULL
+                    WHEN c_value_src.standard_concept = 'S'
+                        THEN c_value_src.concept_id::INTEGER
+                    WHEN c_value_std.standard_concept = 'S'
+                        THEN c_value_std.concept_id::INTEGER
+                    ELSE 0
+                END AS value_as_concept_id,
                 stg.display_text AS measurement_source_value,
                 COALESCE(c_src.concept_id::INTEGER, 0) AS measurement_source_concept_id,
                 CASE
@@ -239,11 +262,12 @@ def run_measurement_etl():
                     WHEN COALESCE(stg.unit_code, stg.unit) IS NULL THEN NULL
                     ELSE COALESCE(c_unit_src.concept_id::INTEGER, 0)
                 END AS unit_source_concept_id,
-                stg.value::VARCHAR AS value_source_value
+                COALESCE(stg.value_source_value, stg.value::VARCHAR)
+                    AS value_source_value
             FROM stg_measurement stg
             LEFT JOIN concept c_src 
                 ON stg.loinc_code = c_src.concept_code 
-                AND c_src.vocabulary_id = 'LOINC'
+                AND stg.athena_vocabulary_id = c_src.vocabulary_id
             LEFT JOIN concept_relationship cr 
                 ON c_src.concept_id = cr.concept_id_1 
                 AND cr.relationship_id = 'Maps to'
@@ -263,6 +287,18 @@ def run_measurement_etl():
                 AND c_unit_std.domain_id = 'Unit'
                 AND c_unit_std.standard_concept = 'S'
                 AND c_unit_std.invalid_reason IS NULL
+            LEFT JOIN concept c_value_src
+                ON stg.value_source_code = c_value_src.concept_code
+                AND stg.value_athena_vocabulary_id = c_value_src.vocabulary_id
+                AND c_value_src.invalid_reason IS NULL
+            LEFT JOIN concept_relationship cr_value
+                ON c_value_src.concept_id = cr_value.concept_id_1
+                AND cr_value.relationship_id = 'Maps to'
+                AND cr_value.invalid_reason IS NULL
+            LEFT JOIN concept c_value_std
+                ON cr_value.concept_id_2 = c_value_std.concept_id
+                AND c_value_std.standard_concept = 'S'
+                AND c_value_std.invalid_reason IS NULL
             -- Numeric FHIR Observations with a Standard target in another
             -- OMOP domain are routed by that domain's ETL, not retained here
             -- as artificial concept_id 0 measurements. Truly unresolved
@@ -273,6 +309,7 @@ def run_measurement_etl():
                   )
               AND NOT (
                     stg.loinc_code = '788-0'
+                    AND stg.athena_vocabulary_id = 'LOINC'
                     AND stg.canonical_unit_code IS DISTINCT FROM '%'
                   )
             -- O escudo contra o 'merge-inflation' garantindo apenas 1 conceito por registo
@@ -280,15 +317,35 @@ def run_measurement_etl():
                 PARTITION BY stg.measurement_id
                 ORDER BY c_std.concept_id DESC,
                          c_unit_std.concept_id DESC,
-                         c_unit_src.concept_id DESC
+                         c_unit_src.concept_id DESC,
+                         c_value_std.concept_id DESC
             ) = 1
         """)
+
+        existing_measurement_ids = {
+            row[0] for row in con.execute("SELECT measurement_id FROM measurement").fetchall()
+        }
+        replace_fhir_source_codings(
+            con,
+            "measurement",
+            [
+                (
+                    "measurement", record[0], record[14], record[15], record[10],
+                    record[12], record[2], record[3], record[13],
+                    current_run_id(),
+                )
+                for record in all_records
+                if record[0] in existing_measurement_ids
+            ],
+            source_adapter="FHIR_R4_Observation",
+        )
 
         con.execute("""
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
                 assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by, run_id
+                vocabulary_version, reviewed_by, run_id, source_system,
+                source_code, source_vocabulary_id, source_record_key
             )
             SELECT 
                 'measurement',
@@ -300,14 +357,17 @@ def run_measurement_etl():
                 1.0,
                 'N/A',
                 'Athena_v5.4',
-                'System',
-                ?
-            FROM measurement
+                'System', ?, coding.source_system_uri, coding.source_code,
+                coding.source_vocabulary_id, coding.source_event_key
+            FROM measurement event
+            JOIN fhir_event_source_coding coding
+              ON coding.target_table = 'measurement'
+             AND coding.target_id = event.measurement_id
             WHERE measurement_concept_id != 0
             AND NOT EXISTS (
                 SELECT 1 FROM mapping_provenance p
                 WHERE p.target_table = 'measurement'
-                  AND p.target_id = measurement.measurement_id
+                  AND p.target_id = event.measurement_id
                   AND p.mapping_method = 'deterministic_maps_to'
                   AND COALESCE(p.run_id, '') = COALESCE(?, '')
             )
