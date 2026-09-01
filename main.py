@@ -144,6 +144,22 @@ def git_commit():
     return result.stdout.strip()
 
 
+def git_worktree_provenance():
+    """Record whether the executable source differs from the named commit."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    status = result.stdout.replace("\r\n", "\n")
+    return {
+        "git_dirty": bool(status.strip()),
+        "git_status_sha256": hashlib.sha256(status.encode("utf-8")).hexdigest(),
+    }
+
+
 def write_manifest(path, manifest):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
@@ -243,6 +259,7 @@ def main():
     staging_db = prepare_staging_database(run_id)
     manifest_path = MANIFESTS_DIR / f"{run_id}.json"
     started = utc_now()
+    source_provenance = git_worktree_provenance()
     manifest = {
         "run_id": run_id,
         "status": "RUNNING",
@@ -252,6 +269,7 @@ def main():
         "configuration": {
             "database_publish_path": str(PUBLISHED_DB),
             "python": sys.version,
+            "source_provenance": source_provenance,
             "runtime": SETTINGS.manifest(),
         },
         "steps": [],

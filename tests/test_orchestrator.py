@@ -78,6 +78,17 @@ def test_missing_step_fails_closed(tmp_path):
         raise AssertionError("Missing mandatory step was silently skipped")
 
 
+def test_dirty_worktree_is_fingerprinted_without_persisting_diff(monkeypatch):
+    class Result:
+        stdout = " M src/etl/drug.py\n?? local-note.txt\n"
+
+    monkeypatch.setattr(main.subprocess, "run", lambda *args, **kwargs: Result())
+    provenance = main.git_worktree_provenance()
+    assert provenance["git_dirty"] is True
+    assert len(provenance["git_status_sha256"]) == 64
+    assert "src/etl/drug.py" not in str(provenance)
+
+
 def test_pytest_step_emits_run_scoped_junit(monkeypatch, tmp_path):
     captured = {}
 
