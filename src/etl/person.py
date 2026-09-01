@@ -88,43 +88,49 @@ def run_person_etl():
     print(f"📊 Extracted {len(all_records)} raw person records.")
 
     with duckdb.connect(DB_PATH) as con:
-        # A CAUSA DO ERRO: Faltava o DROP TABLE para garantir idempotência!
-        con.execute("DROP TABLE IF EXISTS person")
+        con.execute('BEGIN TRANSACTION')
+        try:
+            # A CAUSA DO ERRO: Faltava o DROP TABLE para garantir idempotência!
+            con.execute("DROP TABLE IF EXISTS person")
 
-        con.execute(create_table_sql("person"))
+            con.execute(create_table_sql("person"))
 
-        con.execute("DROP TABLE IF EXISTS stg_person")
-        con.execute("""
-            CREATE TEMPORARY TABLE stg_person (
-                person_id BIGINT,
-                gender_concept_id INTEGER,
-                year_of_birth INTEGER,
-                month_of_birth INTEGER,
-                day_of_birth INTEGER,
-                birth_datetime TIMESTAMP,
-                race_concept_id INTEGER,
-                ethnicity_concept_id INTEGER,
-                person_source_value VARCHAR,
-                gender_source_value VARCHAR
-            )
-        """)
+            con.execute("DROP TABLE IF EXISTS stg_person")
+            con.execute("""
+                CREATE TEMPORARY TABLE stg_person (
+                    person_id BIGINT,
+                    gender_concept_id INTEGER,
+                    year_of_birth INTEGER,
+                    month_of_birth INTEGER,
+                    day_of_birth INTEGER,
+                    birth_datetime TIMESTAMP,
+                    race_concept_id INTEGER,
+                    ethnicity_concept_id INTEGER,
+                    person_source_value VARCHAR,
+                    gender_source_value VARCHAR
+                )
+            """)
 
-        con.executemany("INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", all_records)
+            con.executemany("INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", all_records)
 
-        # Inserção com DISTINCT para garantir unicidade absoluta
-        con.execute("""
-            INSERT INTO person (
-                person_id, gender_concept_id, year_of_birth, month_of_birth, day_of_birth, birth_datetime,
-                race_concept_id, ethnicity_concept_id, person_source_value, gender_source_value
-            )
-            SELECT DISTINCT
-                person_id, gender_concept_id, year_of_birth, month_of_birth, day_of_birth, birth_datetime,
-                race_concept_id, ethnicity_concept_id, person_source_value, gender_source_value
-            FROM stg_person
-        """)
+            # Inserção com DISTINCT para garantir unicidade absoluta
+            con.execute("""
+                INSERT INTO person (
+                    person_id, gender_concept_id, year_of_birth, month_of_birth, day_of_birth, birth_datetime,
+                    race_concept_id, ethnicity_concept_id, person_source_value, gender_source_value
+                )
+                SELECT DISTINCT
+                    person_id, gender_concept_id, year_of_birth, month_of_birth, day_of_birth, birth_datetime,
+                    race_concept_id, ethnicity_concept_id, person_source_value, gender_source_value
+                FROM stg_person
+            """)
 
-        count = con.execute("SELECT COUNT(*) FROM person").fetchone()[0]
+            count = con.execute("SELECT COUNT(*) FROM person").fetchone()[0]
 
+            con.execute('COMMIT')
+        except Exception:
+            con.execute('ROLLBACK')
+            raise
     print(f"✅ PERSON table updated! Total structured patients: {count}")
 
 if __name__ == "__main__":

@@ -120,93 +120,99 @@ def run_drug_etl():
     print("🔌 Connecting to DuckDB for standardized insertion...")
 
     with duckdb.connect(DB_PATH) as con:
-        con.execute("DROP TABLE IF EXISTS drug_exposure")
+        con.execute('BEGIN TRANSACTION')
+        try:
+            con.execute("DROP TABLE IF EXISTS drug_exposure")
 
-        con.execute(create_table_sql("drug_exposure"))
+            con.execute(create_table_sql("drug_exposure"))
 
-        con.execute("DROP TABLE IF EXISTS stg_drug")
-        con.execute("""
-            CREATE TEMPORARY TABLE stg_drug (
-                drug_exposure_id BIGINT,
-                person_id BIGINT,
-                rxnorm_code VARCHAR,
-                display_text VARCHAR,
-                start_date DATE
-            )
-        """)
+            con.execute("DROP TABLE IF EXISTS stg_drug")
+            con.execute("""
+                CREATE TEMPORARY TABLE stg_drug (
+                    drug_exposure_id BIGINT,
+                    person_id BIGINT,
+                    rxnorm_code VARCHAR,
+                    display_text VARCHAR,
+                    start_date DATE
+                )
+            """)
 
-        con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?)", all_records)
+            con.executemany("INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?)", all_records)
 
-        con.execute("""
-            INSERT INTO drug_exposure (
-                drug_exposure_id, person_id, drug_concept_id,
-                drug_exposure_start_date, drug_exposure_start_datetime,
-                drug_exposure_end_date, drug_exposure_end_datetime,
-                drug_type_concept_id, drug_source_value, drug_source_concept_id
-            )
-            SELECT 
-                stg.drug_exposure_id,
-                stg.person_id,
-                CASE 
-                    WHEN c_std.domain_id = 'Drug' THEN COALESCE(c_std.concept_id::INTEGER, 0)
-                    ELSE 0 
-                END AS drug_concept_id,
-                stg.start_date,
-                stg.start_date::TIMESTAMP,
-                stg.start_date,
-                stg.start_date::TIMESTAMP,
-                32817 AS drug_type_concept_id,
-                stg.display_text AS drug_source_value,
-                COALESCE(c_src.concept_id::INTEGER, 0) AS drug_source_concept_id
-            FROM stg_drug stg
-            LEFT JOIN concept c_src 
-                ON stg.rxnorm_code = c_src.concept_code 
-                AND c_src.vocabulary_id = 'RxNorm'
-                AND c_src.invalid_reason IS NULL -- Evita duplicados de conceitos descontinuados
-            LEFT JOIN concept_relationship cr 
-                ON c_src.concept_id = cr.concept_id_1 
-                AND cr.relationship_id = 'Maps to'
-                AND cr.invalid_reason IS NULL
-            LEFT JOIN concept c_std 
-                ON cr.concept_id_2 = c_std.concept_id 
-                AND c_std.standard_concept = 'S'
-                AND c_std.invalid_reason IS NULL
-            -- QUALIFY garante que, mesmo que haja múltiplos mapeamentos, só levamos 1 linha por ID
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.drug_exposure_id ORDER BY c_std.concept_id DESC) = 1
-        """)
+            con.execute("""
+                INSERT INTO drug_exposure (
+                    drug_exposure_id, person_id, drug_concept_id,
+                    drug_exposure_start_date, drug_exposure_start_datetime,
+                    drug_exposure_end_date, drug_exposure_end_datetime,
+                    drug_type_concept_id, drug_source_value, drug_source_concept_id
+                )
+                SELECT 
+                    stg.drug_exposure_id,
+                    stg.person_id,
+                    CASE 
+                        WHEN c_std.domain_id = 'Drug' THEN COALESCE(c_std.concept_id::INTEGER, 0)
+                        ELSE 0 
+                    END AS drug_concept_id,
+                    stg.start_date,
+                    stg.start_date::TIMESTAMP,
+                    stg.start_date,
+                    stg.start_date::TIMESTAMP,
+                    32817 AS drug_type_concept_id,
+                    stg.display_text AS drug_source_value,
+                    COALESCE(c_src.concept_id::INTEGER, 0) AS drug_source_concept_id
+                FROM stg_drug stg
+                LEFT JOIN concept c_src 
+                    ON stg.rxnorm_code = c_src.concept_code 
+                    AND c_src.vocabulary_id = 'RxNorm'
+                    AND c_src.invalid_reason IS NULL -- Evita duplicados de conceitos descontinuados
+                LEFT JOIN concept_relationship cr 
+                    ON c_src.concept_id = cr.concept_id_1 
+                    AND cr.relationship_id = 'Maps to'
+                    AND cr.invalid_reason IS NULL
+                LEFT JOIN concept c_std 
+                    ON cr.concept_id_2 = c_std.concept_id 
+                    AND c_std.standard_concept = 'S'
+                    AND c_std.invalid_reason IS NULL
+                -- QUALIFY garante que, mesmo que haja múltiplos mapeamentos, só levamos 1 linha por ID
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY stg.drug_exposure_id ORDER BY c_std.concept_id DESC) = 1
+            """)
 
-        con.execute("""
-            INSERT INTO mapping_provenance (
-                target_table, target_id, source_value, normalized_value,
-                assigned_concept_id, mapping_method, score, model_name,
-                vocabulary_version, reviewed_by, run_id
-            )
-            SELECT 
-                'drug_exposure',
-                drug_exposure_id,
-                drug_source_value,
-                drug_source_value,
-                drug_concept_id,
-                'deterministic_maps_to',
-                1.0,
-                'N/A',
-                'Athena_v5.4',
-                'System',
-                ?
-            FROM drug_exposure
-            WHERE drug_concept_id != 0
-            AND NOT EXISTS (
-                SELECT 1 FROM mapping_provenance p
-                WHERE p.target_table = 'drug_exposure'
-                  AND p.target_id = drug_exposure.drug_exposure_id
-                  AND p.mapping_method = 'deterministic_maps_to'
-                  AND COALESCE(p.run_id, '') = COALESCE(?, '')
-            )
-        """, [current_run_id(), current_run_id()])
+            con.execute("""
+                INSERT INTO mapping_provenance (
+                    target_table, target_id, source_value, normalized_value,
+                    assigned_concept_id, mapping_method, score, model_name,
+                    vocabulary_version, reviewed_by, run_id
+                )
+                SELECT 
+                    'drug_exposure',
+                    drug_exposure_id,
+                    drug_source_value,
+                    drug_source_value,
+                    drug_concept_id,
+                    'deterministic_maps_to',
+                    1.0,
+                    'N/A',
+                    'Athena_v5.4',
+                    'System',
+                    ?
+                FROM drug_exposure
+                WHERE drug_concept_id != 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM mapping_provenance p
+                    WHERE p.target_table = 'drug_exposure'
+                      AND p.target_id = drug_exposure.drug_exposure_id
+                      AND p.mapping_method = 'deterministic_maps_to'
+                      AND COALESCE(p.run_id, '') = COALESCE(?, '')
+                )
+            """, [current_run_id(), current_run_id()])
 
-        mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
-        unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]
+            mapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id != 0").fetchone()[0]
+            unmapped_count = con.execute("SELECT COUNT(*) FROM drug_exposure WHERE drug_concept_id = 0").fetchone()[0]
 
+            con.execute('COMMIT')
+        except Exception:
+            con.execute('ROLLBACK')
+            raise
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped (OMOP Standard): {mapped_count} medications")
     print(f" - Sent to AI Fallback Queue (ID 0): {unmapped_count} medications")

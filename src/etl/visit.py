@@ -101,24 +101,30 @@ def run_visit_etl():
     print("🔌 Connecting to DuckDB for standardized insertion...")
 
     with duckdb.connect(DB_PATH) as con:
-        con.execute("DROP TABLE IF EXISTS visit_occurrence")
-        con.execute(create_table_sql("visit_occurrence"))
+        con.execute('BEGIN TRANSACTION')
+        try:
+            con.execute("DROP TABLE IF EXISTS visit_occurrence")
+            con.execute(create_table_sql("visit_occurrence"))
 
-        # Bulk Insert
-        if visit_records:
-            con.executemany("""
-                INSERT INTO visit_occurrence (
-                    visit_occurrence_id, person_id, visit_concept_id,
-                    visit_start_date, visit_start_datetime, visit_end_date,
-                    visit_end_datetime, visit_type_concept_id, provider_id,
-                    care_site_id, visit_source_value, visit_source_concept_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, visit_records)
+            # Bulk Insert
+            if visit_records:
+                con.executemany("""
+                    INSERT INTO visit_occurrence (
+                        visit_occurrence_id, person_id, visit_concept_id,
+                        visit_start_date, visit_start_datetime, visit_end_date,
+                        visit_end_datetime, visit_type_concept_id, provider_id,
+                        care_site_id, visit_source_value, visit_source_concept_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, visit_records)
 
-        # Diagnostics
-        mapped_count = con.execute("SELECT COUNT(*) FROM visit_occurrence WHERE visit_concept_id != 0").fetchone()[0]
-        unmapped_count = con.execute("SELECT COUNT(*) FROM visit_occurrence WHERE visit_concept_id = 0").fetchone()[0]
+            # Diagnostics
+            mapped_count = con.execute("SELECT COUNT(*) FROM visit_occurrence WHERE visit_concept_id != 0").fetchone()[0]
+            unmapped_count = con.execute("SELECT COUNT(*) FROM visit_occurrence WHERE visit_concept_id = 0").fetchone()[0]
 
+            con.execute('COMMIT')
+        except Exception:
+            con.execute('ROLLBACK')
+            raise
     print("\n✅ ETL Complete!")
     print(f" - Successfully mapped to OMOP Standards: {mapped_count} visits")
     print(f" - Failed to map (Unknown Type): {unmapped_count} visits")
