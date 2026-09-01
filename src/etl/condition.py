@@ -15,11 +15,20 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
-from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
+from src.adapters.fhir_semantics import (
+    extract_fhir_publication_exclusions,
+    fhir_datetime,
+    is_publishable_fhir_resource,
+    replace_fhir_publication_exclusions,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_person_id
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    resolve_fhir_reference,
+    stable_person_id,
+)
 
 
 def generate_condition_id(unique_string):
@@ -34,6 +43,7 @@ def extract_conditions(file_path):
 
         if bundle.get('resourceType') != 'Bundle':
             return records
+        reference_index = build_fhir_reference_index(bundle)
 
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
@@ -42,7 +52,9 @@ def extract_conditions(file_path):
                 if not is_publishable_fhir_resource(resource):
                     continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
-                person_id = stable_person_id(patient_ref)
+                person_id = stable_person_id(
+                    resolve_fhir_reference(patient_ref, reference_index)
+                )
 
                 if not person_id:
                     continue
@@ -106,8 +118,10 @@ def run_condition_etl():
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
 
     all_records = []
+    all_exclusions = []
     for f in fhir_files:
         all_records.extend(extract_conditions(f))
+        all_exclusions.extend(extract_fhir_publication_exclusions(f, {"Condition"}))
 
     print(f"📊 Extracted {len(all_records)} raw condition records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
@@ -115,6 +129,10 @@ def run_condition_etl():
     with duckdb.connect(DB_PATH) as con:
         con.execute('BEGIN TRANSACTION')
         try:
+            replace_fhir_publication_exclusions(
+                con, "FHIR_R4_Condition", all_exclusions,
+                run_id=current_run_id(),
+            )
             # FORÇA A ELIMINAÇÃO DA TABELA ANTIGA PARA ATUALIZAR O SCHEMA
             con.execute("DROP TABLE IF EXISTS condition_occurrence")
 

@@ -15,11 +15,20 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
-from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
+from src.adapters.fhir_semantics import (
+    extract_fhir_publication_exclusions,
+    fhir_datetime,
+    is_publishable_fhir_resource,
+    replace_fhir_publication_exclusions,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_person_id
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    resolve_fhir_reference,
+    stable_person_id,
+)
 
 
 def generate_procedure_id(unique_string):
@@ -34,6 +43,7 @@ def extract_procedures(file_path):
 
         if bundle.get('resourceType') != 'Bundle':
             return records
+        reference_index = build_fhir_reference_index(bundle)
 
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
@@ -43,7 +53,9 @@ def extract_procedures(file_path):
                 if not is_publishable_fhir_resource(resource):
                     continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
-                person_id = stable_person_id(patient_ref)
+                person_id = stable_person_id(
+                    resolve_fhir_reference(patient_ref, reference_index)
+                )
 
                 if not person_id: continue
 
@@ -90,8 +102,10 @@ def run_procedure_etl():
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
 
     all_records = []
+    all_exclusions = []
     for f in fhir_files:
         all_records.extend(extract_procedures(f))
+        all_exclusions.extend(extract_fhir_publication_exclusions(f, {"Procedure"}))
 
     print(f"📊 Extracted {len(all_records)} raw procedure records.")
     print("🔌 Connecting to DuckDB for standardized insertion...")
@@ -100,6 +114,10 @@ def run_procedure_etl():
         # Every native and cross-domain publication below is atomic. Closing
         # the connection after an exception rolls the active transaction back.
         con.execute("BEGIN TRANSACTION")
+        replace_fhir_publication_exclusions(
+            con, "FHIR_R4_Procedure", all_exclusions,
+            run_id=current_run_id(),
+        )
         con.execute("DROP TABLE IF EXISTS procedure_occurrence")
 
         con.execute(create_table_sql("procedure_occurrence"))

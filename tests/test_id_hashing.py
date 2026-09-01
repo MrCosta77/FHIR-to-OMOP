@@ -1,11 +1,10 @@
-import sys
-from pathlib import Path
-
-# Setup paths
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT))
-
-from src.utils.helpers import normalise_fhir_reference, stable_event_id, stable_person_id
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    normalise_fhir_reference,
+    resolve_fhir_reference,
+    stable_event_id,
+    stable_person_id,
+)
 
 
 def test_stable_person_id_handles_all_reference_formats():
@@ -22,3 +21,21 @@ def test_stable_person_id_handles_all_reference_formats():
 def test_versioned_and_absolute_fhir_references_normalise_to_the_same_id():
     assert normalise_fhir_reference("https://hospital/fhir/Encounter/abc/_history/7") == "abc"
     assert stable_event_id("Encounter/abc") == stable_event_id("urn:uuid:abc")
+
+
+def test_absolute_source_namespaces_prevent_cross_hospital_id_collisions():
+    hospital_a = "https://a.example/fhir/Patient/123"
+    hospital_b = "https://b.example/fhir/Patient/123"
+    assert stable_person_id(hospital_a) != stable_person_id(hospital_b)
+
+    bundle = {
+        "entry": [{
+            "fullUrl": hospital_a,
+            "resource": {"resourceType": "Patient", "id": "123"},
+        }]
+    }
+    index = build_fhir_reference_index(bundle)
+    assert resolve_fhir_reference("Patient/123", index) == hospital_a
+    assert stable_person_id(resolve_fhir_reference("Patient/123", index)) == (
+        stable_person_id(hospital_a)
+    )

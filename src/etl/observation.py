@@ -17,11 +17,20 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
-from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
+from src.adapters.fhir_semantics import (
+    extract_fhir_publication_exclusions,
+    fhir_datetime,
+    is_publishable_fhir_resource,
+    replace_fhir_publication_exclusions,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_person_id
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    resolve_fhir_reference,
+    stable_person_id,
+)
 from src.utils.unit_mapping import canonical_ucum_code
 
 
@@ -37,6 +46,7 @@ def extract_observation_candidates(file_path):
 
         if bundle.get('resourceType') != 'Bundle':
             return records
+        reference_index = build_fhir_reference_index(bundle)
 
         for entry in bundle.get('entry', []):
             resource = entry.get('resource', {})
@@ -46,7 +56,9 @@ def extract_observation_candidates(file_path):
                 if not is_publishable_fhir_resource(resource):
                     continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
-                person_id = stable_person_id(patient_ref)
+                person_id = stable_person_id(
+                    resolve_fhir_reference(patient_ref, reference_index)
+                )
                 if not person_id: continue
 
                 codings = resource.get('code', {}).get('coding', [])
@@ -88,7 +100,9 @@ def extract_observation_candidates(file_path):
                 if not is_publishable_fhir_resource(resource):
                     continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
-                person_id = stable_person_id(patient_ref)
+                person_id = stable_person_id(
+                    resolve_fhir_reference(patient_ref, reference_index)
+                )
                 if not person_id: continue
 
                 effective = fhir_datetime(
@@ -172,14 +186,22 @@ def run_observation_etl():
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
 
     all_records = []
+    all_exclusions = []
     for f in fhir_files:
         all_records.extend(extract_observation_candidates(f))
+        all_exclusions.extend(
+            extract_fhir_publication_exclusions(f, {"Condition", "Observation"})
+        )
 
     print(f"📊 Extracted {len(all_records)} raw candidates (mixed domains).")
     print("🔌 Connecting to DuckDB for strict domain-routed insertion...")
 
     with duckdb.connect(DB_PATH) as con:
         con.execute("BEGIN TRANSACTION")
+        replace_fhir_publication_exclusions(
+            con, "FHIR_R4_Observation", all_exclusions,
+            run_id=current_run_id(),
+        )
         con.execute("DROP TABLE IF EXISTS observation")
 
         con.execute(create_table_sql("observation"))

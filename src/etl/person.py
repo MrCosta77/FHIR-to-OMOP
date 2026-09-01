@@ -32,7 +32,8 @@ def extract_persons(file_path):
                 if not patient_id:
                     continue
 
-                person_id = stable_person_id(patient_id)
+                patient_identity = entry.get('fullUrl') or patient_id
+                person_id = stable_person_id(patient_identity)
                 gender = resource.get('gender', 'unknown')
                 gender_concept_id = 8507 if gender == 'male' else 8532 if gender == 'female' else 0
 

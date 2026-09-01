@@ -11,9 +11,11 @@ from src.adapters.fhir_coding import (
     select_source_coding,
 )
 from src.adapters.fhir_semantics import (
+    extract_fhir_publication_exclusions,
     fhir_datetime,
     is_publishable_fhir_resource,
     medication_request_period,
+    replace_fhir_publication_exclusions,
 )
 from src.etl.condition import extract_conditions
 from src.etl.drug import extract_drugs
@@ -343,3 +345,39 @@ def test_medication_request_period_preserves_time_and_validity_interval():
         "2026-01-01", "2026-01-01T10:00:00.000000",
         "2026-01-31", "2026-01-31T18:00:00.000000",
     )
+
+
+def test_nonpublishable_event_is_audited_without_raw_clinical_content(tmp_path):
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [{
+            "fullUrl": "Observation/excluded-1",
+            "resource": {
+                "resourceType": "Observation",
+                "status": "entered-in-error",
+                "id": "excluded-1",
+                "valueString": "must not be persisted",
+            },
+        }],
+    }
+    path = tmp_path / "excluded.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    rows = extract_fhir_publication_exclusions(path, {"Observation"})
+    assert rows == [(
+        "Observation", "Observation/excluded-1", "entered-in-error",
+        "FHIR_OBSERVATION_STATUS_ENTERED_IN_ERROR",
+    )]
+
+    con = duckdb.connect(":memory:")
+    replace_fhir_publication_exclusions(
+        con, "FHIR_R4_Observation", rows, run_id="RUN-1"
+    )
+    persisted = con.execute("""
+        SELECT source_event_key, source_status, reason_code, run_id
+        FROM fhir_publication_exclusion
+    """).fetchone()
+    assert persisted == (
+        "Observation/excluded-1", "entered-in-error",
+        "FHIR_OBSERVATION_STATUS_ENTERED_IN_ERROR", "RUN-1",
+    )
+    assert "must not be persisted" not in str(persisted)

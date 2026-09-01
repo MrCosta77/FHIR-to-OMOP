@@ -40,6 +40,9 @@ def test_drug_etl_rolls_back_rebuild_after_mid_transaction_failure(
     monkeypatch.setattr(drug, "DB_PATH", str(database))
     monkeypatch.setattr(drug.glob, "glob", lambda _: ["bundle.json"])
     monkeypatch.setattr(drug, "extract_drugs", lambda _: [record])
+    monkeypatch.setattr(
+        drug, "extract_fhir_publication_exclusions", lambda *args: []
+    )
 
     def fail_after_rebuild(*args, **kwargs):
         raise RuntimeError("fault injected after target-table rebuild")

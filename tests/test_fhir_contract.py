@@ -91,7 +91,16 @@ def test_numeric_observation_requires_source_unit(tmp_path):
 
 def test_duplicate_resource_identity_is_rejected(tmp_path):
     path = _mutated_bundle(tmp_path, lambda p: p["entry"].append(p["entry"][0]))
-    with pytest.raises(ValueError, match="duplicate resource"):
+    with pytest.raises(ValueError, match="duplicate (resource|fullUrl)"):
+        validate_bundle(path)
+
+
+def test_relative_clinical_full_url_is_rejected(tmp_path):
+    path = _mutated_bundle(
+        tmp_path,
+        lambda p: p["entry"][2].update(fullUrl="Condition/condition-1"),
+    )
+    with pytest.raises(ValueError, match="absolute fullUrl namespace"):
         validate_bundle(path)
 
 

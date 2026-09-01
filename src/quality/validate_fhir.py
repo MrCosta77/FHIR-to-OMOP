@@ -4,24 +4,27 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter
 from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(PROJECT_ROOT))
+from urllib.parse import urlsplit
 
 from src.utils.helpers import normalise_fhir_reference
 
 CLINICAL_TYPES = {
     "Condition", "Encounter", "MedicationRequest", "Observation", "Procedure"
 }
+IDENTITY_SCOPED_TYPES = CLINICAL_TYPES | {"Patient"}
 AUXILIARY_BUNDLE_PREFIXES = ("hospitalInformation", "practitionerInformation")
 
 
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def _is_absolute_fhir_uri(value: object) -> bool:
+    parsed = urlsplit(str(value or "").strip())
+    return bool(parsed.scheme and (parsed.netloc or parsed.scheme.casefold() == "urn"))
 
 
 def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
@@ -31,6 +34,18 @@ def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
     _require(isinstance(entries, list) and entries, f"{path}: Bundle.entry is empty")
 
     resources = [entry.get("resource", {}) for entry in entries]
+    full_urls: set[str] = set()
+    for entry, resource in zip(entries, resources):
+        resource_type = resource.get("resourceType")
+        if resource_type not in IDENTITY_SCOPED_TYPES:
+            continue
+        full_url = str(entry.get("fullUrl", "")).strip()
+        _require(
+            _is_absolute_fhir_uri(full_url),
+            f"{path}: {resource_type} requires an absolute fullUrl namespace",
+        )
+        _require(full_url not in full_urls, f"{path}: duplicate fullUrl {full_url}")
+        full_urls.add(full_url)
     patients = {resource.get("id") for resource in resources if resource.get("resourceType") == "Patient"}
     patients.discard(None)
     if require_patient:

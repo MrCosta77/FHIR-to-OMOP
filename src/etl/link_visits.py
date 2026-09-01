@@ -17,7 +17,11 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.mapping.governance import current_run_id
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_event_id
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    resolve_fhir_reference,
+    stable_event_id,
+)
 from src.utils.quarantine import ensure_quarantine_table
 
 EVENT_TABLES = {
@@ -105,6 +109,7 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
             bundle = json.load(handle)
         if bundle.get("resourceType") != "Bundle":
             continue
+        reference_index = build_fhir_reference_index(bundle)
         for entry in bundle.get("entry", []):
             resource = entry.get("resource", {})
             targets = RESOURCE_TARGETS.get(resource.get("resourceType"), ())
@@ -120,7 +125,12 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
                 source_event_key = f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
             target_id = _etl_event_id(identity)
             encounter_reference = resource.get("encounter", {}).get("reference") or None
-            referenced_visit_id = stable_event_id(encounter_reference) if encounter_reference else None
+            referenced_visit_id = (
+                stable_event_id(
+                    resolve_fhir_reference(encounter_reference, reference_index)
+                )
+                if encounter_reference else None
+            )
             for target_table in targets:
                 key = (target_table, target_id)
                 value = (target_table, target_id, source_event_key, encounter_reference, referenced_visit_id)

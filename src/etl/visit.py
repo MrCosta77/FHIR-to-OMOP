@@ -1,5 +1,4 @@
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -12,7 +11,13 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
-from src.utils.helpers import stable_person_id
+from src.adapters.fhir_semantics import fhir_datetime
+from src.utils.helpers import (
+    build_fhir_reference_index,
+    resolve_fhir_reference,
+    stable_event_id,
+    stable_person_id,
+)
 
 # OMOP Standard Visit Concepts
 # FHIR Encounter class codes mapped to OMOP Concept IDs
@@ -48,6 +53,7 @@ def run_visit_etl():
             # Skip if not a Bundle
             if bundle.get('resourceType') != 'Bundle':
                 continue
+            reference_index = build_fhir_reference_index(bundle)
 
             for entry in bundle.get('entry', []):
                 resource = entry.get('resource', {})
@@ -55,25 +61,27 @@ def run_visit_etl():
                 if resource.get('resourceType') == 'Encounter':
                     # 1. Get Foreign Key (Patient ID)
                     patient_ref = resource.get('subject', {}).get('reference', '')
-                    person_id = stable_person_id(patient_ref)
+                    person_id = stable_person_id(
+                        resolve_fhir_reference(patient_ref, reference_index)
+                    )
 
                     if not person_id:
                         continue
 
                     # 2. Get Primary Key (Visit ID)
-                    encounter_id = resource.get('id', '')
-                    clean_encounter = encounter_id.replace('urn:uuid:', '')
-                    visit_occurrence_id = int(hashlib.sha256(clean_encounter.encode('utf-8')).hexdigest()[:15], 16)
+                    encounter_identity = (
+                        entry.get('fullUrl') or resource.get('id', '')
+                    )
+                    visit_occurrence_id = stable_event_id(encounter_identity)
 
                     # 3. Get Dates
                     period = resource.get('period', {})
-                    start_date = period.get('start', '')[:10]  # YYYY-MM-DD
-                    end_date = period.get('end', '')[:10]
-
-                    if not start_date:
+                    start = fhir_datetime(period.get('start'))
+                    if start is None:
                         continue
-                    if not end_date:
-                        end_date = start_date # Fallback if visit was single day
+                    end = fhir_datetime(period.get('end')) or start
+                    start_date, start_datetime = start
+                    end_date, end_datetime = end
 
                     # 4. Map Visit Type (Encounter Class)
                     fhir_class_code = resource.get('class', {}).get('code', '').upper()
@@ -87,9 +95,9 @@ def run_visit_etl():
                         person_id,
                         visit_concept_id,
                         start_date,
-                        start_date,
+                        start_datetime,
                         end_date,
-                        end_date,
+                        end_datetime,
                         visit_type_concept_id,
                         None,
                         None,
