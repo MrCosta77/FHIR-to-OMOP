@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from src.etl.person import extract_persons
 from src.etl.procedure import extract_procedures
 from src.quality.validate_fhir import validate_bundle, validate_directory
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = Path(__file__).parent / "fixtures" / "golden_fhir_bundle.json"
 
 
@@ -20,6 +23,22 @@ def test_golden_fhir_bundle_has_stable_resource_contract():
         "Patient": 1, "Encounter": 1, "Condition": 1, "Observation": 2,
         "Medication": 1, "MedicationRequest": 1, "Procedure": 1,
     }
+
+
+def test_validator_supports_the_orchestrator_direct_script_entrypoint():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "src/quality/validate_fhir.py"),
+            str(GOLDEN),
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FHIR input acceptance passed" in completed.stdout
 
 
 def test_directory_accepts_named_synthea_auxiliary_bundle(tmp_path):

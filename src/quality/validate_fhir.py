@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from src.utils.helpers import normalise_fhir_reference
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
+from src.utils.helpers import normalise_fhir_reference  # noqa: E402
 
 CLINICAL_TYPES = {
     "Condition", "Encounter", "MedicationRequest", "Observation", "Procedure"
