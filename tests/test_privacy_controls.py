@@ -38,6 +38,19 @@ def test_direct_identifiers_are_redacted_without_destroying_clinical_values():
     }
 
 
+def test_portuguese_and_financial_identifiers_are_redacted():
+    source = (
+        "NIF: 123456789; NISS 12345678901; CC 12345678; "
+        "IBAN PT50000201231234567890154"
+    )
+    redacted, categories = redact_direct_identifiers(source)
+    assert "123456789" not in redacted
+    assert "12345678901" not in redacted
+    assert "12345678" not in redacted
+    assert "PT50000201231234567890154" not in redacted
+    assert set(categories) == {"IBAN", "LOCAL_IDENTIFIER"}
+
+
 def test_uuid_metadata_is_not_misclassified_as_a_phone_number():
     value = "e41dbff8-3134-5258-8461-a893dc5a7716"
     redacted, categories = redact_direct_identifiers(value)

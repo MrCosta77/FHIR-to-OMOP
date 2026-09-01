@@ -21,8 +21,12 @@ DIRECT_IDENTIFIER_PATTERNS = (
     ("EMAIL", re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")),
     ("PHONE", re.compile(r"(?<![\w-])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?|\d{2,4}[\s.-])\d{3,4}[\s.-]\d{3,4}(?![\w-])")),
     ("US_SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+    ("IBAN", re.compile(r"(?i)\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b")),
     ("IP_ADDRESS", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
-    ("LOCAL_IDENTIFIER", re.compile(r"(?i)\b(?:MRN|NHS|NIF|SNS)\s*[:#-]?\s*[A-Z0-9-]{4,}\b")),
+    ("LOCAL_IDENTIFIER", re.compile(
+        r"(?i)\b(?:MRN|NHS|NIF|NISS|SNS|CC|CITIZEN[ _-]?CARD)"
+        r"\s*[:#-]?\s*[A-Z0-9-]{4,}\b"
+    )),
     ("FHIR_PATIENT_REFERENCE", re.compile(r"(?i)\bPatient/[A-Za-z0-9.-]+\b")),
 )
 
