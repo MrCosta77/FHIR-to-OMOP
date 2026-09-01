@@ -15,6 +15,7 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -38,6 +39,8 @@ def extract_conditions(file_path):
             resource = entry.get('resource', {})
 
             if resource.get('resourceType') == 'Condition':
+                if not is_publishable_fhir_resource(resource):
+                    continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
 
@@ -51,13 +54,19 @@ def extract_conditions(file_path):
                 if coding is None:
                     continue
 
-                start_date = resource.get('onsetDateTime', '')[:10]
-                if not start_date:
+                start = fhir_datetime(
+                    resource.get('onsetDateTime')
+                    or resource.get('onsetPeriod', {}).get('start')
+                )
+                if start is None:
                     continue
+                start_date, start_datetime = start
 
-                end_date = resource.get('abatementDateTime', '')[:10]
-                if not end_date:
-                    end_date = start_date
+                end = fhir_datetime(
+                    resource.get('abatementDateTime')
+                    or resource.get('abatementPeriod', {}).get('end')
+                ) or start
+                end_date, end_datetime = end
 
                 # A forma mais segura de identificar um recurso num Bundle FHIR
                 full_url = entry.get('fullUrl', '')
@@ -78,7 +87,9 @@ def extract_conditions(file_path):
                     coding.code,
                     coding.source_value,
                     start_date,
+                    start_datetime,
                     end_date,
+                    end_datetime,
                     coding.system_uri,
                     coding.athena_vocabulary_id,
                     coding.source_vocabulary_id,
@@ -118,7 +129,9 @@ def run_condition_etl():
                     snomed_code VARCHAR,
                     display_text VARCHAR,
                     start_date DATE,
+                    start_datetime TIMESTAMP,
                     end_date DATE,
+                    end_datetime TIMESTAMP,
                     source_system_uri VARCHAR,
                     athena_vocabulary_id VARCHAR,
                     source_vocabulary_id VARCHAR,
@@ -128,7 +141,7 @@ def run_condition_etl():
             """)
 
             con.executemany(
-                "INSERT INTO stg_condition VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO stg_condition VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 all_records,
             )
 
@@ -151,9 +164,9 @@ def run_condition_etl():
                         ELSE 0 
                     END AS condition_concept_id,
                     stg.start_date,
-                    stg.start_date::TIMESTAMP,
+                    stg.start_datetime,
                     stg.end_date,
-                    stg.end_date::TIMESTAMP,
+                    stg.end_datetime,
                     32817 AS condition_type_concept_id, 
                     stg.display_text AS condition_source_value, 
                     COALESCE(c_src.concept_id::INTEGER, 0) AS condition_source_concept_id
@@ -186,8 +199,8 @@ def run_condition_etl():
                 "condition_occurrence",
                 [
                     (
-                        "condition_occurrence", record[0], record[10], None,
-                        record[6], record[8], record[2], record[3], record[9],
+                        "condition_occurrence", record[0], record[12], None,
+                        record[8], record[10], record[2], record[3], record[11],
                         current_run_id(),
                     )
                     for record in all_records

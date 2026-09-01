@@ -10,6 +10,11 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import (
+    fhir_datetime,
+    is_publishable_fhir_resource,
+    medication_request_period,
+)
 from src.etl.condition import extract_conditions
 from src.etl.drug import extract_drugs
 from src.etl.measurement import extract_measurements
@@ -145,9 +150,9 @@ def test_condition_keeps_local_system_without_calling_it_snomed(tmp_path):
     records = extract_conditions(path)
     assert len(records) == 1
     assert records[0][2] == "830020009"
-    assert records[0][6] == "https://hospital.example/codes"
-    assert records[0][7] is None
-    assert records[0][8].startswith("FHIR_")
+    assert records[0][8] == "https://hospital.example/codes"
+    assert records[0][9] is None
+    assert records[0][10].startswith("FHIR_")
 
 
 def test_medication_reference_uses_fhir_reference_identity(tmp_path):
@@ -171,6 +176,7 @@ def test_medication_reference_uses_fhir_reference_identity(tmp_path):
                 "fullUrl": "https://hospital.example/fhir/MedicationRequest/request-1",
                 "resource": {
                     "resourceType": "MedicationRequest",
+                    "status": "active",
                     "id": "request-1",
                     "subject": {"reference": "Patient/patient-1"},
                     "medicationReference": {"reference": "Medication/medication-1"},
@@ -185,8 +191,9 @@ def test_medication_reference_uses_fhir_reference_identity(tmp_path):
     records = extract_drugs(path)
     assert len(records) == 1
     assert records[0][2:4] == ("314076", "Lisinopril 10 MG")
-    assert records[0][5] == RXNORM_URI
-    assert records[0][6:8] == ("RxNorm", "RxNorm")
+    assert records[0][5] == "2026-01-01T10:00:00.000000"
+    assert records[0][8] == RXNORM_URI
+    assert records[0][9:11] == ("RxNorm", "RxNorm")
 
 
 def test_procedure_keeps_local_system_without_snomed_relabelling(tmp_path):
@@ -196,6 +203,7 @@ def test_procedure_keeps_local_system_without_snomed_relabelling(tmp_path):
             "fullUrl": "Procedure/local-1",
             "resource": {
                 "resourceType": "Procedure",
+                "status": "completed",
                 "subject": {"reference": "Patient/patient-1"},
                 "code": {"coding": [{
                     "system": "https://hospital.example/procedures",
@@ -212,9 +220,10 @@ def test_procedure_keeps_local_system_without_snomed_relabelling(tmp_path):
     records = extract_procedures(path)
     assert len(records) == 1
     assert records[0][2] == "73761001"
-    assert records[0][5] == "https://hospital.example/procedures"
-    assert records[0][6] is None
-    assert records[0][7].startswith("FHIR_")
+    assert records[0][5] == "2026-01-01T10:00:00.000000"
+    assert records[0][8] == "https://hospital.example/procedures"
+    assert records[0][9] is None
+    assert records[0][10].startswith("FHIR_")
 
 
 def test_observation_components_expand_with_distinct_stable_identity(tmp_path):
@@ -224,6 +233,7 @@ def test_observation_components_expand_with_distinct_stable_identity(tmp_path):
             "fullUrl": "Observation/panel-1",
             "resource": {
                 "resourceType": "Observation",
+                "status": "final",
                 "subject": {"reference": "Patient/patient-1"},
                 "code": {"coding": [{
                     "system": LOINC_URI, "code": "24323-8", "display": "Panel"
@@ -267,17 +277,69 @@ def test_observation_components_expand_with_distinct_stable_identity(tmp_path):
 
     assert len(measurement_records) == 2
     assert len(observation_records) == 3
-    assert {record[15] for record in measurement_records} == {
+    assert {record[16] for record in measurement_records} == {
         "component[0]", "component[1]"
     }
     assert len({record[0] for record in measurement_records}) == 2
     coded_measurement = next(
-        record for record in measurement_records if record[15] == "component[1]"
+        record for record in measurement_records if record[16] == "component[1]"
     )
-    assert coded_measurement[19:21] == ("266919005", "Never smoked tobacco")
+    assert coded_measurement[20:22] == ("266919005", "Never smoked tobacco")
     coded_observation = next(
-        record for record in observation_records if record[16] == "component[1]"
+        record for record in observation_records if record[17] == "component[1]"
     )
-    assert coded_observation[20:22] == (
+    assert coded_observation[21:23] == (
         "266919005", "Never smoked tobacco"
+    )
+
+
+def test_non_publishable_fhir_states_are_excluded(tmp_path):
+    assert not is_publishable_fhir_resource({
+        "resourceType": "Observation", "status": "entered-in-error"
+    })
+    assert not is_publishable_fhir_resource({
+        "resourceType": "Procedure", "status": "not-done"
+    })
+    assert not is_publishable_fhir_resource({
+        "resourceType": "MedicationRequest", "status": "cancelled"
+    })
+    assert not is_publishable_fhir_resource({
+        "resourceType": "Condition",
+        "verificationStatus": {"coding": [{"code": "refuted"}]},
+    })
+
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [{
+            "resource": {
+                "resourceType": "Observation",
+                "status": "entered-in-error",
+                "subject": {"reference": "Patient/patient-1"},
+                "code": {"coding": [{
+                    "system": LOINC_URI, "code": "8867-4", "display": "Heart rate"
+                }]},
+                "effectiveDateTime": "2026-01-01T10:00:00Z",
+                "valueQuantity": {"value": 72, "code": "/min"},
+            }
+        }],
+    }
+    path = tmp_path / "excluded.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    assert extract_measurements(path) == []
+    assert extract_observation_candidates(path) == []
+
+
+def test_medication_request_period_preserves_time_and_validity_interval():
+    assert fhir_datetime("2026-01-01T12:30:00+02:00") == (
+        "2026-01-01", "2026-01-01T10:30:00.000000"
+    )
+    assert medication_request_period({
+        "authoredOn": "2025-12-31T23:00:00Z",
+        "dispenseRequest": {"validityPeriod": {
+            "start": "2026-01-01T10:00:00Z",
+            "end": "2026-01-31T18:00:00Z",
+        }},
+    }) == (
+        "2026-01-01", "2026-01-01T10:00:00.000000",
+        "2026-01-31", "2026-01-31T18:00:00.000000",
     )

@@ -17,6 +17,7 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -42,15 +43,21 @@ def extract_measurements(file_path):
             resource = entry.get('resource', {})
 
             if resource.get('resourceType') == 'Observation':
+                if not is_publishable_fhir_resource(resource):
+                    continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
 
                 if not person_id:
                     continue
 
-                date = resource.get('effectiveDateTime', '')[:10]
-                if not date:
+                effective = fhir_datetime(
+                    resource.get('effectiveDateTime')
+                    or resource.get('effectivePeriod', {}).get('start')
+                )
+                if effective is None:
                     continue
+                date, event_datetime = effective
                 full_url = entry.get('fullUrl', '')
                 if full_url:
                     source_event_key = full_url
@@ -96,6 +103,7 @@ def extract_measurements(file_path):
                         coding.source_value,
                         float(value) if value is not None else None,
                         unit, unit_system, unit_code, canonical_unit_code, date,
+                        event_datetime,
                         coding.system_uri, coding.athena_vocabulary_id,
                         coding.source_vocabulary_id, coding.version,
                         source_event_key, component_path,
@@ -142,6 +150,7 @@ def run_measurement_etl():
                 unit_code VARCHAR,
                 canonical_unit_code VARCHAR,
                 date DATE,
+                event_datetime TIMESTAMP,
                 source_system_uri VARCHAR,
                 athena_vocabulary_id VARCHAR,
                 source_vocabulary_id VARCHAR,
@@ -158,7 +167,7 @@ def run_measurement_etl():
         """)
 
         con.executemany(
-            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
         )
 
@@ -240,7 +249,7 @@ def run_measurement_etl():
                     ELSE 0 
                 END AS measurement_concept_id,
                 stg.date,
-                stg.date::TIMESTAMP,
+                stg.event_datetime,
                 32817 AS measurement_type_concept_id,
                 stg.value AS value_as_number,
                 CASE
@@ -330,8 +339,8 @@ def run_measurement_etl():
             "measurement",
             [
                 (
-                    "measurement", record[0], record[14], record[15], record[10],
-                    record[12], record[2], record[3], record[13],
+                    "measurement", record[0], record[15], record[16], record[11],
+                    record[13], record[2], record[3], record[14],
                     current_run_id(),
                 )
                 for record in all_records

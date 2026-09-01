@@ -17,6 +17,7 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -42,6 +43,8 @@ def extract_observation_candidates(file_path):
 
             # 1. Caçar as "Condições" que são na verdade Observações Sociais (as nossas 1082 fugitivas)
             if resource.get('resourceType') == 'Condition':
+                if not is_publishable_fhir_resource(resource):
+                    continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
                 if not person_id: continue
@@ -53,9 +56,13 @@ def extract_observation_candidates(file_path):
                 if coding is None:
                     continue
 
-                date = resource.get('onsetDateTime', '')[:10]
-                if not date:
+                effective = fhir_datetime(
+                    resource.get('onsetDateTime')
+                    or resource.get('onsetPeriod', {}).get('start')
+                )
+                if effective is None:
                     continue
+                date, event_datetime = effective
 
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
@@ -66,6 +73,7 @@ def extract_observation_candidates(file_path):
 
                 records.append((
                     obs_id, person_id, coding.code, coding.source_value, date,
+                    event_datetime,
                     None, None, None, None, None, None,
                     coding.system_uri, coding.athena_vocabulary_id,
                     coding.source_vocabulary_id, coding.version,
@@ -77,12 +85,19 @@ def extract_observation_candidates(file_path):
             # domain. Numeric questionnaire scores can legitimately belong to
             # OBSERVATION even though FHIR represents them as valueQuantity.
             elif resource.get('resourceType') == 'Observation':
+                if not is_publishable_fhir_resource(resource):
+                    continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
                 if not person_id: continue
 
-                date = resource.get('effectiveDateTime', '')[:10]
-                if not date: continue
+                effective = fhir_datetime(
+                    resource.get('effectiveDateTime')
+                    or resource.get('effectivePeriod', {}).get('start')
+                )
+                if effective is None:
+                    continue
+                date, event_datetime = effective
 
                 full_url = entry.get('fullUrl', '')
                 resource_json = json.dumps(resource, sort_keys=True)
@@ -134,7 +149,7 @@ def extract_observation_candidates(file_path):
 
                     records.append((
                         obs_id, person_id, coding.code, coding.source_value,
-                        date, value_as_number, value_as_string, unit,
+                        date, event_datetime, value_as_number, value_as_string, unit,
                         unit_system, unit_code, canonical_unit_code,
                         coding.system_uri, coding.athena_vocabulary_id,
                         coding.source_vocabulary_id, coding.version,
@@ -177,6 +192,7 @@ def run_observation_etl():
                 code VARCHAR,
                 display_text VARCHAR,
                 date DATE,
+                event_datetime TIMESTAMP,
                 value_as_number DOUBLE,
                 value_as_string VARCHAR,
                 unit VARCHAR,
@@ -199,7 +215,7 @@ def run_observation_etl():
         """)
 
         con.executemany(
-            "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
         )
 
@@ -245,7 +261,7 @@ def run_observation_etl():
                 stg.person_id,
                 COALESCE(c_std.concept_id::INTEGER, 0) AS observation_concept_id,
                 stg.date,
-                stg.date::TIMESTAMP,
+                stg.event_datetime,
                 32817 AS observation_type_concept_id,
                 stg.value_as_number,
                 stg.value_as_string,
@@ -311,8 +327,8 @@ def run_observation_etl():
             "observation",
             [
                 (
-                    "observation", record[0], record[15], record[16],
-                    record[11], record[13], record[2], record[3], record[14],
+                    "observation", record[0], record[16], record[17],
+                    record[12], record[14], record[2], record[3], record[15],
                     current_run_id(),
                 )
                 for record in all_records

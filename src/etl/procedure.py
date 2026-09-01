@@ -15,6 +15,7 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import fhir_datetime, is_publishable_fhir_resource
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -39,6 +40,8 @@ def extract_procedures(file_path):
 
             # Capturar Procedimentos
             if resource.get('resourceType') == 'Procedure':
+                if not is_publishable_fhir_resource(resource):
+                    continue
                 patient_ref = resource.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
 
@@ -51,11 +54,16 @@ def extract_procedures(file_path):
                 if coding is None:
                     continue
 
-                # FHIR procedures can have performedDateTime or performedPeriod
-                date = resource.get('performedDateTime', '')[:10]
-                if not date:
-                    date = resource.get('performedPeriod', {}).get('start', '')[:10]
-                if not date: continue
+                # FHIR procedures can have performedDateTime or performedPeriod.
+                period = resource.get('performedPeriod', {})
+                start = fhir_datetime(
+                    resource.get('performedDateTime') or period.get('start')
+                )
+                if start is None:
+                    continue
+                end = fhir_datetime(period.get('end')) or start
+                date, event_datetime = start
+                end_date, end_datetime = end
 
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
@@ -66,7 +74,8 @@ def extract_procedures(file_path):
 
                 records.append((
                     procedure_id, person_id, coding.code, coding.source_value,
-                    date, coding.system_uri, coding.athena_vocabulary_id,
+                    date, event_datetime, end_date, end_datetime,
+                    coding.system_uri, coding.athena_vocabulary_id,
                     coding.source_vocabulary_id, coding.version,
                     source_event_key,
                 ))
@@ -103,6 +112,9 @@ def run_procedure_etl():
                 code VARCHAR,
                 display_text VARCHAR,
                 date DATE,
+                event_datetime TIMESTAMP,
+                end_date DATE,
+                end_datetime TIMESTAMP,
                 source_system_uri VARCHAR,
                 athena_vocabulary_id VARCHAR,
                 source_vocabulary_id VARCHAR,
@@ -112,7 +124,7 @@ def run_procedure_etl():
         """)
 
         con.executemany(
-            "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             all_records,
         )
 
@@ -169,6 +181,7 @@ def run_procedure_etl():
             INSERT INTO procedure_occurrence (
                 procedure_occurrence_id, person_id, procedure_concept_id,
                 procedure_date, procedure_datetime,
+                procedure_end_date, procedure_end_datetime,
                 procedure_type_concept_id,
                 procedure_source_value, procedure_source_concept_id
             )
@@ -177,7 +190,9 @@ def run_procedure_etl():
                 stg.person_id,
                 COALESCE(stg.target_concept_id, 0) AS procedure_concept_id,
                 stg.date,
-                stg.date::TIMESTAMP,
+                stg.event_datetime,
+                stg.end_date,
+                stg.end_datetime,
                 32817 AS procedure_type_concept_id,
                 stg.display_text AS procedure_source_value,
                 stg.source_concept_id AS procedure_source_concept_id
@@ -188,7 +203,7 @@ def run_procedure_etl():
 
         source_rows = {
             record[0]: (
-                record[9], record[5], record[7], record[2], record[3], record[8]
+                record[12], record[8], record[10], record[2], record[3], record[11]
             )
             for record in all_records
         }
@@ -259,7 +274,7 @@ def run_procedure_etl():
                 measurement_source_concept_id
             )
             SELECT procedure_occurrence_id, person_id, target_concept_id,
-                   date, date::TIMESTAMP, 32817, display_text,
+                   date, event_datetime, 32817, display_text,
                    source_concept_id
             FROM stg_procedure_routed
             WHERE target_domain = 'Measurement'
@@ -281,7 +296,7 @@ def run_procedure_etl():
                 observation_source_concept_id
             )
             SELECT procedure_occurrence_id, person_id, target_concept_id,
-                   date, date::TIMESTAMP, 32817, display_text,
+                   date, event_datetime, 32817, display_text,
                    source_concept_id
             FROM stg_procedure_routed
             WHERE target_domain = 'Observation'
@@ -304,7 +319,7 @@ def run_procedure_etl():
                 device_source_concept_id
             )
             SELECT procedure_occurrence_id, person_id, target_concept_id,
-                   date, date::TIMESTAMP, date, date::TIMESTAMP,
+                   date, event_datetime, end_date, end_datetime,
                    32817, display_text, source_concept_id
             FROM stg_procedure_routed
             WHERE target_domain = 'Device'

@@ -15,6 +15,10 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_semantics import (
+    is_publishable_fhir_resource,
+    medication_request_period,
+)
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -51,6 +55,8 @@ def extract_drugs(file_path):
         for entry in bundle.get('entry', []):
             res = entry.get('resource', {})
             if res.get('resourceType') == 'MedicationRequest':
+                if not is_publishable_fhir_resource(res):
+                    continue
                 patient_ref = res.get('subject', {}).get('reference', '')
                 person_id = stable_person_id(patient_ref)
                 if not person_id:
@@ -74,9 +80,10 @@ def extract_drugs(file_path):
                 if coding is None:
                     continue
 
-                start_date = res.get('authoredOn', '')[:10]
-                if not start_date:
+                period = medication_request_period(res)
+                if period is None:
                     continue
+                start_date, start_datetime, end_date, end_datetime = period
 
                 # A forma mais segura de identificar um recurso num Bundle FHIR é o seu 'fullUrl'
                 full_url = entry.get('fullUrl', '')
@@ -98,6 +105,9 @@ def extract_drugs(file_path):
                     coding.code,
                     coding.source_value,
                     start_date,
+                    start_datetime,
+                    end_date,
+                    end_datetime,
                     coding.system_uri,
                     coding.athena_vocabulary_id,
                     coding.source_vocabulary_id,
@@ -136,6 +146,9 @@ def run_drug_etl():
                     rxnorm_code VARCHAR,
                     display_text VARCHAR,
                     start_date DATE,
+                    start_datetime TIMESTAMP,
+                    end_date DATE,
+                    end_datetime TIMESTAMP,
                     source_system_uri VARCHAR,
                     athena_vocabulary_id VARCHAR,
                     source_vocabulary_id VARCHAR,
@@ -145,7 +158,7 @@ def run_drug_etl():
             """)
 
             con.executemany(
-                "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 all_records,
             )
 
@@ -164,10 +177,10 @@ def run_drug_etl():
                         ELSE 0 
                     END AS drug_concept_id,
                     stg.start_date,
-                    stg.start_date::TIMESTAMP,
-                    stg.start_date,
-                    stg.start_date::TIMESTAMP,
-                    32817 AS drug_type_concept_id,
+                    stg.start_datetime,
+                    stg.end_date,
+                    stg.end_datetime,
+                    38000177 AS drug_type_concept_id,
                     stg.display_text AS drug_source_value,
                     COALESCE(c_src.concept_id::INTEGER, 0) AS drug_source_concept_id
                 FROM stg_drug stg
@@ -192,8 +205,8 @@ def run_drug_etl():
                 "drug_exposure",
                 [
                     (
-                        "drug_exposure", record[0], record[9], None, record[5],
-                        record[7], record[2], record[3], record[8], current_run_id(),
+                        "drug_exposure", record[0], record[12], None, record[8],
+                        record[10], record[2], record[3], record[11], current_run_id(),
                     )
                     for record in all_records
                 ],
