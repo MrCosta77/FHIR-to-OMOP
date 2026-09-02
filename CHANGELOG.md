@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-02
+
+### Added
+
+- Stable governed reviewer identities, blinded counterproposals and event-level
+  source binding for auditable human mapping decisions.
+- Explicit FHIR coding identity and publishability semantics across the six
+  clinical mapping domains.
+- Typed immutable FHIR staging records at ETL boundaries.
+
+### Changed
+
+- Extended explicit transaction boundaries and rollback regression coverage to
+  all base ETL adapters.
+- Clarified the distinction between synthetic hospital acceptance, the real
+  Phase 5 local-LLM benchmark and the complete environment-dependent pipeline.
+- Added installation guidance, release badges and citation metadata.
+
+### Fixed
+
+- Hardened direct FHIR-validator execution and mapping identity preservation.
+- Expanded privacy redaction for Portuguese and financial identifiers.
+- Removed fragile positional record access from the base ETL adapters.
+
+### Safety
+
+- This remains a technical research release based on synthetic evidence. It
+  does not constitute clinical validation or authorize production deployment.
+
 ## [0.2.1] - 2026-08-30
 
 ### Fixed
@@ -70,7 +99,8 @@ All notable changes to this project are documented here. The format follows
 - Documented clinical review and institutional governance remain mandatory
   before any hospital pilot.
 
-[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MrCosta77/FHIR-to-OMOP/releases/tag/v0.1.0

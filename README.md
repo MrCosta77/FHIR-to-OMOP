@@ -1,5 +1,11 @@
 # 🏥 Clinical Mapping Framework (FHIR to OMOP CDM v5.4)
 
+[![Quality gates](https://github.com/MrCosta77/FHIR-to-OMOP/actions/workflows/quality.yml/badge.svg)](https://github.com/MrCosta77/FHIR-to-OMOP/actions/workflows/quality.yml)
+[![Release](https://github.com/MrCosta77/FHIR-to-OMOP/actions/workflows/release.yml/badge.svg)](https://github.com/MrCosta77/FHIR-to-OMOP/actions/workflows/release.yml)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![OMOP CDM 5.4](https://img.shields.io/badge/OMOP%20CDM-5.4-5A45FF)](https://ohdsi.github.io/CommonDataModel/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-D22128.svg)](LICENSE)
+
 An end-to-end Health Data Engineering and Real-World Evidence (RWE) pipeline. This framework extracts raw clinical data from FHIR JSON bundles, standardizes it into the **OMOP Common Data Model (v5.4)**, and maps messy/legacy clinical text using a **Retrieval-Augmented Generation (RAG) + Human-in-the-Loop Architecture**.
 
 Licensed under the [Apache License 2.0](LICENSE). Copyright and attribution are
@@ -235,6 +241,23 @@ benchmark, while `python main.py` is the complete environment-dependent FHIR →
 OMOP orchestrator. Neither result alone is proof of production readiness.
 
 ## 🛠️ Advanced Execution & Evaluation
+
+**1. Installation**
+
+Clone the repository and create a Python 3.12 virtual environment:
+
+```bash
+git clone https://github.com/MrCosta77/FHIR-to-OMOP.git
+cd FHIR-to-OMOP
+python -m venv .venv
+```
+
+Activate it with `.venv\Scripts\Activate.ps1` in PowerShell or
+`source .venv/bin/activate` on Linux/macOS, then install the hash-verified lock:
+
+```bash
+python -m pip install --require-hashes -r requirements.lock
+```
 
 The repository includes a small versioned FHIR golden bundle. Contract and
 unit tests run in GitHub Actions without Athena, Ollama, or a local database:

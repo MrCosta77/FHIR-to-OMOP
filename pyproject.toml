@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fhir-to-omop"
-version = "0.2.1"
+version = "0.2.2"
 description = "Clinical AI mapping framework from FHIR to OMOP"
 authors = [
-    {name = "Mario Costa", email = "mariocosta9@gmail.com"}
+    {name = "Mário Luís Gonçalves da Costa", email = "mariocosta9@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11"

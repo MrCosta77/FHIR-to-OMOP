@@ -1,7 +1,7 @@
 # Reproducibility and release process
 
 FHIR-to-OMOP uses `VERSION` as its single product version. Python 3.12 and R
-4.6.1 are the reproducible environments for version 0.2.1. A technical release
+4.6.1 are the reproducible environments for version 0.2.2. A technical release
 does not authorize clinical deployment and must retain
 `deployment_authorized=false` in run evidence.
 

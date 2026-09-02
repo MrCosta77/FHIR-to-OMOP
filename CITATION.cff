@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "FHIR-to-OMOP: Clinical Mapping Framework"
+type: software
+authors:
+  - family-names: "Costa"
+    given-names: "Mário Luís Gonçalves da"
+repository-code: "https://github.com/MrCosta77/FHIR-to-OMOP"
+url: "https://github.com/MrCosta77/FHIR-to-OMOP"
+license: Apache-2.0
+version: 0.2.2
+date-released: "2026-09-02"
+abstract: >-
+  A technical research framework for transforming FHIR clinical data into
+  OMOP CDM 5.4, with deterministic mapping, local retrieval-augmented language
+  models, human review, provenance and fail-closed publication controls.
+keywords:
+  - FHIR
+  - OMOP CDM
+  - OHDSI
+  - clinical data harmonization
+  - real-world evidence
+  - local language models
+  - human-in-the-loop

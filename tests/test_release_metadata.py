@@ -30,7 +30,7 @@ def test_versioned_dependency_locks_and_changelog_are_consistent():
     result = validate_release_metadata(ROOT)
 
     assert result == {
-        "version": "0.2.1",
+        "version": "0.2.2",
         "python_direct_dependencies": 7,
         "r_version": "4.6.1",
         "r_packages": 71,
@@ -58,7 +58,7 @@ def test_release_validator_rejects_package_version_mismatch(tmp_path):
     _copy_release_files(tmp_path)
     pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
-        pyproject.replace('version = "0.2.1"', 'version = "9.9.9"'),
+        pyproject.replace('version = "0.2.2"', 'version = "9.9.9"'),
         encoding="utf-8",
     )
 
