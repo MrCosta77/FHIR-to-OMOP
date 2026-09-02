@@ -151,10 +151,10 @@ def test_condition_keeps_local_system_without_calling_it_snomed(tmp_path):
 
     records = extract_conditions(path)
     assert len(records) == 1
-    assert records[0][2] == "830020009"
-    assert records[0][8] == "https://hospital.example/codes"
-    assert records[0][9] is None
-    assert records[0][10].startswith("FHIR_")
+    assert records[0].coding.code == "830020009"
+    assert records[0].coding.system_uri == "https://hospital.example/codes"
+    assert records[0].coding.athena_vocabulary_id is None
+    assert records[0].coding.source_vocabulary_id.startswith("FHIR_")
 
 
 def test_medication_reference_uses_fhir_reference_identity(tmp_path):
@@ -192,10 +192,12 @@ def test_medication_reference_uses_fhir_reference_identity(tmp_path):
 
     records = extract_drugs(path)
     assert len(records) == 1
-    assert records[0][2:4] == ("314076", "Lisinopril 10 MG")
-    assert records[0][5] == "2026-01-01T10:00:00.000000"
-    assert records[0][8] == RXNORM_URI
-    assert records[0][9:11] == ("RxNorm", "RxNorm")
+    assert records[0].coding.code == "314076"
+    assert records[0].coding.source_value == "Lisinopril 10 MG"
+    assert records[0].start_datetime == "2026-01-01T10:00:00.000000"
+    assert records[0].coding.system_uri == RXNORM_URI
+    assert records[0].coding.athena_vocabulary_id == "RxNorm"
+    assert records[0].coding.source_vocabulary_id == "RxNorm"
 
 
 def test_procedure_keeps_local_system_without_snomed_relabelling(tmp_path):

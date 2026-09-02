@@ -21,6 +21,7 @@ from src.adapters.fhir_semantics import (
     medication_request_period,
     replace_fhir_publication_exclusions,
 )
+from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -109,20 +110,15 @@ def extract_drugs(file_path):
 
                 drug_id = generate_drug_id(base_string)
 
-                records.append((
-                    drug_id,
-                    person_id,
-                    coding.code,
-                    coding.source_value,
-                    start_date,
-                    start_datetime,
-                    end_date,
-                    end_datetime,
-                    coding.system_uri,
-                    coding.athena_vocabulary_id,
-                    coding.source_vocabulary_id,
-                    coding.version,
-                    source_event_key,
+                records.append(CodedFHIRPeriodRecord(
+                    event_id=drug_id,
+                    person_id=person_id,
+                    coding=coding,
+                    start_date=start_date,
+                    start_datetime=start_datetime,
+                    end_date=end_date,
+                    end_datetime=end_datetime,
+                    source_event_key=source_event_key,
                 ))
 
     return records
@@ -177,7 +173,7 @@ def run_drug_etl():
 
             con.executemany(
                 "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                all_records,
+                [record.as_staging_row() for record in all_records],
             )
 
             con.execute("""
@@ -223,8 +219,11 @@ def run_drug_etl():
                 "drug_exposure",
                 [
                     (
-                        "drug_exposure", record[0], record[12], None, record[8],
-                        record[10], record[2], record[3], record[11], current_run_id(),
+                        "drug_exposure", record.event_id, record.source_event_key,
+                        None, record.coding.system_uri,
+                        record.coding.source_vocabulary_id, record.coding.code,
+                        record.coding.source_value, record.coding.version,
+                        current_run_id(),
                     )
                     for record in all_records
                 ],
