@@ -23,6 +23,7 @@ from src.adapters.fhir_semantics import (
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
+from src.adapters.fhir_records import FHIRMeasurementRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -110,21 +111,22 @@ def extract_measurements(file_path):
                     if component_path:
                         base_string = f"{base_string}::{component_path}"
                     measurement_id = generate_measurement_id(base_string)
-                    records.append((
-                        measurement_id, person_id, coding.code,
-                        coding.source_value,
-                        float(value) if value is not None else None,
-                        unit, unit_system, unit_code, canonical_unit_code, date,
-                        event_datetime,
-                        coding.system_uri, coding.athena_vocabulary_id,
-                        coding.source_vocabulary_id, coding.version,
-                        source_event_key, component_path,
-                        value_coding.system_uri if value_coding else None,
-                        value_coding.athena_vocabulary_id if value_coding else None,
-                        value_coding.source_vocabulary_id if value_coding else None,
-                        value_coding.code if value_coding else None,
-                        value_coding.source_value if value_coding else None,
-                        value_coding.version if value_coding else None,
+                    records.append(FHIRMeasurementRecord(
+                        event_id=measurement_id,
+                        person_id=person_id,
+                        coding=coding,
+                        value_as_number=(
+                            float(value) if value is not None else None
+                        ),
+                        unit=unit,
+                        unit_system=unit_system,
+                        unit_code=unit_code,
+                        canonical_unit_code=canonical_unit_code,
+                        event_date=date,
+                        event_datetime=event_datetime,
+                        source_event_key=source_event_key,
+                        component_path=component_path,
+                        value_coding=value_coding,
                     ))
     return records
 
@@ -188,7 +190,7 @@ def run_measurement_etl():
 
         con.executemany(
             "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            all_records,
+            [record.as_staging_row() for record in all_records],
         )
 
         # LOINC 788-0 is RDW expressed as a ratio/percent. Synthea also emits
@@ -359,12 +361,14 @@ def run_measurement_etl():
             "measurement",
             [
                 (
-                    "measurement", record[0], record[15], record[16], record[11],
-                    record[13], record[2], record[3], record[14],
+                    "measurement", record.event_id, record.source_event_key,
+                    record.component_path, record.coding.system_uri,
+                    record.coding.source_vocabulary_id, record.coding.code,
+                    record.coding.source_value, record.coding.version,
                     current_run_id(),
                 )
                 for record in all_records
-                if record[0] in existing_measurement_ids
+                if record.event_id in existing_measurement_ids
             ],
             source_adapter="FHIR_R4_Observation",
         )

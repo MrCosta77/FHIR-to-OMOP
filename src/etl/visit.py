@@ -11,6 +11,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
+from src.adapters.fhir_records import FHIRVisitRecord
 from src.adapters.fhir_semantics import fhir_datetime
 from src.utils.helpers import (
     build_fhir_reference_index,
@@ -90,19 +91,19 @@ def run_visit_etl():
                     # 32817 means "EHR" (Electronic Health Record) - standard for origin tracking
                     visit_type_concept_id = 32817
 
-                    visit_records.append((
-                        visit_occurrence_id,
-                        person_id,
-                        visit_concept_id,
-                        start_date,
-                        start_datetime,
-                        end_date,
-                        end_datetime,
-                        visit_type_concept_id,
-                        None,
-                        None,
-                        fhir_class_code,
-                        0
+                    visit_records.append(FHIRVisitRecord(
+                        visit_occurrence_id=visit_occurrence_id,
+                        person_id=person_id,
+                        visit_concept_id=visit_concept_id,
+                        start_date=start_date,
+                        start_datetime=start_datetime,
+                        end_date=end_date,
+                        end_datetime=end_datetime,
+                        visit_type_concept_id=visit_type_concept_id,
+                        provider_id=None,
+                        care_site_id=None,
+                        visit_source_value=fhir_class_code,
+                        visit_source_concept_id=0,
                     ))
 
     print(f"📊 Extracted {len(visit_records)} raw visit records.")
@@ -123,7 +124,7 @@ def run_visit_etl():
                         visit_end_datetime, visit_type_concept_id, provider_id,
                         care_site_id, visit_source_value, visit_source_concept_id
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, visit_records)
+                """, [record.as_staging_row() for record in visit_records])
 
             # Diagnostics
             mapped_count = con.execute("SELECT COUNT(*) FROM visit_occurrence WHERE visit_concept_id != 0").fetchone()[0]

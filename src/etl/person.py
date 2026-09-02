@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 # Importa a config global, como sugerido pela revisão
+from src.adapters.fhir_records import FHIRPersonRecord
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
@@ -69,9 +70,17 @@ def extract_persons(file_path):
                         if 'hispanic' in text: ethnicity_concept_id = 38003563
                         else: ethnicity_concept_id = 38003564
 
-                records.append((
-                    person_id, gender_concept_id, year_of_birth, month_of_birth, day_of_birth, birth_datetime,
-                    race_concept_id, ethnicity_concept_id, patient_id, gender
+                records.append(FHIRPersonRecord(
+                    person_id=person_id,
+                    gender_concept_id=gender_concept_id,
+                    year_of_birth=year_of_birth,
+                    month_of_birth=month_of_birth,
+                    day_of_birth=day_of_birth,
+                    birth_datetime=birth_datetime,
+                    race_concept_id=race_concept_id,
+                    ethnicity_concept_id=ethnicity_concept_id,
+                    person_source_value=patient_id,
+                    gender_source_value=gender,
                 ))
     return records
 
@@ -112,7 +121,10 @@ def run_person_etl():
                 )
             """)
 
-            con.executemany("INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", all_records)
+            con.executemany(
+                "INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [record.as_staging_row() for record in all_records],
+            )
 
             # Inserção com DISTINCT para garantir unicidade absoluta
             con.execute("""

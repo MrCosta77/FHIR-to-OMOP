@@ -223,11 +223,11 @@ def test_procedure_keeps_local_system_without_snomed_relabelling(tmp_path):
 
     records = extract_procedures(path)
     assert len(records) == 1
-    assert records[0][2] == "73761001"
-    assert records[0][5] == "2026-01-01T10:00:00.000000"
-    assert records[0][8] == "https://hospital.example/procedures"
-    assert records[0][9] is None
-    assert records[0][10].startswith("FHIR_")
+    assert records[0].coding.code == "73761001"
+    assert records[0].start_datetime == "2026-01-01T10:00:00.000000"
+    assert records[0].coding.system_uri == "https://hospital.example/procedures"
+    assert records[0].coding.athena_vocabulary_id is None
+    assert records[0].coding.source_vocabulary_id.startswith("FHIR_")
 
 
 def test_observation_components_expand_with_distinct_stable_identity(tmp_path):
@@ -281,20 +281,24 @@ def test_observation_components_expand_with_distinct_stable_identity(tmp_path):
 
     assert len(measurement_records) == 2
     assert len(observation_records) == 3
-    assert {record[16] for record in measurement_records} == {
+    assert {record.component_path for record in measurement_records} == {
         "component[0]", "component[1]"
     }
-    assert len({record[0] for record in measurement_records}) == 2
+    assert len({record.event_id for record in measurement_records}) == 2
     coded_measurement = next(
-        record for record in measurement_records if record[16] == "component[1]"
+        record
+        for record in measurement_records
+        if record.component_path == "component[1]"
     )
-    assert coded_measurement[20:22] == ("266919005", "Never smoked tobacco")
+    assert coded_measurement.value_coding.code == "266919005"
+    assert coded_measurement.value_coding.source_value == "Never smoked tobacco"
     coded_observation = next(
-        record for record in observation_records if record[17] == "component[1]"
+        record
+        for record in observation_records
+        if record.component_path == "component[1]"
     )
-    assert coded_observation[21:23] == (
-        "266919005", "Never smoked tobacco"
-    )
+    assert coded_observation.value_coding.code == "266919005"
+    assert coded_observation.value_coding.source_value == "Never smoked tobacco"
 
 
 def test_non_publishable_fhir_states_are_excluded(tmp_path):

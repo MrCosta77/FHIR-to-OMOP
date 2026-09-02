@@ -23,6 +23,7 @@ from src.adapters.fhir_semantics import (
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
+from src.adapters.fhir_records import FHIRObservationRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -83,14 +84,13 @@ def extract_observation_candidates(file_path):
                 )
                 obs_id = generate_observation_id(base_string)
 
-                records.append((
-                    obs_id, person_id, coding.code, coding.source_value, date,
-                    event_datetime,
-                    None, None, None, None, None, None,
-                    coding.system_uri, coding.athena_vocabulary_id,
-                    coding.source_vocabulary_id, coding.version,
-                    source_event_key, None,
-                    None, None, None, None, None, None,
+                records.append(FHIRObservationRecord(
+                    event_id=obs_id,
+                    person_id=person_id,
+                    coding=coding,
+                    event_date=date,
+                    event_datetime=event_datetime,
+                    source_event_key=source_event_key,
                 ))
 
             # 2. Route every coded FHIR Observation by its Standard OMOP
@@ -161,19 +161,21 @@ def extract_observation_candidates(file_path):
                             preferred_systems=(SNOMED_URI, LOINC_URI),
                         )
 
-                    records.append((
-                        obs_id, person_id, coding.code, coding.source_value,
-                        date, event_datetime, value_as_number, value_as_string, unit,
-                        unit_system, unit_code, canonical_unit_code,
-                        coding.system_uri, coding.athena_vocabulary_id,
-                        coding.source_vocabulary_id, coding.version,
-                        source_event_key, component_path,
-                        value_coding.system_uri if value_coding else None,
-                        value_coding.athena_vocabulary_id if value_coding else None,
-                        value_coding.source_vocabulary_id if value_coding else None,
-                        value_coding.code if value_coding else None,
-                        value_coding.source_value if value_coding else None,
-                        value_coding.version if value_coding else None,
+                    records.append(FHIRObservationRecord(
+                        event_id=obs_id,
+                        person_id=person_id,
+                        coding=coding,
+                        event_date=date,
+                        event_datetime=event_datetime,
+                        source_event_key=source_event_key,
+                        component_path=component_path,
+                        value_as_number=value_as_number,
+                        value_as_string=value_as_string,
+                        unit=unit,
+                        unit_system=unit_system,
+                        unit_code=unit_code,
+                        canonical_unit_code=canonical_unit_code,
+                        value_coding=value_coding,
                     ))
 
     return records
@@ -238,7 +240,7 @@ def run_observation_etl():
 
         con.executemany(
             "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            all_records,
+            [record.as_staging_row() for record in all_records],
         )
 
         ambiguous = con.execute("""
@@ -349,12 +351,14 @@ def run_observation_etl():
             "observation",
             [
                 (
-                    "observation", record[0], record[16], record[17],
-                    record[12], record[14], record[2], record[3], record[15],
+                    "observation", record.event_id, record.source_event_key,
+                    record.component_path, record.coding.system_uri,
+                    record.coding.source_vocabulary_id, record.coding.code,
+                    record.coding.source_value, record.coding.version,
                     current_run_id(),
                 )
                 for record in all_records
-                if record[0] in existing_observation_ids
+                if record.event_id in existing_observation_ids
             ],
             source_adapter="FHIR_R4_Observation",
         )

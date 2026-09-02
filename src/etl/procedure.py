@@ -21,6 +21,7 @@ from src.adapters.fhir_semantics import (
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
+from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -84,12 +85,15 @@ def extract_procedures(file_path):
                 )
                 procedure_id = generate_procedure_id(base_string)
 
-                records.append((
-                    procedure_id, person_id, coding.code, coding.source_value,
-                    date, event_datetime, end_date, end_datetime,
-                    coding.system_uri, coding.athena_vocabulary_id,
-                    coding.source_vocabulary_id, coding.version,
-                    source_event_key,
+                records.append(CodedFHIRPeriodRecord(
+                    event_id=procedure_id,
+                    person_id=person_id,
+                    coding=coding,
+                    start_date=date,
+                    start_datetime=event_datetime,
+                    end_date=end_date,
+                    end_datetime=end_datetime,
+                    source_event_key=source_event_key,
                 ))
 
     return records
@@ -143,7 +147,7 @@ def run_procedure_etl():
 
         con.executemany(
             "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            all_records,
+            [record.as_staging_row() for record in all_records],
         )
 
         ambiguous = con.execute("""
@@ -219,12 +223,7 @@ def run_procedure_etl():
                OR stg.target_concept_id IS NULL
         """)
 
-        source_rows = {
-            record[0]: (
-                record[12], record[8], record[10], record[2], record[3], record[11]
-            )
-            for record in all_records
-        }
+        source_rows = {record.event_id: record for record in all_records}
         for target_table, _id_column, domain in (
             ('procedure_occurrence', 'procedure_occurrence_id', 'Procedure'),
             ('measurement', 'measurement_id', 'Measurement'),
@@ -244,10 +243,14 @@ def run_procedure_etl():
                 target_table,
                 [
                     (
-                        target_table, target_id, source_rows[target_id][0], None,
-                        source_rows[target_id][1], source_rows[target_id][2],
-                        source_rows[target_id][3], source_rows[target_id][4],
-                        source_rows[target_id][5], current_run_id(),
+                        target_table, target_id,
+                        source_rows[target_id].source_event_key, None,
+                        source_rows[target_id].coding.system_uri,
+                        source_rows[target_id].coding.source_vocabulary_id,
+                        source_rows[target_id].coding.code,
+                        source_rows[target_id].coding.source_value,
+                        source_rows[target_id].coding.version,
+                        current_run_id(),
                     )
                     for target_id in target_ids
                 ],
