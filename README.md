@@ -223,7 +223,16 @@ records the evidence bounds and derivation method for every run.
 
 ### 6. Real-World Hospital Acceptance Testing
 
-The repository provides a complete acceptance gate spanning all six domains (Condition, Drug, Measurement, Observation, Procedure, Device). The deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces the isolated mapping, fail-closed ingestion handoff, blinded human review, adjudication, and final STCM application logic. In addition, an executable real-environment script (`scripts/run_e2e_evaluation.py`) measures the active local RAG retrieval (Chroma) and unmocked LLM against the same target concepts without generating PHI. This is an environment-specific evaluation, not proof of production readiness.
+The repository provides a complete acceptance gate spanning all six domains
+(Condition, Drug, Measurement, Observation, Procedure, Device). The
+deterministic CI suite (`test_e2e_hospital_acceptance.py`) enforces isolated
+mapping persistence, fail-closed ingestion handoff, blinded human review,
+adjudication, STCM publication and final application. The convenience launcher
+`scripts/run_e2e_evaluation.py` runs that same synthetic acceptance test with
+controlled Chroma and Ollama doubles; it does not evaluate the installed local
+model. The real local RAG/LLM comparison is the separately versioned Phase 5
+benchmark, while `python main.py` is the complete environment-dependent FHIR →
+OMOP orchestrator. Neither result alone is proof of production readiness.
 
 ## 🛠️ Advanced Execution & Evaluation
 
