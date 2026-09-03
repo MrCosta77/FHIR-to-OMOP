@@ -204,14 +204,17 @@ def test_e2e_hospital_acceptance(tmp_path, monkeypatch):
         report = ingestion_handoff.process_ingestion_handoff(con, receipts, actor="ingestor", reason="E2E handoff")
         assert len(report.outcomes) == 6
 
-        from src.mapping.governance.identity import bootstrap_identity_administrator, register_governed_actor
+        from src.mapping.governance.identity import (
+            bootstrap_identity_administrator,
+            register_governed_actor,
+        )
         bootstrap_identity_administrator(con, "Admin", "E2E Test")
         for actor, roles in [("Reviewer One", ["reviewer"]), ("Reviewer Two", ["reviewer"]), ("Clinical Adjudicator", ["adjudicator"]), ("binder", ["integration_engineer"])]:
             try:
                 register_governed_actor(con, actor, roles, "Admin", "E2E Test", confirm_distinct=True)
             except Exception:
                 pass
-                
+
         # 6. Adjudicate
         decisions_in_review = con.execute("SELECT mapping_decision_id FROM mapping_decision WHERE status = 'PENDING'").fetchall()
         for (decision_id,) in decisions_in_review:

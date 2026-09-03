@@ -15,13 +15,13 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.adapters.fhir_semantics import (
     extract_fhir_publication_exclusions,
     fhir_datetime,
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
-from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -170,39 +170,39 @@ def run_condition_etl():
                     condition_type_concept_id, condition_source_value,
                     condition_source_concept_id
                 )
-                SELECT 
+                SELECT
                     stg.condition_occurrence_id,
                     stg.person_id,
-                    CASE 
+                    CASE
                         WHEN c_std.domain_id = 'Condition' THEN COALESCE(c_std.concept_id::INTEGER, 0)
-                        ELSE 0 
+                        ELSE 0
                     END AS condition_concept_id,
                     stg.start_date,
                     stg.start_datetime,
                     stg.end_date,
                     stg.end_datetime,
-                    32817 AS condition_type_concept_id, 
-                    stg.display_text AS condition_source_value, 
+                    32817 AS condition_type_concept_id,
+                    stg.display_text AS condition_source_value,
                     COALESCE(c_src.concept_id::INTEGER, 0) AS condition_source_concept_id
                 FROM stg_condition stg
-                LEFT JOIN concept c_src 
-                    ON stg.snomed_code = c_src.concept_code 
+                LEFT JOIN concept c_src
+                    ON stg.snomed_code = c_src.concept_code
                     AND stg.athena_vocabulary_id = c_src.vocabulary_id
                     AND c_src.invalid_reason IS NULL
-                LEFT JOIN concept_relationship cr 
-                    ON c_src.concept_id = cr.concept_id_1 
+                LEFT JOIN concept_relationship cr
+                    ON c_src.concept_id = cr.concept_id_1
                     AND cr.relationship_id = 'Maps to'
                     AND cr.invalid_reason IS NULL
-                LEFT JOIN concept c_std 
-                    ON cr.concept_id_2 = c_std.concept_id 
+                LEFT JOIN concept c_std
+                    ON cr.concept_id_2 = c_std.concept_id
                     AND c_std.standard_concept = 'S'
                     AND c_std.invalid_reason IS NULL
                 -- Só insere se for estritamente uma condição, ou se não teve mapeamento nenhum (IS NULL)
                 WHERE (c_std.domain_id = 'Condition' OR c_std.domain_id IS NULL)
                 -- Em caso de empate, dá prioridade ao conceito cujo domínio é 'Condition'
                 QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY stg.condition_occurrence_id 
-                    ORDER BY 
+                    PARTITION BY stg.condition_occurrence_id
+                    ORDER BY
                         CASE WHEN c_std.domain_id = 'Condition' THEN 0 ELSE 1 END ASC,
                         c_std.concept_id ASC
                 ) = 1
@@ -231,7 +231,7 @@ def run_condition_etl():
                     vocabulary_version, reviewed_by, run_id, source_system,
                     source_code, source_vocabulary_id, source_record_key
                 )
-                SELECT 
+                SELECT
                     'condition_occurrence',
                     condition_occurrence_id,
                     condition_source_value,

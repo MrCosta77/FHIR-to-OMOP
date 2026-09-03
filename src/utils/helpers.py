@@ -50,13 +50,28 @@ def resolve_fhir_reference(reference: str, index: dict[str, str]) -> str:
     value = str(reference or "").strip()
     return index.get(value, value)
 
+import hmac
+
+from src.utils.config import PHI_SALT
+
+
 def stable_person_id(source_id: str) -> int:
-    """Generates a highly stable, collision-resistant BIGINT from any FHIR ID format."""
+    """Generates a highly stable, collision-resistant BIGINT from any FHIR ID format using HMAC-SHA256."""
     clean_id = canonical_fhir_identity(source_id)
-    return int(hashlib.sha256(clean_id.encode('utf-8')).hexdigest(), 16) % (2**62)
+    secure_hash = hmac.new(
+        PHI_SALT.encode("utf-8"),
+        clean_id.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return int(secure_hash, 16) % (2**62)
 
 
 def stable_event_id(source_id: str) -> int:
-    """Match the deterministic BIGINT used by the clinical event ETLs."""
+    """Match the deterministic BIGINT used by the clinical event ETLs using HMAC-SHA256."""
     clean_id = canonical_fhir_identity(source_id)
-    return int(hashlib.sha256(clean_id.encode("utf-8")).hexdigest()[:15], 16)
+    secure_hash = hmac.new(
+        PHI_SALT.encode("utf-8"),
+        clean_id.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return int(secure_hash[:15], 16)

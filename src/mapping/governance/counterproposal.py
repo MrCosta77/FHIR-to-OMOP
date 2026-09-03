@@ -12,7 +12,7 @@ from .identity import resolve_governed_actor
 from .schema import ensure_governance_tables
 
 
-def _semantic_duplicate_ids(con, row):
+def _semantic_duplicate_ids(con, row: dict):
     return [
         value[0]
         for value in con.execute(
@@ -26,7 +26,14 @@ def _semantic_duplicate_ids(con, row):
               AND LOWER(TRIM(source_value)) = LOWER(TRIM(?))
               AND assigned_concept_id = ?
             """,
-            [row[1], row[8], row[12], row[11], row[2], int(row[4])],
+            [
+                row["target_table"],
+                row["source_adapter"],
+                row["source_vocabulary_id"],
+                row["source_code"],
+                row["source_value"],
+                int(row["assigned_concept_id"]),
+            ],
         ).fetchall()
     ]
 
@@ -87,32 +94,36 @@ def submit_counterproposal(
     actor = resolve_governed_actor(con, proposer, "reviewer")
     proposer_actor_id = actor["actor_id"]
     proposer = actor["display_name"]
-    original = con.execute(
+    cursor = con.execute(
         """
         SELECT mapping_decision_id, target_table, source_value,
                normalized_value, assigned_concept_id, run_id,
-               vocabulary_version, COALESCE(publication_eligible, TRUE),
+               vocabulary_version, COALESCE(publication_eligible, TRUE) as publication_eligible,
                source_adapter, source_record_key, source_system, source_code,
                source_vocabulary_id, status
         FROM mapping_decision WHERE mapping_decision_id = ?
         """,
         [original_decision_id],
-    ).fetchone()
-    if not original:
+    )
+    row = cursor.fetchone()
+    if not row:
         raise ValueError(f"Unknown mapping decision: {original_decision_id}")
-    if original[13] != "REJECTED":
+    columns = [desc[0] for desc in cursor.description]
+    original = dict(zip(columns, row))
+
+    if original["status"] != "REJECTED":
         raise ValueError(
             "The original candidate must be finally REJECTED before a "
             "counterproposal can be created."
         )
-    if not original[7]:
+    if not original["publication_eligible"]:
         raise ValueError("Only publication-eligible decisions can be corrected.")
-    if original[8]:
+    if original["source_adapter"]:
         raise ValueError(
             "Counterproposals for externally bound events require a new verified "
             "source-event binding and are not yet supported by this workflow."
         )
-    if candidate_concept_id == int(original[4]):
+    if candidate_concept_id == int(original["assigned_concept_id"]):
         raise ValueError("The counterproposal must select a different concept.")
 
     duplicate_ids = _semantic_duplicate_ids(con, original)
@@ -131,18 +142,14 @@ def submit_counterproposal(
             "The proposer must have independently rejected the original candidate."
         )
 
-    expected_domain = TARGET_GOVERNANCE[original[1]][2]
+    expected_domain = TARGET_GOVERNANCE[original["target_table"]][2]
     candidate = con.execute(
         """
         SELECT concept_name, vocabulary_id
         FROM concept
         WHERE concept_id = ? AND domain_id = ? AND standard_concept = 'S'
           AND (invalid_reason IS NULL OR invalid_reason = '')
-          AND CURRENT_DATE BETWEEN
-              COALESCE(TRY_CAST(valid_start_date AS DATE),
-                       TRY_STRPTIME(CAST(valid_start_date AS VARCHAR), '%Y%m%d')::DATE)
-              AND COALESCE(TRY_CAST(valid_end_date AS DATE),
-                           TRY_STRPTIME(CAST(valid_end_date AS VARCHAR), '%Y%m%d')::DATE)
+          AND CURRENT_DATE BETWEEN COALESCE(TRY_CAST(valid_start_date AS DATE), TRY_STRPTIME(CAST(valid_start_date AS VARCHAR), '%Y%m%d')::DATE) AND COALESCE(TRY_CAST(valid_end_date AS DATE), TRY_STRPTIME(CAST(valid_end_date AS VARCHAR), '%Y%m%d')::DATE)
         LIMIT 1
         """,
         [candidate_concept_id, expected_domain],
@@ -155,13 +162,13 @@ def submit_counterproposal(
 
     semantic_key = "|".join(
         [
-            original[1], original[12] or "", original[11] or "",
-            original[2].strip().casefold(), str(candidate_concept_id),
+            original["target_table"], original["source_vocabulary_id"] or "", original["source_code"] or "",
+            original["source_value"].strip().casefold(), str(candidate_concept_id),
         ]
     )
     scope_digest = hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()
     decision_id = decision_id_for(
-        "HUMAN-CURATION", original[1], original[2], candidate_concept_id,
+        "HUMAN-CURATION", original["target_table"], original["source_value"], candidate_concept_id,
         source_record_key=scope_digest,
     )
     existing = con.execute(
@@ -198,9 +205,9 @@ def submit_counterproposal(
                       ?, ?, ?, ?)
             """,
             [
-                decision_id, original[1], original[2], candidate[0],
-                candidate_concept_id, original[6], original[10], original[11],
-                original[12], proposer, rationale, original_decision_id,
+                decision_id, original["target_table"], original["source_value"], candidate[0],
+                candidate_concept_id, original["vocabulary_version"], original["source_system"], original["source_code"],
+                original["source_vocabulary_id"], proposer, rationale, original_decision_id,
                 proposer_actor_id,
             ],
         )

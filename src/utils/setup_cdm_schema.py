@@ -34,7 +34,7 @@ def create_omop_skeleton():
                 cause_source_value VARCHAR(50),
                 cause_source_concept_id INTEGER
             );
-            
+
             CREATE TABLE IF NOT EXISTS device_exposure (
                 device_exposure_id BIGINT PRIMARY KEY,
                 person_id BIGINT NOT NULL,
@@ -56,7 +56,7 @@ def create_omop_skeleton():
                 unit_source_value VARCHAR(50),
                 unit_source_concept_id INTEGER
             );
-            
+
             CREATE TABLE IF NOT EXISTS note (
                 note_id BIGINT PRIMARY KEY,
                 person_id BIGINT NOT NULL,
@@ -73,7 +73,7 @@ def create_omop_skeleton():
                 visit_detail_id BIGINT,
                 note_source_value VARCHAR(50)
             );
-            
+
             CREATE TABLE IF NOT EXISTS specimen (
                 specimen_id BIGINT PRIMARY KEY,
                 person_id BIGINT NOT NULL,
@@ -91,7 +91,7 @@ def create_omop_skeleton():
                 anatomic_site_source_value VARCHAR(50),
                 disease_status_source_value VARCHAR(50)
             );
-            
+
             CREATE TABLE IF NOT EXISTS cost (
                 cost_id BIGINT PRIMARY KEY,
                 cost_event_id BIGINT NOT NULL,
@@ -116,7 +116,7 @@ def create_omop_skeleton():
                 drg_concept_id INTEGER,
                 drg_source_value VARCHAR(3)
             );
-            
+
             CREATE TABLE IF NOT EXISTS location (
                 location_id BIGINT PRIMARY KEY,
                 address_1 VARCHAR(50),
@@ -131,7 +131,7 @@ def create_omop_skeleton():
                 latitude DOUBLE,
                 longitude DOUBLE
             );
-            
+
             CREATE TABLE IF NOT EXISTS provider (
                 provider_id BIGINT PRIMARY KEY,
                 provider_name VARCHAR(255),
@@ -147,7 +147,7 @@ def create_omop_skeleton():
                 gender_source_value VARCHAR(50),
                 gender_source_concept_id INTEGER
             );
-            
+
             CREATE TABLE IF NOT EXISTS source_to_concept_map (
                 source_code VARCHAR(50) NOT NULL,
                 source_concept_id INTEGER NOT NULL,

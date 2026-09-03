@@ -47,3 +47,9 @@ codigo_completo.txt
 
 # Local scratch files
 .local_scratch/
+
+# Python Packaging
+build/
+dist/
+*.egg-info/
+*.whl

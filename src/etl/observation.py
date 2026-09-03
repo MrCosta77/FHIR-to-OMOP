@@ -17,13 +17,13 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_records import FHIRObservationRecord
 from src.adapters.fhir_semantics import (
     extract_fhir_publication_exclusions,
     fhir_datetime,
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
-from src.adapters.fhir_records import FHIRObservationRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -280,7 +280,7 @@ def run_observation_etl():
                 observation_source_concept_id, unit_source_value,
                 value_source_value
             )
-            SELECT 
+            SELECT
                 stg.observation_id,
                 stg.person_id,
                 COALESCE(c_std.concept_id::INTEGER, 0) AS observation_concept_id,
@@ -306,15 +306,15 @@ def run_observation_etl():
                 stg.unit AS unit_source_value,
                 stg.value_source_value
             FROM stg_observation stg
-            LEFT JOIN concept c_src 
-                ON stg.code = c_src.concept_code 
+            LEFT JOIN concept c_src
+                ON stg.code = c_src.concept_code
                 AND stg.athena_vocabulary_id = c_src.vocabulary_id
-            LEFT JOIN concept_relationship cr 
-                ON c_src.concept_id = cr.concept_id_1 
+            LEFT JOIN concept_relationship cr
+                ON c_src.concept_id = cr.concept_id_1
                 AND cr.relationship_id = 'Maps to'
                 AND cr.invalid_reason IS NULL
             LEFT JOIN concept c_std
-                ON cr.concept_id_2 = c_std.concept_id 
+                ON cr.concept_id_2 = c_std.concept_id
                 AND c_std.standard_concept = 'S'
                 AND c_std.invalid_reason IS NULL
             LEFT JOIN concept c_unit_std
@@ -370,7 +370,7 @@ def run_observation_etl():
                 vocabulary_version, reviewed_by, run_id, source_system,
                 source_code, source_vocabulary_id, source_record_key
             )
-            SELECT 
+            SELECT
                 'observation',
                 observation_id,
                 observation_source_value,

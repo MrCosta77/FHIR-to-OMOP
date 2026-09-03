@@ -27,7 +27,7 @@ def evaluate_accuracy():
 
         # Evaluate Precision and Recall by joining STCM-mapped measurements with ground truth
         query = """
-            SELECT 
+            SELECT
                 COUNT(*) as total_corrupted,
                 SUM(CASE WHEN m.measurement_concept_id != 0 THEN 1 ELSE 0 END) as total_mapped,
                 SUM(CASE WHEN m.measurement_concept_id = g.true_concept_id THEN 1 ELSE 0 END) as correct_matches

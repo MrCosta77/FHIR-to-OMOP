@@ -15,13 +15,13 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.adapters.fhir_semantics import (
     extract_fhir_publication_exclusions,
     fhir_datetime,
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
-from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql, ensure_table_columns
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -207,7 +207,7 @@ def run_procedure_etl():
                 procedure_type_concept_id,
                 procedure_source_value, procedure_source_concept_id
             )
-            SELECT 
+            SELECT
                 stg.procedure_occurrence_id,
                 stg.person_id,
                 COALESCE(stg.target_concept_id, 0) AS procedure_concept_id,
@@ -364,7 +364,7 @@ def run_procedure_etl():
                 vocabulary_version, reviewed_by, run_id, source_system,
                 source_code, source_vocabulary_id, source_record_key
             )
-            SELECT 
+            SELECT
                 'procedure_occurrence',
                 procedure_occurrence_id,
                 procedure_source_value,

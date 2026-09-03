@@ -286,7 +286,7 @@ def clinical_review_agreement(con):
         left_votes = Counter(pair[0] for pair in pairs)
         right_votes = Counter(pair[1] for pair in pairs)
         observed = sum(left == right for left, right in pairs) / len(pairs)
-        total_votes = 2 * len(pairs)
+        2 * len(pairs)
         expected = sum(
             (left_votes[verdict] / len(pairs))
             * (right_votes[verdict] / len(pairs))

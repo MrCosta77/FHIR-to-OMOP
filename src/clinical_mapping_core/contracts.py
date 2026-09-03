@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class DecisionKind(str, Enum):
+class DecisionKind(StrEnum):
     """The only outcomes a governed mapping model may return."""
 
     SELECT = "SELECT"

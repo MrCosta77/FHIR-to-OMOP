@@ -17,13 +17,13 @@ from src.adapters.fhir_coding import (
     replace_fhir_source_codings,
     select_source_coding,
 )
+from src.adapters.fhir_records import FHIRMeasurementRecord
 from src.adapters.fhir_semantics import (
     extract_fhir_publication_exclusions,
     fhir_datetime,
     is_publishable_fhir_resource,
     replace_fhir_publication_exclusions,
 )
-from src.adapters.fhir_records import FHIRMeasurementRecord
 from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
@@ -263,12 +263,12 @@ def run_measurement_etl():
                 unit_concept_id, unit_source_value, unit_source_concept_id,
                 value_source_value
             )
-            SELECT 
+            SELECT
                 stg.measurement_id,
                 stg.person_id,
-                CASE 
+                CASE
                     WHEN c_std.domain_id = 'Measurement' THEN COALESCE(c_std.concept_id::INTEGER, 0)
-                    ELSE 0 
+                    ELSE 0
                 END AS measurement_concept_id,
                 stg.date,
                 stg.event_datetime,
@@ -296,15 +296,15 @@ def run_measurement_etl():
                 COALESCE(stg.value_source_value, stg.value::VARCHAR)
                     AS value_source_value
             FROM stg_measurement stg
-            LEFT JOIN concept c_src 
-                ON stg.loinc_code = c_src.concept_code 
+            LEFT JOIN concept c_src
+                ON stg.loinc_code = c_src.concept_code
                 AND stg.athena_vocabulary_id = c_src.vocabulary_id
-            LEFT JOIN concept_relationship cr 
-                ON c_src.concept_id = cr.concept_id_1 
+            LEFT JOIN concept_relationship cr
+                ON c_src.concept_id = cr.concept_id_1
                 AND cr.relationship_id = 'Maps to'
                 AND cr.invalid_reason IS NULL
-            LEFT JOIN concept c_std 
-                ON cr.concept_id_2 = c_std.concept_id 
+            LEFT JOIN concept c_std
+                ON cr.concept_id_2 = c_std.concept_id
                 AND c_std.standard_concept = 'S'
                 AND c_std.invalid_reason IS NULL
             LEFT JOIN concept c_unit_src
@@ -380,7 +380,7 @@ def run_measurement_etl():
                 vocabulary_version, reviewed_by, run_id, source_system,
                 source_code, source_vocabulary_id, source_record_key
             )
-            SELECT 
+            SELECT
                 'measurement',
                 measurement_id,
                 measurement_source_value,

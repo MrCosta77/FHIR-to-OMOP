@@ -242,6 +242,8 @@ REQUIRE_INTEGRATION = SETTINGS.require_integration
 INCLUDE_DQD = SETTINGS.include_dqd
 PROFILE = SETTINGS.profile
 
+# Secret Cryptographic Salt for PHI Hashing (Environment Tiering)
+PHI_SALT = os.environ.get("CMF_PHI_SALT", "synthea-dev-secret-2026")
 
 def main():
     print(json.dumps(SETTINGS.manifest(), indent=2, sort_keys=True))

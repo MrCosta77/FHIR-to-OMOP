@@ -9,10 +9,10 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.omop.cdm54 import create_table_sql
-from src.utils.config import DB_PATH, FHIR_DIR
 from src.adapters.fhir_records import FHIRVisitRecord
 from src.adapters.fhir_semantics import fhir_datetime
+from src.omop.cdm54 import create_table_sql
+from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,

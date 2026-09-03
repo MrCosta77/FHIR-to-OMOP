@@ -103,6 +103,10 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
     if "FHIR-to-OMOP" not in notice or "Copyright" not in notice:
         raise ReleaseMetadataError("NOTICE has no project copyright attribution")
 
+    citation = _read(root / "CITATION.cff")
+    if "cff-version:" not in citation or "FHIR-to-OMOP" not in citation:
+        raise ReleaseMetadataError("CITATION.cff is missing or invalid")
+
     quality_workflow = _read(root / ".github" / "workflows" / "quality.yml")
     if "requirements.lock" not in quality_workflow or "--require-hashes" not in quality_workflow:
         raise ReleaseMetadataError("Quality CI does not install the hashed Python lock")
@@ -135,3 +139,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

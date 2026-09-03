@@ -19,7 +19,7 @@ def generate_report():
         print("1. POPULATION OVERVIEW\n" + "-"*50)
         pop_count = con.execute("SELECT COUNT(*) FROM person").fetchone()[0]
         avg_obs = con.execute("""
-            SELECT AVG(DATEDIFF('year', observation_period_start_date, observation_period_end_date)) 
+            SELECT AVG(DATEDIFF('year', observation_period_start_date, observation_period_end_date))
             FROM observation_period
         """).fetchone()[0]
 
@@ -45,12 +45,12 @@ def generate_report():
         # 3. PHENOTYPING: HYPERTENSION CASCADE
         print("3. PHENOTYPING: HYPERTENSION CASCADE (Specific Phenotype)\n" + "-"*50)
         ht_patients = con.execute("""
-            SELECT COUNT(DISTINCT person_id) FROM condition_occurrence 
+            SELECT COUNT(DISTINCT person_id) FROM condition_occurrence
             WHERE condition_concept_id = 320128 -- Essential hypertension
         """).fetchone()[0]
 
         ht_meds = con.execute("""
-            SELECT COUNT(DISTINCT de.person_id) 
+            SELECT COUNT(DISTINCT de.person_id)
             FROM drug_exposure de
             JOIN condition_occurrence co ON de.person_id = co.person_id
             WHERE co.condition_concept_id = 320128

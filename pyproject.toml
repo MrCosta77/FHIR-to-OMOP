@@ -25,6 +25,15 @@ dev = [
     "pytest==9.1.1"
 ]
 
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = [
+    "src", "src.adapters", "src.analytics", "src.app", "src.benchmark", 
+    "src.clinical_mapping_core", "src.etl", "src.mapping", "src.omop", 
+    "src.quality", "src.security", "src.simulation", "src.utils", 
+    "src.mapping.governance"
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -39,4 +48,9 @@ select = [
 ]
 ignore = [
     "E501", # line too long (handled by formatter)
+    "E402", # module level import not at top of file (sys.path append)
+    "E701", # multiple statements on one line
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
