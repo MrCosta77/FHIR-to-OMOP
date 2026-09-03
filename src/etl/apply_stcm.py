@@ -138,10 +138,10 @@ def apply_stcm_mappings(db_path=DB_PATH):
                         continue
 
                     target_schema = TABLE_SCHEMAS[target_table]
-                    
+
                     source_cols = {row[0] for row in con.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{source_table}'").fetchall()}
                     target_cols = {row[0] for row in con.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{target_table}'").fetchall()}
-                    
+
                     sel_person = "s.person_id," if "person_id" in source_cols else "NULL AS person_id,"
                     sel_date = f"s.{source_schema['date']} AS event_date," if source_schema['date'] in source_cols else "NULL AS event_date,"
                     sel_dt = f"s.{source_schema['dt']} AS event_datetime," if source_schema['dt'] in source_cols else "NULL AS event_datetime,"
@@ -151,7 +151,7 @@ def apply_stcm_mappings(db_path=DB_PATH):
                     con.execute("DROP TABLE IF EXISTS temp_cross_routing")
                     con.execute(f"""
                         CREATE TEMPORARY TABLE temp_cross_routing AS
-                        SELECT 
+                        SELECT
                             s.{id_col} AS route_id,
                             {sel_person}
                             approved.target_concept_id AS mapped_concept_id,
@@ -172,12 +172,12 @@ def apply_stcm_mappings(db_path=DB_PATH):
                           AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
                           AND CURRENT_DATE BETWEEN COALESCE(TRY_CAST(c.valid_start_date AS DATE), TRY_STRPTIME(CAST(c.valid_start_date AS VARCHAR), '%Y%m%d')::DATE) AND COALESCE(TRY_CAST(c.valid_end_date AS DATE), TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE)
                     """)
-                    
+
                     routed_count = con.execute("SELECT COUNT(*) FROM temp_cross_routing").fetchone()[0]
                     if routed_count > 0:
                         ins_cols = [target_schema['id'], target_schema['concept'], target_schema['source'], target_schema['source_concept']]
                         sel_cols = ["route_id", "mapped_concept_id", "source_value", "0"]
-                        
+
                         if "person_id" in target_cols:
                             ins_cols.append("person_id")
                             sel_cols.append("person_id")
@@ -193,7 +193,7 @@ def apply_stcm_mappings(db_path=DB_PATH):
                         if "visit_occurrence_id" in target_cols:
                             ins_cols.append("visit_occurrence_id")
                             sel_cols.append("visit_occurrence_id")
-                            
+
                         con.execute(f"""
                             INSERT INTO {target_table} ({', '.join(ins_cols)})
                             SELECT {', '.join(sel_cols)} FROM temp_cross_routing
