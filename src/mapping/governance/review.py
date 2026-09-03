@@ -40,14 +40,19 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     """, [decision_id]).fetchone()
     if not row:
         raise ValueError(f"Unknown mapping decision: {decision_id}")
-    if not row[1]:
+
+    (status, publication_eligible, proposed_by, target_table, source_adapter,
+     source_vocabulary_id, source_code, source_value, assigned_concept_id,
+     proposed_by_actor_id) = row
+
+    if not publication_eligible:
         raise ValueError(
             "Pre-ingestion proposals are not clinically reviewable until bound "
             "to an explicit source vocabulary and ingested OMOP event."
         )
-    if row[0] not in {"PENDING", "LOW_CONFIDENCE"}:
-        raise ValueError(f"Decision is not independently reviewable: {row[0]}")
-    if row[9] and row[9] == reviewer_actor_id:
+    if status not in {"PENDING", "LOW_CONFIDENCE"}:
+        raise ValueError(f"Decision is not independently reviewable: {status}")
+    if proposed_by_actor_id and proposed_by_actor_id == reviewer_actor_id:
         raise ValueError("A counterproposal author cannot review their own candidate.")
     existing = con.execute("""
         SELECT COUNT(*) FROM clinical_mapping_review
@@ -67,7 +72,8 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
           AND LOWER(TRIM(prior.source_value)) = LOWER(TRIM(?))
           AND prior.assigned_concept_id = ?
     """, [
-        reviewer_actor_id, row[3], row[4], row[5], row[6], row[7], int(row[8]),
+        reviewer_actor_id, target_table, source_adapter, source_vocabulary_id,
+        source_code, source_value, int(assigned_concept_id),
     ]).fetchone()[0]
     if duplicate:
         raise ValueError(
