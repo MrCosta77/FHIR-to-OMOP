@@ -1,5 +1,4 @@
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -30,15 +29,12 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
+    stable_event_id,
     stable_person_id,
+    stable_resource_fingerprint,
 )
 from src.utils.unit_mapping import canonical_ucum_code
 
-
-def generate_observation_id(unique_string):
-    """Generates a stable, deterministic ID from a unique string."""
-    clean_string = unique_string.replace('urn:uuid:', '')
-    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
 def extract_observation_candidates(file_path):
     records = []
@@ -80,9 +76,9 @@ def extract_observation_candidates(file_path):
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
                 source_event_key = full_url or (
-                    f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                    stable_resource_fingerprint(base_string)
                 )
-                obs_id = generate_observation_id(base_string)
+                obs_id = stable_event_id(base_string)
 
                 records.append(FHIRObservationRecord(
                     event_id=obs_id,
@@ -116,7 +112,7 @@ def extract_observation_candidates(file_path):
                 full_url = entry.get('fullUrl', '')
                 resource_json = json.dumps(resource, sort_keys=True)
                 source_event_key = full_url or (
-                    f"sha256:{hashlib.sha256(resource_json.encode('utf-8')).hexdigest()}"
+                    stable_resource_fingerprint(resource_json)
                 )
 
                 for component_path, codeable, value_holder in (
@@ -131,7 +127,7 @@ def extract_observation_candidates(file_path):
                     base_string = full_url or resource_json
                     if component_path:
                         base_string = f"{base_string}::{component_path}"
-                    obs_id = generate_observation_id(base_string)
+                    obs_id = stable_event_id(base_string)
 
                     value_as_number = None
                     value_as_string = None

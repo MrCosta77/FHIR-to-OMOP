@@ -75,3 +75,13 @@ def stable_event_id(source_id: str) -> int:
         hashlib.sha256
     ).hexdigest()
     return int(secure_hash[:15], 16)
+
+
+def stable_resource_fingerprint(resource_json: str) -> str:
+    """Generates a secure hash for a full FHIR JSON string using HMAC-SHA256."""
+    secure_hash = hmac.new(
+        PHI_SALT.encode("utf-8"),
+        resource_json.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return f"hmac256:{secure_hash}"

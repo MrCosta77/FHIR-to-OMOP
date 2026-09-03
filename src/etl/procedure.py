@@ -1,5 +1,4 @@
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -28,14 +27,11 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
+    stable_event_id,
     stable_person_id,
+    stable_resource_fingerprint,
 )
 
-
-def generate_procedure_id(unique_string):
-    """Generates a stable, deterministic ID from a unique string."""
-    clean_string = unique_string.replace('urn:uuid:', '')
-    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
 def extract_procedures(file_path):
     records = []
@@ -81,9 +77,9 @@ def extract_procedures(file_path):
                 full_url = entry.get('fullUrl', '')
                 base_string = full_url if full_url else json.dumps(resource, sort_keys=True)
                 source_event_key = full_url or (
-                    f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                    stable_resource_fingerprint(base_string)
                 )
-                procedure_id = generate_procedure_id(base_string)
+                procedure_id = stable_event_id(base_string)
 
                 records.append(CodedFHIRPeriodRecord(
                     event_id=procedure_id,

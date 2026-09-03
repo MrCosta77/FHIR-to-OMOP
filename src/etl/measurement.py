@@ -1,5 +1,4 @@
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -30,16 +29,13 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
+    stable_event_id,
     stable_person_id,
+    stable_resource_fingerprint,
 )
 from src.utils.quarantine import ensure_quarantine_table
 from src.utils.unit_mapping import canonical_ucum_code
 
-
-def generate_measurement_id(unique_string):
-    """Generates a stable, deterministic ID from a unique string."""
-    clean_string = unique_string.replace('urn:uuid:', '')
-    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
 def extract_measurements(file_path):
     records = []
@@ -77,7 +73,7 @@ def extract_measurements(file_path):
                 else:
                     resource_json = json.dumps(resource, sort_keys=True)
                     source_event_key = (
-                        f"sha256:{hashlib.sha256(resource_json.encode('utf-8')).hexdigest()}"
+                        stable_resource_fingerprint(resource_json)
                     )
 
                 for component_path, codeable, value_holder in (
@@ -110,7 +106,7 @@ def extract_measurements(file_path):
                     base_string = full_url or resource_json
                     if component_path:
                         base_string = f"{base_string}::{component_path}"
-                    measurement_id = generate_measurement_id(base_string)
+                    measurement_id = stable_event_id(base_string)
                     records.append(FHIRMeasurementRecord(
                         event_id=measurement_id,
                         person_id=person_id,

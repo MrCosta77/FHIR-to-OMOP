@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -21,6 +20,7 @@ from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
     stable_event_id,
+    stable_resource_fingerprint,
 )
 from src.utils.quarantine import ensure_quarantine_table
 
@@ -55,11 +55,6 @@ def _table_exists(con, table: str) -> bool:
            WHERE table_schema = 'main' AND table_name = ?""", [table]
     ).fetchone()[0])
 
-
-def _etl_event_id(identity: str) -> int:
-    """Reproduce the ID algorithm currently used by the event extractors."""
-    clean_identity = identity.replace("urn:uuid:", "")
-    return int(hashlib.sha256(clean_identity.encode("utf-8")).hexdigest()[:15], 16)
 
 
 def ensure_visit_linkage_tables(con) -> None:
@@ -122,8 +117,8 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
             else:
                 canonical = json.dumps(resource, sort_keys=True)
                 identity = canonical
-                source_event_key = f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
-            target_id = _etl_event_id(identity)
+                source_event_key = stable_resource_fingerprint(canonical)
+            target_id = stable_event_id(identity)
             encounter_reference = resource.get("encounter", {}).get("reference") or None
             referenced_visit_id = (
                 stable_event_id(

@@ -1,5 +1,4 @@
 import glob
-import hashlib
 import json
 import os
 import sys
@@ -29,14 +28,11 @@ from src.utils.helpers import (
     build_fhir_reference_index,
     normalise_fhir_reference,
     resolve_fhir_reference,
+    stable_event_id,
     stable_person_id,
+    stable_resource_fingerprint,
 )
 
-
-def generate_drug_id(unique_string):
-    """Generates a stable, deterministic ID from a unique string."""
-    clean_string = unique_string.replace('urn:uuid:', '')
-    return int(hashlib.sha256(clean_string.encode('utf-8')).hexdigest()[:15], 16)
 
 def extract_drugs(file_path):
     records = []
@@ -105,10 +101,10 @@ def extract_drugs(file_path):
                     # Fallback à prova de bala: transformar o recurso inteiro numa string e fazer o hash
                     base_string = json.dumps(res, sort_keys=True)
                     source_event_key = (
-                        f"sha256:{hashlib.sha256(base_string.encode('utf-8')).hexdigest()}"
+                        stable_resource_fingerprint(base_string)
                     )
 
-                drug_id = generate_drug_id(base_string)
+                drug_id = stable_event_id(base_string)
 
                 records.append(CodedFHIRPeriodRecord(
                     event_id=drug_id,
