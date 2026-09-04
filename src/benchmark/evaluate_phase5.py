@@ -520,7 +520,7 @@ def evaluate_phase5(
             config = arm_config[arm_name]
             model = config["model"]
 
-            def run_llm_arm(model=model, config=config):
+            def run_llm_arm(model=model, config=config, arm_name=arm_name):
                 predictions = []
                 telemetry_rows = []
                 for position, case in enumerate(inputs, start=1):

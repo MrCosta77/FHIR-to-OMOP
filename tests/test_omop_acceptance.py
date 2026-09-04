@@ -166,7 +166,7 @@ def test_every_event_has_a_governed_visit_linkage_decision(con):
         """).fetchone()
         assert row, "No successful ETL run is available for linkage acceptance"
         run_id = row[0]
-    for table, event_date in {
+    for table, _event_date in {
         "condition_occurrence": "condition_start_date",
         "drug_exposure": "drug_exposure_start_date",
         "measurement": "measurement_date",

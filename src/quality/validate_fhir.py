@@ -39,7 +39,7 @@ def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
 
     resources = [entry.get("resource", {}) for entry in entries]
     full_urls: set[str] = set()
-    for entry, resource in zip(entries, resources):
+    for entry, resource in zip(entries, resources, strict=False):
         resource_type = resource.get("resourceType")
         if resource_type not in IDENTITY_SCOPED_TYPES:
             continue

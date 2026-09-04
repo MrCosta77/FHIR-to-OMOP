@@ -208,7 +208,7 @@ def validate_table_schema(con, table, physical_name=None):
             f"{physical_name} does not match OMOP CDM {CDM_VERSION} columns. "
             f"Expected {expected_names}; received {actual_names}."
         )
-    for row, field in zip(actual, fields):
+    for row, field in zip(actual, fields, strict=False):
         actual_type = row[2].upper().split("(", 1)[0]
         expected_type = duckdb_type(field.datatype).upper().split("(", 1)[0]
         if actual_type != expected_type:

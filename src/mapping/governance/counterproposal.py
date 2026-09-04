@@ -74,7 +74,7 @@ def counterproposal_source_queue(con, proposer):
         """,
         [proposer_actor_id],
     ).fetchall()
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(zip(columns, row, strict=False)) for row in rows]
 
 
 def submit_counterproposal(
@@ -109,7 +109,7 @@ def submit_counterproposal(
     if not row:
         raise ValueError(f"Unknown mapping decision: {original_decision_id}")
     columns = [desc[0] for desc in cursor.description]
-    original = dict(zip(columns, row))
+    original = dict(zip(columns, row, strict=False))
 
     if original["status"] != "REJECTED":
         raise ValueError(

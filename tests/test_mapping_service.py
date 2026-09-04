@@ -75,7 +75,7 @@ def test_stale_chroma_index_is_rebuilt(monkeypatch, tmp_path):
             return self._count
 
         def add(self, ids, documents):
-            self.added.extend(zip(ids, documents))
+            self.added.extend(zip(ids, documents, strict=False))
             self._count += len(ids)
 
         def modify(self, metadata):
