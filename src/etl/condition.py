@@ -125,7 +125,7 @@ def run_condition_etl():
                 con, "FHIR_R4_Condition", all_exclusions,
                 run_id=current_run_id(),
             )
-            # FORÇA A ELIMINAÇÃO DA TABELA ANTIGA PARA ATUALIZAR O SCHEMA
+            # FORCE DROP THE OLD TABLE TO UPDATE SCHEMA
             con.execute("DROP TABLE IF EXISTS condition_occurrence")
 
             con.execute(create_table_sql("condition_occurrence"))

@@ -17,7 +17,7 @@ def setup_audit_tables():
     print("-" * 50)
 
     with duckdb.connect(DB_PATH) as con:
-        # 1. Proveniência, execuções e decisões humanas
+        # 1. Provenance, executions, and human decisions
         ensure_governance_tables(con)
         con.execute("""
             UPDATE mapping_provenance
@@ -27,7 +27,7 @@ def setup_audit_tables():
         """)
         print("✅ 'mapping_provenance' table verified/created successfully!")
 
-        # 3. TABELA CDM_SOURCE (Obrigatória para o OHDSI Data Quality Dashboard)
+        # 3. CDM_SOURCE TABLE (Required for the OHDSI Data Quality Dashboard)
         con.execute("""
             CREATE TABLE IF NOT EXISTS cdm_source (
                 cdm_source_name VARCHAR(255) NOT NULL,
@@ -44,14 +44,14 @@ def setup_audit_tables():
             )
         """)
 
-        # Tentar ler a versão do vocabulário dinamicamente da tabela 'vocabulary'
+        # Try to read the vocabulary version dynamically from the vocabulary table
         vocab_version = "Unknown_Vocab_Version"
         try:
             res = con.execute("SELECT vocabulary_version FROM vocabulary WHERE vocabulary_id = 'None'").fetchone()
             if res and res[0]:
                 vocab_version = res[0]
         except duckdb.CatalogException:
-            pass # Ignora se a tabela vocabulary ainda não existir
+            pass # Ignore if the vocabulary table does not exist yet
 
         current_date = datetime.now().strftime('%Y-%m-%d')
         con.execute("DELETE FROM cdm_source")
