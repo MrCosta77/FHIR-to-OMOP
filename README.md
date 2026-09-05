@@ -278,7 +278,7 @@ Any external FHIR bundle can be checked before ETL with
 **2. Prerequisites**
 * Download the **OMOP Vocabularies** from [Athena](https://athena.ohdsi.org/) and place `CONCEPT.csv`, `CONCEPT_RELATIONSHIP.csv`, `VOCABULARY.csv`, `DOMAIN.csv`, `CONCEPT_CLASS.csv` and `CONCEPT_ANCESTOR.csv` in `data/omop_vocab/`. Missing required files fail the run.
 * Place synthetic **FHIR JSON bundles** (e.g., from Synthea) in `synthea/output/fhir/`. Every bundle is contract-validated before clinical tables are rebuilt.
-* Ensure [Ollama](https://ollama.ai/) is installed and running locally with the model selected by the active profile. Development defaults to `qwen2.5-coder:7b`; benchmark and hospital default to `llama3.1`.
+* Ensure [Ollama](https://ollama.ai/) is installed and running locally with the model selected by the active profile. Development and hospital currently default to the locally evaluated `qwen2.5-coder:7b`; benchmark retains `llama3.1` as a comparison arm. These are provisional defaults, not claims of clinical validation.
 
 Check all mandatory pipeline inputs and services before starting a run:
 ```bash

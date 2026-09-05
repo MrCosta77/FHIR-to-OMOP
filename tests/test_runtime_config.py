@@ -54,7 +54,11 @@ def test_external_llm_endpoint_fails_closed():
 
 def test_hospital_profile_requires_explicit_phi_approval():
     with pytest.raises(SettingsError, match="CMF_PHI_ENABLED"):
-        load_settings({"CMF_PROFILE": "hospital"})
+        load_settings({
+            "CMF_PROFILE": "hospital",
+            "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
+            "CMF_PHI_KEY_VERSION": "hospital-key-v1",
+        })
 
 
 def test_hospital_profile_accepts_complete_phi_activation():
@@ -63,16 +67,22 @@ def test_hospital_profile_accepts_complete_phi_activation():
         "CMF_PHI_ENABLED": "true",
         "CMF_PHI_POLICY_APPROVED_BY": "Hospital DPO",
         "CMF_PHI_RETENTION_DAYS": "30",
+        "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "hospital-key-v1",
     })
     assert settings.profile == "hospital"
     assert settings.data_classification == "PHI"
-    assert settings.similarity_threshold == 1.0
+    assert settings.similarity_threshold == 0.9
+    assert settings.model_name == "qwen2.5-coder:7b"
+    assert settings.phi_key_version == "hospital-key-v1"
+    assert settings.phi_salt not in settings.manifest().values()
+    assert settings.phi_salt not in repr(settings)
+    assert len(settings.phi_key_fingerprint) == 16
     assert settings.include_dqd is True
 
 
 @pytest.mark.parametrize("override", [
     {"CMF_DATA_CLASSIFICATION": "SYNTHETIC"},
-    {"CMF_SIMILARITY_THRESHOLD": "0.9"},
     {"CMF_SIMULATE_LIS_NOISE": "true"},
     {"CMF_REQUIRE_INTEGRATION": "false"},
     {"CMF_INCLUDE_DQD": "false"},
@@ -83,6 +93,8 @@ def test_hospital_profile_cannot_downgrade_safety(override):
         "CMF_PHI_ENABLED": "true",
         "CMF_PHI_POLICY_APPROVED_BY": "Hospital DPO",
         "CMF_PHI_RETENTION_DAYS": "30",
+        "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "hospital-key-v1",
         **override,
     }
     with pytest.raises(SettingsError):
@@ -92,6 +104,26 @@ def test_hospital_profile_cannot_downgrade_safety(override):
 def test_invalid_boolean_fails_closed():
     with pytest.raises(SettingsError, match="must be true or false"):
         load_settings({"CMF_REQUIRE_INTEGRATION": "sometimes"})
+
+
+@pytest.mark.parametrize("override", [
+    {},
+    {"CMF_PHI_SALT": "too-short", "CMF_PHI_KEY_VERSION": "hospital-key-v1"},
+    {
+        "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "development-v1",
+    },
+])
+def test_hospital_profile_requires_institution_managed_key(override):
+    environment = {
+        "CMF_PROFILE": "hospital",
+        "CMF_PHI_ENABLED": "true",
+        "CMF_PHI_POLICY_APPROVED_BY": "Hospital DPO",
+        "CMF_PHI_RETENTION_DAYS": "30",
+        **override,
+    }
+    with pytest.raises(SettingsError, match="CMF_PHI"):
+        load_settings(environment)
 
 
 def test_profile_rejects_unknown_keys(tmp_path):

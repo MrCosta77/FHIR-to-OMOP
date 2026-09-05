@@ -16,14 +16,23 @@ the execution environment using the mechanism appropriate to that platform.
 - `development` preserves the existing local Qwen setup and synthetic defaults.
 - `benchmark` isolates generated outputs, requires integration checks and uses
   the Llama candidate selected for development calibration.
-- `hospital` defaults to PHI, a conservative threshold of `1.0`, and fails at
-  import/startup unless PHI activation, named approval and positive retention
-  are provided. It also requires the complete integration and OHDSI DQD gates.
-  It is a safety template, not deployment authorization.
+- `hospital` defaults to PHI, local `qwen2.5-coder:7b` and a provisional review
+  priority threshold of `0.9`. Every LLM proposal still requires human approval,
+  irrespective of score. The profile fails at import/startup unless PHI
+  activation, named approval, positive retention, an institution-managed
+  `CMF_PHI_SALT` of at least 32 characters and an institution-managed
+  `CMF_PHI_KEY_VERSION` are provided. It also requires the complete integration
+  and OHDSI DQD gates. It is a safety template, not deployment authorization.
 
 Relative paths are anchored at the repository root, independent of the current
 working directory. Absolute paths are accepted on the host platform. No profile
 contains credentials, identities or institutional approvals.
+
+The pseudonymization secret must be injected by the institution's secret
+manager and is never included in manifests or logs. Manifests contain only its
+declared version and a truncated SHA-256 fingerprint so runs can be compared
+without revealing the key. Changing or losing this secret changes deterministic
+person and event identifiers and therefore requires a governed migration.
 
 Validate and display the effective non-secret configuration before a run:
 

@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.security.privacy import validate_privacy_runtime
+from src.utils.assets import runtime_asset
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SUPPORTED_PROFILES = {"development", "benchmark", "hospital"}
 PROFILE_SCHEMA_VERSION = "1.0.0"
+DEVELOPMENT_PHI_SALT = "synthea-dev-secret-2026"
 PROFILE_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
     "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
@@ -68,6 +71,9 @@ class RuntimeSettings:
     simulate_lis_noise: bool
     require_integration: bool
     include_dqd: bool
+    phi_salt: str = field(repr=False)
+    phi_key_version: str
+    phi_key_fingerprint: str
 
     def manifest(self) -> dict:
         """Return non-secret settings suitable for immutable run provenance."""
@@ -89,6 +95,8 @@ class RuntimeSettings:
             "simulate_lis_noise": self.simulate_lis_noise,
             "require_integration": self.require_integration,
             "include_dqd": self.include_dqd,
+            "phi_key_version": self.phi_key_version,
+            "phi_key_fingerprint": self.phi_key_fingerprint,
         }
 
 
@@ -149,7 +157,9 @@ def load_settings(
     """Load one versioned profile, apply explicit environment overrides and validate."""
     env = os.environ if environ is None else environ
     root = Path(project_root).resolve()
-    profiles = Path(profile_root or root / "config" / "profiles")
+    profiles = Path(profile_root) if profile_root else runtime_asset(
+        "config", "profiles"
+    )
     profile = env.get("CMF_PROFILE", "development").strip().casefold()
     values = _load_profile(profile, profiles)
 
@@ -184,14 +194,24 @@ def load_settings(
         values["require_integration"], "CMF_REQUIRE_INTEGRATION"
     )
     include_dqd = _parse_boolean(values["include_dqd"], "CMF_INCLUDE_DQD")
+    phi_salt = env.get("CMF_PHI_SALT", DEVELOPMENT_PHI_SALT)
+    phi_key_version = env.get("CMF_PHI_KEY_VERSION", "development-v1").strip()
     if not model_name:
         raise SettingsError("CMF_MODEL_NAME must not be empty.")
     if profile == "hospital":
         if classification != "PHI":
             raise SettingsError("The hospital profile cannot downgrade PHI classification.")
-        if threshold != 1.0:
+        if phi_salt == DEVELOPMENT_PHI_SALT:
             raise SettingsError(
-                "The hospital profile requires threshold 1.0 until clinical authorization."
+                "The hospital profile requires institution-managed CMF_PHI_SALT."
+            )
+        if len(phi_salt) < 32:
+            raise SettingsError(
+                "CMF_PHI_SALT must contain at least 32 characters in the hospital profile."
+            )
+        if not phi_key_version or phi_key_version == "development-v1":
+            raise SettingsError(
+                "The hospital profile requires institution-managed CMF_PHI_KEY_VERSION."
             )
         if simulate_lis_noise:
             raise SettingsError("LIS noise simulation is forbidden in the hospital profile.")
@@ -219,6 +239,11 @@ def load_settings(
         simulate_lis_noise=simulate_lis_noise,
         require_integration=require_integration,
         include_dqd=include_dqd,
+        phi_salt=phi_salt,
+        phi_key_version=phi_key_version,
+        phi_key_fingerprint=hashlib.sha256(
+            phi_salt.encode("utf-8")
+        ).hexdigest()[:16],
     )
 
 
@@ -243,7 +268,7 @@ INCLUDE_DQD = SETTINGS.include_dqd
 PROFILE = SETTINGS.profile
 
 # Secret Cryptographic Salt for PHI Hashing (Environment Tiering)
-PHI_SALT = os.environ.get("CMF_PHI_SALT", "synthea-dev-secret-2026")
+PHI_SALT = SETTINGS.phi_salt
 
 def main():
     print(json.dumps(SETTINGS.manifest(), indent=2, sort_keys=True))

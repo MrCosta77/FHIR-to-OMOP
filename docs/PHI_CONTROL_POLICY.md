@@ -12,10 +12,15 @@ after the institution confirms the de-identification method. Setting
 - `CMF_PHI_ENABLED=true`;
 - `CMF_PHI_POLICY_APPROVED_BY` with the named institutional approver;
 - `CMF_PHI_RETENTION_DAYS` with a positive approved retention period;
+- `CMF_PHI_SALT` supplied by the institution, with at least 32 characters;
+- `CMF_PHI_KEY_VERSION` supplied and governed by the institution;
 - a loopback-only Ollama endpoint.
 
 The repository does not choose a hospital retention period. That is an
 institutional legal, privacy and records-management decision.
+The public synthetic-development key is rejected by the hospital profile. The
+secret itself is never persisted; only its declared version and a truncated,
+one-way fingerprint may appear in non-secret run provenance.
 
 ## Redaction and model boundary
 
