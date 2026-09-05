@@ -30,6 +30,7 @@ from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_person_id,
     stable_resource_fingerprint,
 )
@@ -78,7 +79,11 @@ def extract_observation_candidates(file_path):
                 source_event_key = full_url or (
                     stable_resource_fingerprint(base_string)
                 )
-                obs_id = stable_event_id(base_string)
+                obs_id = (
+                    stable_event_id(base_string)
+                    if full_url
+                    else stable_payload_event_id(base_string)
+                )
 
                 records.append(FHIRObservationRecord(
                     event_id=obs_id,
@@ -124,10 +129,15 @@ def extract_observation_candidates(file_path):
                     )
                     if coding is None:
                         continue
-                    base_string = full_url or resource_json
-                    if component_path:
-                        base_string = f"{base_string}::{component_path}"
-                    obs_id = stable_event_id(base_string)
+                    if full_url:
+                        identity = full_url
+                        if component_path:
+                            identity = f"{identity}::{component_path}"
+                        obs_id = stable_event_id(identity)
+                    else:
+                        obs_id = stable_payload_event_id(
+                            resource_json, component_path
+                        )
 
                     value_as_number = None
                     value_as_string = None

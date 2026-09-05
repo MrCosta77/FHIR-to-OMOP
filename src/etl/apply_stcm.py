@@ -16,10 +16,8 @@ TABLE_SCHEMAS = {
     'procedure_occurrence': {'domain': 'Procedure', 'id': 'procedure_occurrence_id', 'concept': 'procedure_concept_id', 'date': 'procedure_date', 'dt': 'procedure_datetime', 'type': 'procedure_type_concept_id', 'source': 'procedure_source_value', 'source_concept': 'procedure_source_concept_id'},
     'device_exposure': {'domain': 'Device', 'id': 'device_exposure_id', 'concept': 'device_concept_id', 'date': 'device_exposure_start_date', 'dt': 'device_exposure_start_datetime', 'type': 'device_type_concept_id', 'source': 'device_source_value', 'source_concept': 'device_source_concept_id'},
 }
-DOMAIN_TO_TABLE = {v['domain']: k for k, v in TABLE_SCHEMAS.items()}
-
 def apply_stcm_mappings(db_path=DB_PATH):
-    print("⚕️ STARTING STCM APPLICATION (Cross-Domain Routing Enabled)")
+    print("⚕️ STARTING DOMAIN-SAFE STCM APPLICATION")
     print("-" * 50)
 
     with duckdb.connect(db_path) as con:
@@ -132,80 +130,7 @@ def apply_stcm_mappings(db_path=DB_PATH):
                 mapped_count = after - before
                 print(f"✅ Applied {mapped_count} mapped events natively in '{source_table}'")
 
-                # 3. Cross-Domain Routing (OMOP Magic)
-                for target_domain, target_table in DOMAIN_TO_TABLE.items():
-                    if target_domain == expected_domain:
-                        continue
-
-                    target_schema = TABLE_SCHEMAS[target_table]
-
-                    source_cols = {row[0] for row in con.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{source_table}'").fetchall()}
-                    target_cols = {row[0] for row in con.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{target_table}'").fetchall()}
-
-                    sel_person = "s.person_id," if "person_id" in source_cols else "NULL AS person_id,"
-                    sel_date = f"s.{source_schema['date']} AS event_date," if source_schema['date'] in source_cols else "NULL AS event_date,"
-                    sel_dt = f"s.{source_schema['dt']} AS event_datetime," if source_schema['dt'] in source_cols else "NULL AS event_datetime,"
-                    sel_type = f"s.{source_schema['type']} AS type_concept_id," if source_schema['type'] in source_cols else "0 AS type_concept_id,"
-                    sel_visit = "s.visit_occurrence_id" if "visit_occurrence_id" in source_cols else "NULL AS visit_occurrence_id"
-
-                    con.execute("DROP TABLE IF EXISTS temp_cross_routing")
-                    con.execute(f"""
-                        CREATE TEMPORARY TABLE temp_cross_routing AS
-                        SELECT
-                            s.{id_col} AS route_id,
-                            {sel_person}
-                            approved.target_concept_id AS mapped_concept_id,
-                            {sel_date}
-                            {sel_dt}
-                            {sel_type}
-                            s.{source_val_col} AS source_value,
-                            {sel_visit}
-                        FROM temp_approved approved
-                        JOIN concept c ON approved.target_concept_id = c.concept_id
-                        JOIN {source_table} s ON (
-                            (approved.target_id IS NULL AND s.{source_val_col} = approved.source_code)
-                            OR s.{id_col} = approved.target_id
-                        )
-                        WHERE s.{concept_col} = 0
-                          AND c.domain_id = '{target_domain}'
-                          AND c.standard_concept = 'S'
-                          AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
-                          AND CURRENT_DATE BETWEEN COALESCE(TRY_CAST(c.valid_start_date AS DATE), TRY_STRPTIME(CAST(c.valid_start_date AS VARCHAR), '%Y%m%d')::DATE) AND COALESCE(TRY_CAST(c.valid_end_date AS DATE), TRY_STRPTIME(CAST(c.valid_end_date AS VARCHAR), '%Y%m%d')::DATE)
-                    """)
-
-                    routed_count = con.execute("SELECT COUNT(*) FROM temp_cross_routing").fetchone()[0]
-                    if routed_count > 0:
-                        ins_cols = [target_schema['id'], target_schema['concept'], target_schema['source'], target_schema['source_concept']]
-                        sel_cols = ["route_id", "mapped_concept_id", "source_value", "0"]
-
-                        if "person_id" in target_cols:
-                            ins_cols.append("person_id")
-                            sel_cols.append("person_id")
-                        if target_schema['date'] in target_cols:
-                            ins_cols.append(target_schema['date'])
-                            sel_cols.append("event_date")
-                        if target_schema['dt'] in target_cols:
-                            ins_cols.append(target_schema['dt'])
-                            sel_cols.append("event_datetime")
-                        if target_schema['type'] in target_cols:
-                            ins_cols.append(target_schema['type'])
-                            sel_cols.append("type_concept_id")
-                        if "visit_occurrence_id" in target_cols:
-                            ins_cols.append("visit_occurrence_id")
-                            sel_cols.append("visit_occurrence_id")
-
-                        con.execute(f"""
-                            INSERT INTO {target_table} ({', '.join(ins_cols)})
-                            SELECT {', '.join(sel_cols)} FROM temp_cross_routing
-                        """)
-                        con.execute(f"""
-                            DELETE FROM {source_table}
-                            WHERE {id_col} IN (SELECT route_id FROM temp_cross_routing)
-                        """)
-                        print(f"🔄 Routed {routed_count} events from '{source_table}' -> '{target_table}' (Domain: {target_domain})")
-
                 con.execute("DROP TABLE IF EXISTS temp_approved")
-                con.execute("DROP TABLE IF EXISTS temp_cross_routing")
 
             con.execute('COMMIT')
         except Exception:

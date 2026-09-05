@@ -14,12 +14,14 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from src.adapters.fhir_coding import iter_observation_elements
 from src.mapping.governance import current_run_id
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_resource_fingerprint,
 )
 from src.utils.quarantine import ensure_quarantine_table
@@ -118,7 +120,6 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
                 canonical = json.dumps(resource, sort_keys=True)
                 identity = canonical
                 source_event_key = stable_resource_fingerprint(canonical)
-            target_id = stable_event_id(identity)
             encounter_reference = resource.get("encounter", {}).get("reference") or None
             referenced_visit_id = (
                 stable_event_id(
@@ -126,12 +127,36 @@ def extract_fhir_event_contexts(fhir_dir=FHIR_DIR) -> list[tuple]:
                 )
                 if encounter_reference else None
             )
-            for target_table in targets:
-                key = (target_table, target_id)
-                value = (target_table, target_id, source_event_key, encounter_reference, referenced_visit_id)
-                if key in contexts and contexts[key] != value:
-                    raise ValueError(f"Conflicting FHIR encounter context for {target_table}/{target_id}")
-                contexts[key] = value
+            component_paths = [""]
+            if resource.get("resourceType") == "Observation":
+                component_paths = [
+                    path
+                    for path, _codeable, _value_holder in (
+                        iter_observation_elements(resource)
+                    )
+                ]
+            for component_path in component_paths:
+                if full_url:
+                    event_identity = identity
+                    if component_path:
+                        event_identity = f"{event_identity}::{component_path}"
+                    target_id = stable_event_id(event_identity)
+                else:
+                    target_id = stable_payload_event_id(
+                        identity, component_path
+                    )
+                for target_table in targets:
+                    key = (target_table, target_id)
+                    value = (
+                        target_table, target_id, source_event_key,
+                        encounter_reference, referenced_visit_id,
+                    )
+                    if key in contexts and contexts[key] != value:
+                        raise ValueError(
+                            "Conflicting FHIR encounter context for "
+                            f"{target_table}/{target_id}"
+                        )
+                    contexts[key] = value
     return list(contexts.values())
 
 

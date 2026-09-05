@@ -395,6 +395,60 @@ def test_stcm_application_requires_human_approval(tmp_path):
         assert con.execute("SELECT measurement_concept_id FROM measurement").fetchone()[0] == 300
 
 
+def test_stcm_application_does_not_move_events_between_omop_domains(tmp_path):
+    db_path = tmp_path / "domain-safe.duckdb"
+    with duckdb.connect(str(db_path)) as con:
+        _create_stcm(con)
+        _create_provenance(con)
+        con.execute("""
+            CREATE TABLE concept (
+                concept_id INTEGER, domain_id VARCHAR,
+                standard_concept VARCHAR, invalid_reason VARCHAR,
+                valid_start_date VARCHAR, valid_end_date VARCHAR
+            )
+        """)
+        con.execute("""
+            INSERT INTO concept VALUES (
+                400, 'Condition', 'S', NULL, '19700101', '20991231'
+            )
+        """)
+        con.execute("""
+            INSERT INTO source_to_concept_map VALUES (
+                'Legacy', 0, 'CMF_SYNTHEA_MEASUREMENT', 'Legacy',
+                400, 'SNOMED', '2020-01-01', '2099-12-31', NULL
+            )
+        """)
+        con.execute("""
+            INSERT INTO mapping_provenance (
+                target_table, target_id, source_value, assigned_concept_id,
+                reviewed_by
+            ) VALUES ('measurement', 1, 'Legacy', 400, 'Approved_by_Human')
+        """)
+        for table, id_col, concept_col, source_col in [
+            ("condition_occurrence", "condition_occurrence_id", "condition_concept_id", "condition_source_value"),
+            ("drug_exposure", "drug_exposure_id", "drug_concept_id", "drug_source_value"),
+            ("measurement", "measurement_id", "measurement_concept_id", "measurement_source_value"),
+            ("observation", "observation_id", "observation_concept_id", "observation_source_value"),
+            ("procedure_occurrence", "procedure_occurrence_id", "procedure_concept_id", "procedure_source_value"),
+            ("device_exposure", "device_exposure_id", "device_concept_id", "device_source_value"),
+        ]:
+            con.execute(
+                f"CREATE TABLE {table} "
+                f"({id_col} BIGINT, {concept_col} INTEGER, {source_col} VARCHAR)"
+            )
+        con.execute("INSERT INTO measurement VALUES (1, 0, 'Legacy')")
+
+    apply_stcm_mappings(db_path)
+
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        assert con.execute("SELECT * FROM measurement").fetchall() == [
+            (1, 0, "Legacy")
+        ]
+        assert con.execute(
+            "SELECT COUNT(*) FROM condition_occurrence"
+        ).fetchone()[0] == 0
+
+
 def test_stcm_application_uses_fhir_vocabulary_and_code_identity(tmp_path):
     db_path = tmp_path / "scoped-fhir.duckdb"
     with duckdb.connect(str(db_path)) as con:

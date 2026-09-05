@@ -3,6 +3,7 @@ from src.utils.helpers import (
     normalise_fhir_reference,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_person_id,
 )
 
@@ -38,4 +39,19 @@ def test_absolute_source_namespaces_prevent_cross_hospital_id_collisions():
     assert resolve_fhir_reference("Patient/123", index) == hospital_a
     assert stable_person_id(resolve_fhir_reference("Patient/123", index)) == (
         stable_person_id(hospital_a)
+    )
+
+
+def test_payload_event_ids_do_not_apply_reference_normalisation():
+    first = '{"code": "A", "url": "http://one.example/same"}'
+    second = '{"code": "B", "url": "http://two.example/same"}'
+
+    assert stable_payload_event_id(first) != stable_payload_event_id(second)
+
+
+def test_payload_component_paths_produce_distinct_event_ids():
+    payload = '{"resourceType": "Observation"}'
+
+    assert stable_payload_event_id(payload, "component[0]") != (
+        stable_payload_event_id(payload, "component[1]")
     )

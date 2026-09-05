@@ -29,6 +29,7 @@ from src.utils.helpers import (
     normalise_fhir_reference,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_person_id,
     stable_resource_fingerprint,
 )
@@ -104,7 +105,11 @@ def extract_drugs(file_path):
                         stable_resource_fingerprint(base_string)
                     )
 
-                drug_id = stable_event_id(base_string)
+                drug_id = (
+                    stable_event_id(base_string)
+                    if full_url
+                    else stable_payload_event_id(base_string)
+                )
 
                 records.append(CodedFHIRPeriodRecord(
                     event_id=drug_id,

@@ -28,6 +28,7 @@ from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_person_id,
     stable_resource_fingerprint,
 )
@@ -88,7 +89,11 @@ def extract_conditions(file_path):
                         stable_resource_fingerprint(base_string)
                     )
 
-                condition_id = stable_event_id(base_string)
+                condition_id = (
+                    stable_event_id(base_string)
+                    if full_url
+                    else stable_payload_event_id(base_string)
+                )
 
                 records.append(CodedFHIRPeriodRecord(
                     event_id=condition_id,

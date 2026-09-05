@@ -67,12 +67,29 @@ def stable_person_id(source_id: str) -> int:
 
 
 def stable_event_id(source_id: str) -> int:
-    """Match the deterministic BIGINT used by the clinical event ETLs using HMAC-SHA256."""
+    """Return a deterministic BIGINT for a FHIR reference or ``fullUrl``."""
     clean_id = canonical_fhir_identity(source_id)
     secure_hash = hmac.new(
         PHI_SALT.encode("utf-8"),
         clean_id.encode("utf-8"),
         hashlib.sha256
+    ).hexdigest()
+    return int(secure_hash[:15], 16)
+
+
+def stable_payload_event_id(resource_json: str, component_path: str = "") -> int:
+    """Return a deterministic BIGINT for canonical FHIR JSON and an optional child path.
+
+    Payloads must not pass through FHIR-reference normalisation: JSON can contain
+    URLs whose slashes are data, not reference separators.
+    """
+    identity = resource_json
+    if component_path:
+        identity = f"{identity}::{component_path}"
+    secure_hash = hmac.new(
+        PHI_SALT.encode("utf-8"),
+        identity.encode("utf-8"),
+        hashlib.sha256,
     ).hexdigest()
     return int(secure_hash[:15], 16)
 

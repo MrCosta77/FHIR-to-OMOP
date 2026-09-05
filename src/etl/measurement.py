@@ -30,6 +30,7 @@ from src.utils.helpers import (
     build_fhir_reference_index,
     resolve_fhir_reference,
     stable_event_id,
+    stable_payload_event_id,
     stable_person_id,
     stable_resource_fingerprint,
 )
@@ -103,10 +104,15 @@ def extract_measurements(file_path):
                     canonical_unit_code = canonical_ucum_code(
                         unit_system, unit_code
                     )
-                    base_string = full_url or resource_json
-                    if component_path:
-                        base_string = f"{base_string}::{component_path}"
-                    measurement_id = stable_event_id(base_string)
+                    if full_url:
+                        identity = full_url
+                        if component_path:
+                            identity = f"{identity}::{component_path}"
+                        measurement_id = stable_event_id(identity)
+                    else:
+                        measurement_id = stable_payload_event_id(
+                            resource_json, component_path
+                        )
                     records.append(FHIRMeasurementRecord(
                         event_id=measurement_id,
                         person_id=person_id,

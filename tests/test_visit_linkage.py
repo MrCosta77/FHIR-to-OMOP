@@ -1,7 +1,13 @@
+import json
+
 import duckdb
 
-from src.etl.link_visits import link_events_in_connection, replace_fhir_event_contexts
-from src.utils.helpers import stable_event_id
+from src.etl.link_visits import (
+    extract_fhir_event_contexts,
+    link_events_in_connection,
+    replace_fhir_event_contexts,
+)
+from src.utils.helpers import stable_event_id, stable_payload_event_id
 
 
 def _connection():
@@ -87,3 +93,29 @@ def test_linkage_is_idempotent_for_a_run():
     link_events_in_connection(con, "TEST-RUN")
     assert con.execute("SELECT COUNT(*) FROM event_visit_linkage").fetchone()[0] == 1
     assert con.execute("SELECT visit_occurrence_id FROM condition_occurrence").fetchone()[0] == visit_id
+
+
+def test_observation_component_context_ids_match_payload_ids(tmp_path):
+    resource = {
+        "resourceType": "Observation",
+        "encounter": {"reference": "Encounter/enc-1"},
+        "component": [
+            {"code": {"coding": [{"code": "a"}]}, "valueQuantity": {"value": 1}},
+            {"code": {"coding": [{"code": "b"}]}, "valueQuantity": {"value": 2}},
+        ],
+    }
+    bundle = {"resourceType": "Bundle", "entry": [{"resource": resource}]}
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+
+    contexts = extract_fhir_event_contexts(tmp_path)
+    actual_ids = {
+        target_id
+        for target_table, target_id, *_rest in contexts
+        if target_table == "measurement"
+    }
+    canonical = json.dumps(resource, sort_keys=True)
+
+    assert {
+        stable_payload_event_id(canonical, "component[0]"),
+        stable_payload_event_id(canonical, "component[1]"),
+    } <= actual_ids
