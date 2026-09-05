@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "default_data_classification": "SYNTHETIC",
+  "allowed_data_classifications": ["SYNTHETIC", "DEIDENTIFIED", "PHI"],
+  "llm_network_policy": {
+    "allowed_hosts": ["localhost", "127.0.0.1", "::1"],
+    "external_endpoints_forbidden": true
+  },
+  "prompt_policy": {
+    "direct_identifier_redaction_required": true,
+    "raw_prompt_logging_forbidden": true,
+    "raw_response_logging_forbidden": true
+  },
+  "phi_activation": {
+    "enabled_environment_variable": "CMF_PHI_ENABLED",
+    "approval_environment_variable": "CMF_PHI_POLICY_APPROVED_BY",
+    "retention_environment_variable": "CMF_PHI_RETENTION_DAYS",
+    "authenticated_user_environment_variable": "CMF_AUTHENTICATED_USER",
+    "reviewer_allowlist_environment_variable": "CMF_REVIEWER_ALLOWLIST",
+    "adjudicator_allowlist_environment_variable": "CMF_ADJUDICATOR_ALLOWLIST",
+    "source_admin_allowlist_environment_variable": "CMF_SOURCE_ADMIN_ALLOWLIST"
+  },
+  "retention": {
+    "raw_prompts_days": 0,
+    "raw_responses_days": 0,
+    "phi_retention_requires_institutional_approval": true
+  }
+}

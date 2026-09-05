@@ -6,8 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICY = PROJECT_ROOT / "quality" / "dqd_policy.json"
+from src.utils.assets import runtime_asset
+
+DEFAULT_POLICY = runtime_asset("quality", "dqd_policy.json")
 
 
 def validate_dqd_result(result: dict, policy: dict) -> dict[str, int | float]:

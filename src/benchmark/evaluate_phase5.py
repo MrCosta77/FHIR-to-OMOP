@@ -35,11 +35,14 @@ from src.mapping.semantic_mapper import (
     build_prompt,
     parse_llm_decision,
 )
+from src.utils.assets import runtime_asset
 from src.utils.config import SETTINGS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
-DEFAULT_PROTOCOL = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_protocol.json"
+DEFAULT_FIXTURE = runtime_asset("benchmarks", "dirty_hospital", "cases.jsonl")
+DEFAULT_PROTOCOL = runtime_asset(
+    "benchmarks", "dirty_hospital", "phase5_protocol.json"
+)
 DEFAULT_DATABASE = SETTINGS.db_path
 DEFAULT_CHROMA = SETTINGS.chroma_path
 EVALUATOR_VERSION = "1.0.0"

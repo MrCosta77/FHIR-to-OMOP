@@ -34,6 +34,13 @@ packages = [
     "src.mapping.governance"
 ]
 
+[tool.setuptools.package-data]
+src = [
+    "_data/**/*.csv",
+    "_data/**/*.json",
+    "_data/**/*.jsonl",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

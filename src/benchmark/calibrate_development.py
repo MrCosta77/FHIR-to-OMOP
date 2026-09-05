@@ -35,11 +35,13 @@ from src.mapping.semantic_mapper import (
     OLLAMA_TIMEOUT,
     PROMPT_VERSION,
 )
+from src.utils.assets import runtime_asset
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROTOCOL = (
-    PROJECT_ROOT / "benchmarks" / "dirty_hospital" /
-    "phase6_development_protocol.json"
+    runtime_asset(
+        "benchmarks", "dirty_hospital", "phase6_development_protocol.json"
+    )
 )
 
 

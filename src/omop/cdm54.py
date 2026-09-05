@@ -6,12 +6,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SPEC_PATH = (
-    PROJECT_ROOT
-    / "resources"
-    / "omop_cdm_v5_4"
-    / "OMOP_CDMv5.4_Field_Level.csv"
+from src.utils.assets import runtime_asset
+
+SPEC_PATH = runtime_asset(
+    "resources", "omop_cdm_v5_4", "OMOP_CDMv5.4_Field_Level.csv"
 )
 CDM_VERSION = "5.4"
 CDM_RELEASE = "v5.4.3"

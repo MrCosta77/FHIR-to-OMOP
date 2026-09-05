@@ -1,0 +1,9 @@
+{
+  "schema_version": 3,
+  "status": "approved",
+  "reviewed_by": "Mario Costa",
+  "reviewed_on": "2026-08-26",
+  "max_errors": 0,
+  "max_failed_checks": 0,
+  "allowed_failure_ids": {}
+}
