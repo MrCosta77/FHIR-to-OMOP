@@ -17,6 +17,13 @@
     "simulate_lis_noise": false,
     "require_integration": true,
     "include_dqd": true,
-    "ollama_timeout": 120.0
+    "ollama_timeout": 120.0,
+    "cdm_source_name": "",
+    "cdm_source_abbreviation": "",
+    "cdm_holder": "",
+    "cdm_source_description": "",
+    "cdm_source_release_date": "",
+    "cdm_source_documentation_reference": "",
+    "cdm_etl_reference": "https://github.com/MrCosta77/FHIR-to-OMOP"
   }
 }

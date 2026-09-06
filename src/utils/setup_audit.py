@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.mapping.governance import ensure_governance_tables
-from src.utils.config import DB_PATH
+from src.utils.config import DB_PATH, SETTINGS
 
 
 def setup_audit_tables():
@@ -54,6 +54,7 @@ def setup_audit_tables():
             pass # Ignore if the vocabulary table does not exist yet
 
         current_date = datetime.now().strftime('%Y-%m-%d')
+        source_release_date = SETTINGS.cdm_source_release_date or current_date
         con.execute("DELETE FROM cdm_source")
 
         con.execute("""
@@ -63,15 +64,21 @@ def setup_audit_tables():
                 source_release_date, cdm_release_date, cdm_version,
                 cdm_version_concept_id, vocabulary_version
             ) VALUES (
-                'Clinical Mapping Framework (Synthea RWE)',
-                'CMF-Synthea',
-                'Mario Costa',
-                'Synthetic patient records generated via Synthea and transformed into OMOP CDM.',
-                'https://github.com/synthetichealth/synthea',
-                'https://github.com/MrCosta77/FHIR-to-OMOP',
+                ?, ?, ?, ?,
+                ?, ?,
                 ?, ?, '5.4', 756265, ?
             )
-        """, (current_date, current_date, vocab_version))
+        """, (
+            SETTINGS.cdm_source_name,
+            SETTINGS.cdm_source_abbreviation,
+            SETTINGS.cdm_holder,
+            SETTINGS.cdm_source_description,
+            SETTINGS.cdm_source_documentation_reference or None,
+            SETTINGS.cdm_etl_reference or None,
+            source_release_date,
+            current_date,
+            vocab_version,
+        ))
 
         print("✅ 'cdm_source' table verified/created successfully!")
 

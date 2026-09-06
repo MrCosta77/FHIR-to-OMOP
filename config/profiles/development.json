@@ -17,6 +17,13 @@
     "simulate_lis_noise": false,
     "require_integration": false,
     "include_dqd": false,
-    "ollama_timeout": 120.0
+    "ollama_timeout": 120.0,
+    "cdm_source_name": "Clinical Mapping Framework (Synthea RWE)",
+    "cdm_source_abbreviation": "CMF-Synthea",
+    "cdm_holder": "Mário Luís Gonçalves da Costa",
+    "cdm_source_description": "Synthetic patient records generated via Synthea and transformed into OMOP CDM.",
+    "cdm_source_release_date": "",
+    "cdm_source_documentation_reference": "https://github.com/synthetichealth/synthea",
+    "cdm_etl_reference": "https://github.com/MrCosta77/FHIR-to-OMOP"
   }
 }

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import duckdb
 
@@ -120,3 +121,54 @@ def test_run_manifest_is_persisted_in_database(tmp_path):
         assert con.execute("""
             SELECT run_id, status, git_commit FROM etl_run
         """).fetchone() == ("RUN-test", "RUNNING", "abc123")
+
+
+def test_phi_input_manifest_suppresses_fhir_filenames(monkeypatch, tmp_path):
+    fhir = tmp_path / "fhir"
+    vocabulary = tmp_path / "vocabulary"
+    fhir.mkdir()
+    vocabulary.mkdir()
+    (fhir / "Patient-Maria-SNS-123456.json").write_text("{}", encoding="utf-8")
+    (vocabulary / "CONCEPT.csv").write_text("concept_id", encoding="utf-8")
+    monkeypatch.setattr(main, "FHIR_INPUT_DIR", fhir)
+    monkeypatch.setattr(
+        main,
+        "SETTINGS",
+        replace(main.SETTINGS, vocab_dir=vocabulary, data_classification="PHI"),
+    )
+
+    manifest = main.input_manifest()
+
+    assert manifest[0]["path"] == "fhir/input-000001.json"
+    assert "Maria" not in str(manifest)
+    assert manifest[1]["path"].endswith("CONCEPT.csv")
+
+
+def test_phi_error_message_suppresses_exception_content(monkeypatch):
+    monkeypatch.setattr(
+        main, "SETTINGS", replace(main.SETTINGS, data_classification="PHI")
+    )
+
+    message = main.safe_error_message(
+        ValueError("unresolved Patient/Maria-SNS-123456")
+    )
+
+    assert message == "ValueError: sensitive details suppressed"
+
+
+def test_phi_subprocess_output_is_discarded_without_buffering(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        main, "SETTINGS", replace(main.SETTINGS, data_classification="PHI")
+    )
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    main.run_step({"name": "config", "script": "src/utils/config.py"}, {})
+
+    assert captured["stdout"] is main.subprocess.DEVNULL
+    assert captured["stderr"] is main.subprocess.DEVNULL
+    assert "capture_output" not in captured

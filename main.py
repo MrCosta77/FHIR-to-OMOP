@@ -48,6 +48,10 @@ PIPELINE_STEPS = [
         "script": "src/quality/preflight.py",
         "args": ["--include-dqd"] if SETTINGS.include_dqd else [],
     },
+    {
+        "name": "0b. Validate Pseudonymization Key Continuity",
+        "script": "src/security/key_continuity.py",
+    },
     {"name": "1. Setup Vocabularies", "script": "src/utils/setup_vocab.py"},
     {"name": "2. Setup Audit/Provenance", "script": "src/utils/setup_audit.py"},
     {"name": "2b. Build OMOP DDL Skeleton", "script": "src/utils/setup_cdm_schema.py"},
@@ -117,23 +121,35 @@ def sha256_file(path):
 
 def input_manifest():
     roots = [
-        FHIR_INPUT_DIR,
-        SETTINGS.vocab_dir,
+        ("fhir", FHIR_INPUT_DIR),
+        ("vocabulary", SETTINGS.vocab_dir),
     ]
     files = []
-    for root in roots:
+    for source_kind, root in roots:
         if root.is_dir():
-            for path in sorted(item for item in root.iterdir() if item.is_file()):
-                try:
-                    manifest_path = path.relative_to(PROJECT_ROOT)
-                except ValueError:
-                    manifest_path = path
+            source_files = sorted(item for item in root.iterdir() if item.is_file())
+            for index, path in enumerate(source_files, start=1):
+                if SETTINGS.data_classification == "PHI" and source_kind == "fhir":
+                    manifest_path = f"fhir/input-{index:06d}{path.suffix.lower()}"
+                else:
+                    try:
+                        manifest_path = path.relative_to(PROJECT_ROOT)
+                    except ValueError:
+                        manifest_path = path
                 files.append({
                     "path": str(manifest_path).replace("\\", "/"),
+                    "source_kind": source_kind,
                     "size": path.stat().st_size,
                     "sha256": sha256_file(path),
                 })
     return files
+
+
+def safe_error_message(exc: Exception) -> str:
+    """Return diagnostic detail unless PHI policy requires suppression."""
+    if SETTINGS.data_classification == "PHI":
+        return f"{type(exc).__name__}: sensitive details suppressed"
+    return str(exc)
 
 
 def git_commit():
@@ -250,7 +266,18 @@ def run_step(step, environment):
         command.append(str(script_path))
     command.extend(step.get("args", []))
     started = time.monotonic()
-    subprocess.run(command, cwd=PROJECT_ROOT, env=environment, check=True)
+    suppress_output = SETTINGS.data_classification == "PHI"
+    output_policy = (
+        {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if suppress_output else {}
+    )
+    subprocess.run(
+        command,
+        cwd=PROJECT_ROOT,
+        env=environment,
+        check=True,
+        **output_policy,
+    )
     return round(time.monotonic() - started, 3)
 
 
@@ -296,7 +323,8 @@ def main():
                 step_record["status"] = "SUCCESS"
             except Exception as exc:
                 step_record["status"] = "FAILED"
-                step_record["error"] = str(exc)
+                step_record["error_type"] = type(exc).__name__
+                step_record["error"] = safe_error_message(exc)
                 raise
             finally:
                 write_manifest(manifest_path, manifest)
@@ -340,7 +368,7 @@ def main():
             raise
         manifest["status"] = "FAILED"
         manifest["completed_at"] = utc_now().isoformat()
-        manifest["error_message"] = str(exc)
+        manifest["error_message"] = safe_error_message(exc)
         try:
             persist_run(staging_db, manifest)
         finally:

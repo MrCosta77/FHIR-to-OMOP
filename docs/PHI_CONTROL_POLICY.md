@@ -21,6 +21,10 @@ institutional legal, privacy and records-management decision.
 The public synthetic-development key is rejected by the hospital profile. The
 secret itself is never persisted; only its declared version and a truncated,
 one-way fingerprint may appear in non-secret run provenance.
+The same version and fingerprint are persisted inside the protected database
+and verified before ETL. A mismatch always fails closed and requires a governed
+identifier migration. `CMF_PHI_KEY_BOOTSTRAP_APPROVED=true` is restricted to
+one-time registration of a populated legacy database with no key manifest.
 
 ## Redaction and model boundary
 
@@ -33,6 +37,10 @@ approved de-identification/data-loss-prevention control.
 
 Only `localhost` or an IP loopback endpoint is accepted. Raw prompts and raw
 model responses are never written to the security audit log.
+FHIR filenames are replaced by opaque sequence labels in PHI run manifests.
+Failed subprocess output and raw exception text are suppressed before errors
+are persisted, preventing paths and Patient/Encounter references from entering
+immutable run evidence.
 
 ## Access
 

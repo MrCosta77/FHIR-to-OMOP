@@ -4,6 +4,14 @@ import pytest
 
 from src.utils.config import SettingsError, load_settings
 
+HOSPITAL_CDM_ENV = {
+    "CMF_CDM_SOURCE_NAME": "Example Hospital OMOP",
+    "CMF_CDM_SOURCE_ABBREVIATION": "EXH-OMOP",
+    "CMF_CDM_HOLDER": "Example Hospital",
+    "CMF_CDM_SOURCE_DESCRIPTION": "Governed hospital EHR extract.",
+    "CMF_CDM_SOURCE_RELEASE_DATE": "2026-09-01",
+}
+
 
 def test_development_profile_resolves_portable_paths(tmp_path):
     profiles = tmp_path / "config" / "profiles"
@@ -58,6 +66,7 @@ def test_hospital_profile_requires_explicit_phi_approval():
             "CMF_PROFILE": "hospital",
             "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
             "CMF_PHI_KEY_VERSION": "hospital-key-v1",
+            **HOSPITAL_CDM_ENV,
         })
 
 
@@ -69,6 +78,7 @@ def test_hospital_profile_accepts_complete_phi_activation():
         "CMF_PHI_RETENTION_DAYS": "30",
         "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
         "CMF_PHI_KEY_VERSION": "hospital-key-v1",
+        **HOSPITAL_CDM_ENV,
     })
     assert settings.profile == "hospital"
     assert settings.data_classification == "PHI"
@@ -79,6 +89,25 @@ def test_hospital_profile_accepts_complete_phi_activation():
     assert settings.phi_salt not in repr(settings)
     assert len(settings.phi_key_fingerprint) == 16
     assert settings.include_dqd is True
+
+
+def test_hospital_profile_requires_institutional_cdm_metadata():
+    environment = {
+        "CMF_PROFILE": "hospital",
+        "CMF_PHI_ENABLED": "true",
+        "CMF_PHI_POLICY_APPROVED_BY": "Hospital DPO",
+        "CMF_PHI_RETENTION_DAYS": "30",
+        "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "hospital-key-v1",
+    }
+
+    with pytest.raises(SettingsError, match="CDM source metadata"):
+        load_settings(environment)
+
+
+def test_cdm_source_release_date_must_be_a_real_date():
+    with pytest.raises(SettingsError, match="valid YYYY-MM-DD"):
+        load_settings({"CMF_CDM_SOURCE_RELEASE_DATE": "2026-99-99"})
 
 
 @pytest.mark.parametrize("override", [
@@ -95,6 +124,7 @@ def test_hospital_profile_cannot_downgrade_safety(override):
         "CMF_PHI_RETENTION_DAYS": "30",
         "CMF_PHI_SALT": "hospital-secret-with-at-least-32-characters",
         "CMF_PHI_KEY_VERSION": "hospital-key-v1",
+        **HOSPITAL_CDM_ENV,
         **override,
     }
     with pytest.raises(SettingsError):

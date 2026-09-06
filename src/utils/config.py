@@ -8,6 +8,7 @@ import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from src.security.privacy import validate_privacy_runtime
@@ -22,6 +23,9 @@ PROFILE_KEYS = {
     "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
     "ollama_timeout", "model_name", "similarity_threshold", "data_classification",
     "simulate_lis_noise", "require_integration", "include_dqd",
+    "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
+    "cdm_source_description", "cdm_source_release_date",
+    "cdm_source_documentation_reference", "cdm_etl_reference",
 }
 ENVIRONMENT_KEYS = {
     "db_path": "CMF_DB_PATH",
@@ -40,6 +44,13 @@ ENVIRONMENT_KEYS = {
     "simulate_lis_noise": "CMF_SIMULATE_LIS_NOISE",
     "require_integration": "CMF_REQUIRE_INTEGRATION",
     "include_dqd": "CMF_INCLUDE_DQD",
+    "cdm_source_name": "CMF_CDM_SOURCE_NAME",
+    "cdm_source_abbreviation": "CMF_CDM_SOURCE_ABBREVIATION",
+    "cdm_holder": "CMF_CDM_HOLDER",
+    "cdm_source_description": "CMF_CDM_SOURCE_DESCRIPTION",
+    "cdm_source_release_date": "CMF_CDM_SOURCE_RELEASE_DATE",
+    "cdm_source_documentation_reference": "CMF_CDM_SOURCE_DOCUMENTATION_REFERENCE",
+    "cdm_etl_reference": "CMF_CDM_ETL_REFERENCE",
 }
 PATH_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
@@ -71,6 +82,13 @@ class RuntimeSettings:
     simulate_lis_noise: bool
     require_integration: bool
     include_dqd: bool
+    cdm_source_name: str
+    cdm_source_abbreviation: str
+    cdm_holder: str
+    cdm_source_description: str
+    cdm_source_release_date: str
+    cdm_source_documentation_reference: str
+    cdm_etl_reference: str
     phi_salt: str = field(repr=False)
     phi_key_version: str
     phi_key_fingerprint: str
@@ -95,6 +113,15 @@ class RuntimeSettings:
             "simulate_lis_noise": self.simulate_lis_noise,
             "require_integration": self.require_integration,
             "include_dqd": self.include_dqd,
+            "cdm_source_name": self.cdm_source_name,
+            "cdm_source_abbreviation": self.cdm_source_abbreviation,
+            "cdm_holder": self.cdm_holder,
+            "cdm_source_description": self.cdm_source_description,
+            "cdm_source_release_date": self.cdm_source_release_date,
+            "cdm_source_documentation_reference": (
+                self.cdm_source_documentation_reference
+            ),
+            "cdm_etl_reference": self.cdm_etl_reference,
             "phi_key_version": self.phi_key_version,
             "phi_key_fingerprint": self.phi_key_fingerprint,
         }
@@ -196,6 +223,24 @@ def load_settings(
     include_dqd = _parse_boolean(values["include_dqd"], "CMF_INCLUDE_DQD")
     phi_salt = env.get("CMF_PHI_SALT", DEVELOPMENT_PHI_SALT)
     phi_key_version = env.get("CMF_PHI_KEY_VERSION", "development-v1").strip()
+    cdm_source = {
+        key: str(values[key]).strip()
+        for key in (
+            "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
+            "cdm_source_description", "cdm_source_release_date",
+            "cdm_source_documentation_reference", "cdm_etl_reference",
+        )
+    }
+    if len(cdm_source["cdm_source_abbreviation"]) > 25:
+        raise SettingsError("CMF_CDM_SOURCE_ABBREVIATION must not exceed 25 characters.")
+    release_date = cdm_source["cdm_source_release_date"]
+    if release_date:
+        try:
+            date.fromisoformat(release_date)
+        except ValueError as exc:
+            raise SettingsError(
+                "CMF_CDM_SOURCE_RELEASE_DATE must be a valid YYYY-MM-DD date."
+            ) from exc
     if not model_name:
         raise SettingsError("CMF_MODEL_NAME must not be empty.")
     if profile == "hospital":
@@ -212,6 +257,18 @@ def load_settings(
         if not phi_key_version or phi_key_version == "development-v1":
             raise SettingsError(
                 "The hospital profile requires institution-managed CMF_PHI_KEY_VERSION."
+            )
+        required_cdm = {
+            "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
+            "cdm_source_description", "cdm_source_release_date",
+        }
+        missing_cdm = [
+            key for key in required_cdm if not cdm_source[key]
+        ]
+        if missing_cdm:
+            raise SettingsError(
+                "The hospital profile requires institutional CDM source metadata: "
+                + ", ".join(sorted(missing_cdm))
             )
         if simulate_lis_noise:
             raise SettingsError("LIS noise simulation is forbidden in the hospital profile.")
@@ -239,6 +296,7 @@ def load_settings(
         simulate_lis_noise=simulate_lis_noise,
         require_integration=require_integration,
         include_dqd=include_dqd,
+        **cdm_source,
         phi_salt=phi_salt,
         phi_key_version=phi_key_version,
         phi_key_fingerprint=hashlib.sha256(

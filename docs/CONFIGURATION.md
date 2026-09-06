@@ -34,6 +34,22 @@ declared version and a truncated SHA-256 fingerprint so runs can be compared
 without revealing the key. Changing or losing this secret changes deterministic
 person and event identifiers and therefore requires a governed migration.
 
+Before any ETL step, the pipeline records the key version and fingerprint in
+`cmf_pseudonymization_key_manifest`. Every later run must match both values.
+An existing populated hospital database created before this control is adopted
+requires the one-time declaration `CMF_PHI_KEY_BOOTSTRAP_APPROVED=true`; this
+only registers the current key identity and never permits a later key change.
+
+The hospital profile also requires institution-owned `cdm_source` metadata:
+`CMF_CDM_SOURCE_NAME`, `CMF_CDM_SOURCE_ABBREVIATION`, `CMF_CDM_HOLDER`,
+`CMF_CDM_SOURCE_DESCRIPTION` and `CMF_CDM_SOURCE_RELEASE_DATE`. Documentation
+and ETL references are optional overrides. Synthetic Synthea attribution is
+never written into a hospital-profile database.
+
+PHI manifests retain content hashes and sizes but replace FHIR filenames with
+ordered opaque identifiers. Persisted errors contain exception types and a
+suppression notice rather than raw paths or FHIR references.
+
 Validate and display the effective non-secret configuration before a run:
 
 ```bash
