@@ -11,6 +11,15 @@ sys.path.append(str(PROJECT_ROOT))
 
 from src.utils.config import DB_PATH, MODEL_NAME
 
+MAX_RESULT_ROWS = 1000
+_FORBIDDEN_SQL = re.compile(
+    r"\b(?:ALTER|ATTACH|CALL|COPY|CREATE|DELETE|DETACH|DROP|EXPORT|IMPORT|"
+    r"INSERT|INSTALL|LOAD|PRAGMA|RESET|SET|TRUNCATE|UPDATE|VACUUM)\b|"
+    r"\b(?:GLOB|PARQUET_SCAN|POSTGRES_SCAN|SQLITE_SCAN)\s*\(|"
+    r"\bREAD_(?:CSV|JSON|PARQUET)(?:_AUTO)?\s*\(",
+    re.IGNORECASE,
+)
+
 # 1. Define the Agent's "Brain": Database Context
 SCHEMA_CONTEXT = """
 You are an expert Health Data Scientist and SQL developer working with an OMOP CDM v5.4 database in DuckDB.
@@ -46,18 +55,48 @@ def generate_sql_query(question):
             options={'temperature': 0.0} # We want exact and deterministic responses
         )
 
-        raw_output = response['message']['content'].strip()
-
-        # Regex to strip markdown formatting if the LLM includes it (e.g., ```sql ... ```)
-        sql_match = re.search(r'```(?:sql)?\n(.*?)\n```', raw_output, re.DOTALL | re.IGNORECASE)
-        if sql_match:
-            return sql_match.group(1).strip()
-
-        return raw_output.replace('```', '').strip()
+        return extract_sql_query(response['message']['content'])
 
     except Exception as e:
         print(f"❌ LLM Error: {e}")
         return None
+
+
+def extract_sql_query(raw_output: str) -> str:
+    """Extract one SQL payload from an optional Markdown code fence."""
+    output = str(raw_output or "").strip()
+    fenced = re.search(
+        r"```(?:sql)?[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?```",
+        output,
+        re.DOTALL | re.IGNORECASE,
+    )
+    return fenced.group(1).strip() if fenced else output
+
+
+def _sql_control_text(sql_query: str) -> str:
+    """Mask literals/comments so control-token checks do not inspect their contents."""
+    text = re.sub(r"/\*.*?\*/", " ", sql_query, flags=re.DOTALL)
+    text = re.sub(r"--[^\r\n]*", " ", text)
+    text = re.sub(r"'(?:''|[^'])*'", "''", text)
+    text = re.sub(r'"(?:""|[^"])*"', '""', text)
+    return text.strip()
+
+
+def validate_read_only_sql(sql_query: str) -> str:
+    """Accept one SELECT/CTE statement without DuckDB external-access functions."""
+    query = str(sql_query or "").strip()
+    if not query:
+        raise ValueError("The generated SQL query is empty.")
+
+    control = _sql_control_text(query)
+    without_trailing_semicolon = control[:-1].rstrip() if control.endswith(";") else control
+    if ";" in without_trailing_semicolon:
+        raise ValueError("Only one SQL statement is allowed.")
+    if not re.match(r"^(?:SELECT|WITH)\b", without_trailing_semicolon, re.IGNORECASE):
+        raise ValueError("Only SELECT queries and read-only CTEs are allowed.")
+    if _FORBIDDEN_SQL.search(without_trailing_semicolon):
+        raise ValueError("The query contains a forbidden SQL operation or external data access.")
+    return query
 
 def run_agent():
     print("\n" + "🤖"*25)
@@ -89,7 +128,8 @@ def run_agent():
 
             try:
                 print("⚙️ Executing query in DuckDB...")
-                result = con.execute(sql_query).fetchall()
+                sql_query = validate_read_only_sql(sql_query)
+                result = con.execute(sql_query).fetchmany(MAX_RESULT_ROWS)
                 columns = [desc[0] for desc in con.description]
 
                 print("\n📊 RESULT:")
@@ -103,7 +143,7 @@ def run_agent():
                         print(" | ".join(str(val) for val in row))
                 print("\n")
 
-            except duckdb.Error as e:
+            except (duckdb.Error, ValueError) as e:
                 print(f"❌ SQL Execution Error: The generated query had a syntax issue.\nDetails: {e}\n")
 
 if __name__ == "__main__":

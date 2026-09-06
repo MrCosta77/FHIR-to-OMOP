@@ -267,6 +267,9 @@ python -m pytest -m "not integration" -v
 Python 3.12 dependencies are transitively pinned with artifact hashes. The
 official OHDSI R stack is pinned for R 4.6.1 in `renv.lock`; restore and release
 instructions are in [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md).
+The CI wheel check verifies importability and packaged runtime resources only.
+The supported full-pipeline execution remains a source checkout; this repository
+does not currently publish a standalone application or PyPI distribution.
 After building the local DuckDB, run the complete suite (including OMOP
 integration checks):
 ```bash

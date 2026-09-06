@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import tomllib
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +42,43 @@ def _direct_python_packages(text: str) -> set[str]:
             raise ReleaseMetadataError(f"Invalid requirements.in line: {raw_line}")
         packages.add(match.group(1).lower().replace("_", "-"))
     return packages
+
+
+def _cff_scalar(text: str, key: str) -> str:
+    match = re.search(rf"(?m)^{re.escape(key)}:\s*(.+?)\s*$", text)
+    if not match:
+        raise ReleaseMetadataError(f"CITATION.cff is missing required field: {key}")
+    return match.group(1).strip().strip('"').strip("'")
+
+
+def _validate_citation(citation: str, version: str) -> None:
+    if _cff_scalar(citation, "cff-version") != "1.2.0":
+        raise ReleaseMetadataError("CITATION.cff must use CFF 1.2.0")
+    if _cff_scalar(citation, "title") != "FHIR-to-OMOP: Clinical Mapping Framework":
+        raise ReleaseMetadataError("CITATION.cff title does not identify this project")
+    if _cff_scalar(citation, "license") != "Apache-2.0":
+        raise ReleaseMetadataError("CITATION.cff license must be Apache-2.0")
+    if _cff_scalar(citation, "version") != version:
+        raise ReleaseMetadataError("CITATION.cff version does not match VERSION")
+    try:
+        date.fromisoformat(_cff_scalar(citation, "date-released"))
+    except ValueError as exc:
+        raise ReleaseMetadataError("CITATION.cff date-released is not an ISO date") from exc
+    repository = _cff_scalar(citation, "repository-code")
+    if repository != "https://github.com/MrCosta77/FHIR-to-OMOP":
+        raise ReleaseMetadataError("CITATION.cff repository-code is not canonical")
+    if not re.search(r"(?m)^\s*- family-names:\s*\S", citation):
+        raise ReleaseMetadataError("CITATION.cff has no author family-names")
+    if not re.search(r"(?m)^\s+given-names:\s*\S", citation):
+        raise ReleaseMetadataError("CITATION.cff has no author given-names")
+
+
+def _unreleased_notes(changelog: str) -> str:
+    match = re.search(
+        r"(?ms)^## \[Unreleased\]\s*(.*?)(?=^## \[|\Z)",
+        changelog,
+    )
+    return match.group(1).strip() if match else ""
 
 
 def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> dict:
@@ -104,8 +142,7 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
         raise ReleaseMetadataError("NOTICE has no project copyright attribution")
 
     citation = _read(root / "CITATION.cff")
-    if "cff-version:" not in citation or "FHIR-to-OMOP" not in citation:
-        raise ReleaseMetadataError("CITATION.cff is missing or invalid")
+    _validate_citation(citation, version)
 
     quality_workflow = _read(root / ".github" / "workflows" / "quality.yml")
     if "requirements.lock" not in quality_workflow or "--require-hashes" not in quality_workflow:
@@ -114,6 +151,10 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
     if release:
         if "Select and add the project license" in changelog:
             raise ReleaseMetadataError("CHANGELOG.md still marks the license as pending")
+        if _unreleased_notes(changelog):
+            raise ReleaseMetadataError(
+                "CHANGELOG.md has Unreleased changes that must be assigned to a version"
+            )
 
     return {
         "version": version,

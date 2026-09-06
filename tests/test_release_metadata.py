@@ -15,6 +15,7 @@ RELEASE_FILES = [
     "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
+    "CITATION.cff",
     ".github/workflows/quality.yml",
 ]
 
@@ -30,8 +31,8 @@ def test_versioned_dependency_locks_and_changelog_are_consistent():
     result = validate_release_metadata(ROOT)
 
     assert result == {
-        "version": "0.2.2",
-        "python_direct_dependencies": 7,
+        "version": "0.3.0",
+        "python_direct_dependencies": 8,
         "r_version": "4.6.1",
         "r_packages": 71,
         "license": "Apache-2.0",
@@ -39,8 +40,20 @@ def test_versioned_dependency_locks_and_changelog_are_consistent():
     }
 
 
-def test_release_gate_accepts_apache_2_metadata():
+def test_release_gate_accepts_versioned_changes():
     assert validate_release_metadata(ROOT, release=True)["release_ready"] is True
+
+
+def test_release_gate_rejects_unversioned_changes(tmp_path):
+    _copy_release_files(tmp_path)
+    changelog = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(
+        changelog.replace("## [Unreleased]", "## [Unreleased]\n\n- Pending change", 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="Unreleased changes"):
+        validate_release_metadata(tmp_path, release=True)
 
 
 def test_release_validator_rejects_missing_required_r_package(tmp_path):
@@ -58,9 +71,21 @@ def test_release_validator_rejects_package_version_mismatch(tmp_path):
     _copy_release_files(tmp_path)
     pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
-        pyproject.replace('version = "0.2.2"', 'version = "9.9.9"'),
+        pyproject.replace('version = "0.3.0"', 'version = "9.9.9"'),
         encoding="utf-8",
     )
 
     with pytest.raises(ReleaseMetadataError, match="does not match VERSION"):
+        validate_release_metadata(tmp_path)
+
+
+def test_release_validator_rejects_citation_version_mismatch(tmp_path):
+    _copy_release_files(tmp_path)
+    citation = (tmp_path / "CITATION.cff").read_text(encoding="utf-8")
+    (tmp_path / "CITATION.cff").write_text(
+        citation.replace("version: 0.3.0", "version: 9.9.9"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="CITATION.cff version"):
         validate_release_metadata(tmp_path)

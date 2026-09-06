@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.0] - 2026-09-06
+
+### Changed
+
+- Pinned the CI linter in the hashed Python lock and restored the documented
+  lock-compilation command.
+- Clarified the review-queue threshold and supported wheel-installation scope.
+
+### Fixed
+
+- Rejected empty FHIR identities instead of deriving valid-looking hashed IDs.
+- Restricted local-LLM Text-to-SQL execution to a single read-only query,
+  blocked external-file functions and bounded displayed results.
+- Strengthened structured citation and pending-release metadata validation.
+
+### Safety
+
+- Hospital runs now bind institution-managed pseudonymization-key continuity,
+  source metadata and PHI-safe run evidence before ETL execution.
+
 ## [0.2.2] - 2026-09-02
 
 ### Added
@@ -99,7 +121,8 @@ All notable changes to this project are documented here. The format follows
 - Documented clinical review and institutional governance remain mandatory
   before any hospital pilot.
 
-[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MrCosta77/FHIR-to-OMOP/compare/v0.1.0...v0.2.0

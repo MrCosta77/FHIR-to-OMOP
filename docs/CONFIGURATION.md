@@ -24,6 +24,11 @@ the execution environment using the mechanism appropriate to that platform.
   `CMF_PHI_KEY_VERSION` are provided. It also requires the complete integration
   and OHDSI DQD gates. It is a safety template, not deployment authorization.
 
+`similarity_threshold` is a retrieval-quality gate for admitting a proposal
+to the human-review queue. It is not an automatic acceptance threshold and
+never authorizes STCM or OMOP publication; governed human decisions remain
+mandatory at every configured value.
+
 Relative paths are anchored at the repository root, independent of the current
 working directory. Absolute paths are accepted on the host platform. No profile
 contains credentials, identities or institutional approvals.

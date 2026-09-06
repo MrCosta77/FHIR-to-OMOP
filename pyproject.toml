@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fhir-to-omop"
-version = "0.2.2"
+version = "0.3.0"
 description = "Clinical AI mapping framework from FHIR to OMOP"
 authors = [
     {name = "Mário Luís Gonçalves da Costa", email = "mariocosta9@gmail.com"}
@@ -22,15 +22,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.1.1"
+    "pytest==9.1.1",
+    "ruff==0.16.5"
 ]
 
 [tool.setuptools]
 package-dir = {"" = "."}
 packages = [
-    "src", "src.adapters", "src.analytics", "src.app", "src.benchmark", 
-    "src.clinical_mapping_core", "src.etl", "src.mapping", "src.omop", 
-    "src.quality", "src.security", "src.simulation", "src.utils", 
+    "src", "src.adapters", "src.analytics", "src.app", "src.benchmark",
+    "src.clinical_mapping_core", "src.etl", "src.mapping", "src.omop",
+    "src.quality", "src.security", "src.simulation", "src.utils",
     "src.mapping.governance"
 ]
 

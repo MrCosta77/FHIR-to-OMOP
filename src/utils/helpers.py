@@ -58,6 +58,8 @@ from src.utils.config import PHI_SALT
 def stable_person_id(source_id: str) -> int:
     """Generates a highly stable, collision-resistant BIGINT from any FHIR ID format using HMAC-SHA256."""
     clean_id = canonical_fhir_identity(source_id)
+    if not clean_id:
+        raise ValueError("FHIR patient identity must not be empty")
     secure_hash = hmac.new(
         PHI_SALT.encode("utf-8"),
         clean_id.encode("utf-8"),
@@ -69,6 +71,8 @@ def stable_person_id(source_id: str) -> int:
 def stable_event_id(source_id: str) -> int:
     """Return a deterministic BIGINT for a FHIR reference or ``fullUrl``."""
     clean_id = canonical_fhir_identity(source_id)
+    if not clean_id:
+        raise ValueError("FHIR event identity must not be empty")
     secure_hash = hmac.new(
         PHI_SALT.encode("utf-8"),
         clean_id.encode("utf-8"),
@@ -83,7 +87,9 @@ def stable_payload_event_id(resource_json: str, component_path: str = "") -> int
     Payloads must not pass through FHIR-reference normalisation: JSON can contain
     URLs whose slashes are data, not reference separators.
     """
-    identity = resource_json
+    identity = str(resource_json or "")
+    if not identity:
+        raise ValueError("FHIR resource payload must not be empty")
     if component_path:
         identity = f"{identity}::{component_path}"
     secure_hash = hmac.new(

@@ -7,3 +7,4 @@ sentence-transformers==2.5.1
 pandas==3.0.5
 streamlit>=1.30.0,<2
 pytest==9.1.1
+ruff==0.16.5

@@ -1,3 +1,5 @@
+import pytest
+
 from src.utils.helpers import (
     build_fhir_reference_index,
     normalise_fhir_reference,
@@ -55,3 +57,17 @@ def test_payload_component_paths_produce_distinct_event_ids():
     assert stable_payload_event_id(payload, "component[0]") != (
         stable_payload_event_id(payload, "component[1]")
     )
+
+
+@pytest.mark.parametrize("value", ["", None, "   "])
+def test_empty_fhir_references_fail_closed(value):
+    with pytest.raises(ValueError, match="must not be empty"):
+        stable_person_id(value)
+    with pytest.raises(ValueError, match="must not be empty"):
+        stable_event_id(value)
+
+
+@pytest.mark.parametrize("value", ["", None])
+def test_empty_fhir_payloads_fail_closed(value):
+    with pytest.raises(ValueError, match="must not be empty"):
+        stable_payload_event_id(value)

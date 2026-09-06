@@ -1,7 +1,7 @@
 # Reproducibility and release process
 
 FHIR-to-OMOP uses `VERSION` as its single product version. Python 3.12 and R
-4.6.1 are the reproducible environments for version 0.2.2. A technical release
+4.6.1 are the reproducible environments for version 0.3.0. A technical release
 does not authorize clinical deployment and must retain
 `deployment_authorized=false` in run evidence.
 
@@ -14,7 +14,8 @@ python -m venv .venv
 python -m pip install --require-hashes -r requirements.lock
 ```
 
-`requirements.in` contains the seven direct constraints. `requirements.lock`
+`requirements.in` contains the eight direct runtime/quality constraints.
+`requirements.lock`
 is a universal, transitive lock generated for Python 3.12. `requirements.txt`
 is retained only as a compatibility entry point to that lock.
 
@@ -29,10 +30,13 @@ renv::restore(prompt = FALSE)
 ## Deliberately update a lock
 
 Dependency changes require review. Edit `requirements.in`, install `uv`, then
-regenerate and validate the universal lock:
+regenerate through the versioned wrapper and validate the universal lock:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compile_python_lock.ps1
+```
 
 ```bash
-uv pip compile --universal --generate-hashes --python-version 3.12 --output-file requirements.lock requirements.in
 uv pip install --dry-run --system --require-hashes --python-platform x86_64-manylinux_2_28 --python-version 3.12 -r requirements.lock
 ```
 
@@ -49,6 +53,11 @@ renv::snapshot(
 
 Review every version and source change in both lockfiles. Never regenerate a
 lock merely to silence CI.
+
+The wheel smoke test in CI validates Python imports and bundled runtime assets.
+It is not evidence of a complete executable distribution: the supported
+orchestrator still runs from a source checkout and no PyPI artifact is
+published by the release workflow.
 
 ## Release checklist
 
