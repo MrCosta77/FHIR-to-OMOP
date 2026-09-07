@@ -8,7 +8,7 @@ import duckdb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH, SIMULATE_LIS_NOISE
+from src.utils.config import DB_PATH, SIMULATE_LIS_NOISE, get_settings
 
 
 def run_noise_injection():
@@ -36,7 +36,7 @@ def run_noise_injection():
         """)
 
         total_measurements = con.execute("SELECT COUNT(*) FROM measurement WHERE measurement_concept_id != 0").fetchone()[0]
-        limit = int(total_measurements * 0.10)
+        limit = int(total_measurements * get_settings().lis_noise_ratio)
 
         if limit == 0:
             print("⚠️ No valid measurements found to corrupt.")

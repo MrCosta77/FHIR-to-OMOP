@@ -22,7 +22,7 @@ PROFILE_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
     "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
     "ollama_timeout", "model_name", "similarity_threshold", "data_classification",
-    "simulate_lis_noise", "require_integration", "include_dqd",
+    "simulate_lis_noise", "lis_noise_ratio", "require_integration", "include_dqd",
     "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
     "cdm_source_description", "cdm_source_release_date",
     "cdm_source_documentation_reference", "cdm_etl_reference",
@@ -42,6 +42,7 @@ ENVIRONMENT_KEYS = {
     "similarity_threshold": "CMF_SIMILARITY_THRESHOLD",
     "data_classification": "CMF_DATA_CLASSIFICATION",
     "simulate_lis_noise": "CMF_SIMULATE_LIS_NOISE",
+    "lis_noise_ratio": "CMF_LIS_NOISE_RATIO",
     "require_integration": "CMF_REQUIRE_INTEGRATION",
     "include_dqd": "CMF_INCLUDE_DQD",
     "cdm_source_name": "CMF_CDM_SOURCE_NAME",
@@ -80,6 +81,7 @@ class RuntimeSettings:
     similarity_threshold: float
     data_classification: str
     simulate_lis_noise: bool
+    lis_noise_ratio: float
     require_integration: bool
     include_dqd: bool
     cdm_source_name: str
@@ -111,6 +113,7 @@ class RuntimeSettings:
             "similarity_threshold": self.similarity_threshold,
             "data_classification": self.data_classification,
             "simulate_lis_noise": self.simulate_lis_noise,
+            "lis_noise_ratio": self.lis_noise_ratio,
             "require_integration": self.require_integration,
             "include_dqd": self.include_dqd,
             "cdm_source_name": self.cdm_source_name,
@@ -214,6 +217,7 @@ def load_settings(
     model_name = str(values["model_name"]).strip()
     ollama_url = str(values["ollama_url"]).strip()
     classification = str(values["data_classification"]).strip().upper()
+    lis_noise_ratio = float(values["lis_noise_ratio"])
     simulate_lis_noise = _parse_boolean(
         values["simulate_lis_noise"], "CMF_SIMULATE_LIS_NOISE"
     )
@@ -294,6 +298,7 @@ def load_settings(
         similarity_threshold=threshold,
         data_classification=privacy["classification"],
         simulate_lis_noise=simulate_lis_noise,
+        lis_noise_ratio=lis_noise_ratio,
         require_integration=require_integration,
         include_dqd=include_dqd,
         **cdm_source,
@@ -321,6 +326,7 @@ OLLAMA_TIMEOUT = SETTINGS.ollama_timeout
 MODEL_NAME = SETTINGS.model_name
 SIMILARITY_THRESHOLD = SETTINGS.similarity_threshold
 SIMULATE_LIS_NOISE = SETTINGS.simulate_lis_noise
+LIS_NOISE_RATIO = SETTINGS.lis_noise_ratio
 REQUIRE_INTEGRATION = SETTINGS.require_integration
 INCLUDE_DQD = SETTINGS.include_dqd
 PROFILE = SETTINGS.profile
