@@ -34,13 +34,27 @@ def _identity_administrator(con, claimed_name):
     return {"actor_id": row[0], "display_name": row[1]}
 
 
-def bootstrap_identity_administrator(con, display_name, reason):
+def bootstrap_identity_administrator(
+    con, display_name, reason, *, _manage_transaction=True
+):
     """Create or grant the sole initial identity administrator explicitly."""
     ensure_governance_tables(con)
     display_name = authorize_actor(display_name, "source_admin")
     reason = (reason or "").strip()
     if not reason:
         raise ValueError("A bootstrap authorization reason is required.")
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            result = bootstrap_identity_administrator(
+                con, display_name, reason, _manage_transaction=False
+            )
+            con.execute("COMMIT")
+            return result
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     existing_admins = con.execute("""
         SELECT COUNT(*) FROM governed_actor_role ar
         JOIN governed_actor a USING (actor_id)
@@ -55,7 +69,8 @@ def bootstrap_identity_administrator(con, display_name, reason):
         JOIN governed_actor a USING (actor_id)
         WHERE al.alias_key = ? AND al.active AND a.active
     """, [key]).fetchone()
-    con.execute("BEGIN TRANSACTION")
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
     try:
         if actor:
             actor_id, canonical_name = actor
@@ -85,9 +100,11 @@ def bootstrap_identity_administrator(con, display_name, reason):
             con, "IDENTITY_ADMIN_BOOTSTRAPPED", display_name, "RECORDED",
             {"actor_id": actor_id},
         )
-        con.execute("COMMIT")
+        if _manage_transaction:
+            con.execute("COMMIT")
     except Exception:
-        con.execute("ROLLBACK")
+        if _manage_transaction:
+            con.execute("ROLLBACK")
         raise
     return {"actor_id": actor_id, "display_name": canonical_name}
 
@@ -185,7 +202,8 @@ def resolve_governed_actor(con, identity, role):
 
 
 def register_governed_actor(
-    con, display_name, roles, registered_by, reason, *, confirm_distinct=False
+    con, display_name, roles, registered_by, reason, *, confirm_distinct=False,
+    _manage_transaction=True,
 ):
     """Register a new person; similar identities require explicit alias handling."""
     display_name = (display_name or "").strip()
@@ -198,6 +216,20 @@ def register_governed_actor(
     if not roles or not roles.issubset(GOVERNED_ROLES):
         raise ValueError("At least one supported governed role is required.")
     ensure_governance_tables(con)
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            result = register_governed_actor(
+                con, display_name, roles, registered_by, reason,
+                confirm_distinct=confirm_distinct,
+                _manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return result
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     administrator = _identity_administrator(con, registered_by)["display_name"]
     key = canonical_actor_key(display_name)
     exact = con.execute("""
@@ -219,7 +251,8 @@ def register_governed_actor(
         )
 
     actor_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:governed-actor:{key}"))
-    con.execute("BEGIN TRANSACTION")
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
     try:
         con.execute("""
             INSERT INTO governed_actor (
@@ -243,15 +276,18 @@ def register_governed_actor(
             con, "GOVERNED_ACTOR_REGISTERED", administrator, "RECORDED",
             {"actor_id": actor_id, "roles": sorted(roles)},
         )
-        con.execute("COMMIT")
+        if _manage_transaction:
+            con.execute("COMMIT")
     except Exception:
-        con.execute("ROLLBACK")
+        if _manage_transaction:
+            con.execute("ROLLBACK")
         raise
     return {"actor_id": actor_id, "display_name": display_name, "roles": roles}
 
 
 def add_governed_actor_alias(
-    con, actor_id, alias_name, approved_by, reason, *, confirm_owner=False
+    con, actor_id, alias_name, approved_by, reason, *, confirm_owner=False,
+    _manage_transaction=True,
 ):
     """Attach a reviewed name variant to one existing actor."""
     alias_name = (alias_name or "").strip()
@@ -259,6 +295,20 @@ def add_governed_actor_alias(
     if not alias_name or not reason:
         raise ValueError("Alias and approval reason are required.")
     ensure_governance_tables(con)
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            result = add_governed_actor_alias(
+                con, actor_id, alias_name, approved_by, reason,
+                confirm_owner=confirm_owner,
+                _manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return result
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     administrator = _identity_administrator(con, approved_by)["display_name"]
     actor = con.execute("""
         SELECT display_name FROM governed_actor

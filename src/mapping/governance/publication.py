@@ -14,7 +14,7 @@ from .schema import ensure_governance_tables
 
 
 def adjudicate_mapping_decision(
-    con, decision_id, action, adjudicator, rationale
+    con, decision_id, action, adjudicator, rationale, *, _manage_transaction=True
 ):
     """Finalize a proposal only after two reviews by distinct other people."""
     action = action.strip().upper()
@@ -28,6 +28,19 @@ def adjudicate_mapping_decision(
     if not rationale:
         raise ValueError("An adjudication rationale is required.")
     ensure_governance_tables(con)
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            status = adjudicate_mapping_decision(
+                con, decision_id, action, adjudicator, rationale,
+                _manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return status
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     actor = resolve_governed_actor(con, adjudicator, "adjudicator")
     adjudicator_actor_id = actor["actor_id"]
     adjudicator = actor["display_name"]
@@ -55,34 +68,28 @@ def adjudicate_mapping_decision(
         raise ValueError("The adjudicator must be distinct from both reviewers.")
     unanimous = reviews[0][1] == reviews[1][1]
 
-    con.execute("BEGIN TRANSACTION")
-    try:
-        status = _finalize_mapping_decision(
-            con, decision_id, action, adjudicator, rationale,
-            manage_transaction=False,
-        )
-        con.execute("""
-            INSERT INTO clinical_mapping_adjudication (
-                adjudication_id, mapping_decision_id, adjudicator,
-                adjudicator_actor_id, final_action, rationale,
-                reviewer_count, unanimous
-            ) VALUES (?, ?, ?, ?, ?, ?, 2, ?)
-        """, [
-            str(uuid.uuid4()), decision_id, adjudicator, adjudicator_actor_id,
-            action, rationale, unanimous,
-        ])
-        audit_security_event(
-            con, "CLINICAL_MAPPING_ADJUDICATION", adjudicator, status,
-            {
-                "mapping_decision_id": decision_id,
-                "final_action": action,
-                "unanimous": unanimous,
-            },
-        )
-        con.execute("COMMIT")
-    except Exception:
-        con.execute("ROLLBACK")
-        raise
+    status = _finalize_mapping_decision(
+        con, decision_id, action, adjudicator, rationale,
+        manage_transaction=False,
+    )
+    con.execute("""
+        INSERT INTO clinical_mapping_adjudication (
+            adjudication_id, mapping_decision_id, adjudicator,
+            adjudicator_actor_id, final_action, rationale,
+            reviewer_count, unanimous
+        ) VALUES (?, ?, ?, ?, ?, ?, 2, ?)
+    """, [
+        str(uuid.uuid4()), decision_id, adjudicator, adjudicator_actor_id,
+        action, rationale, unanimous,
+    ])
+    audit_security_event(
+        con, "CLINICAL_MAPPING_ADJUDICATION", adjudicator, status,
+        {
+            "mapping_decision_id": decision_id,
+            "final_action": action,
+            "unanimous": unanimous,
+        },
+    )
     return status
 
 def _validate_scoped_event_binding(
@@ -144,6 +151,19 @@ def _finalize_mapping_decision(
     if not reviewer:
         raise ValueError("A reviewer name is required.")
     ensure_governance_tables(con)
+    if manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            status = _finalize_mapping_decision(
+                con, decision_id, action, reviewer, reason,
+                manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return status
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     row = con.execute("""
         SELECT target_table, source_value, assigned_concept_id, run_id,
                COALESCE(publication_eligible, TRUE), source_adapter,
@@ -200,8 +220,6 @@ def _finalize_mapping_decision(
             )
         target_vocabulary = valid[0]
 
-    if manage_transaction:
-        con.execute("BEGIN TRANSACTION")
     try:
         duplicate_ids = [
             duplicate[0]
@@ -375,10 +393,6 @@ def _finalize_mapping_decision(
                 WHERE source_code = ? AND source_vocabulary_id = ?
                   AND target_concept_id = ?
             """, [source_code, source_vocabulary, int(concept_id)])
-        if manage_transaction:
-            con.execute("COMMIT")
     except Exception:
-        if manage_transaction:
-            con.execute("ROLLBACK")
         raise
     return new_status

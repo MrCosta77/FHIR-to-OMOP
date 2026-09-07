@@ -78,7 +78,8 @@ def counterproposal_source_queue(con, proposer):
 
 
 def submit_counterproposal(
-    con, original_decision_id, candidate_concept_id, proposer, rationale
+    con, original_decision_id, candidate_concept_id, proposer, rationale,
+    *, _manage_transaction=True,
 ):
     """Create a traceable human candidate without mutating the rejected record."""
     proposer = authorize_actor((proposer or "").strip(), "reviewer")
@@ -91,6 +92,19 @@ def submit_counterproposal(
         raise ValueError("Candidate concept_id must be an integer.") from exc
 
     ensure_governance_tables(con)
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            result = submit_counterproposal(
+                con, original_decision_id, candidate_concept_id, proposer,
+                rationale, _manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return result
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     actor = resolve_governed_actor(con, proposer, "reviewer")
     proposer_actor_id = actor["actor_id"]
     proposer = actor["display_name"]
@@ -188,9 +202,7 @@ def submit_counterproposal(
             "created": False,
         }
 
-    con.execute("BEGIN TRANSACTION")
-    try:
-        con.execute(
+    con.execute(
             """
             INSERT INTO mapping_decision (
                 mapping_decision_id, run_id, target_table, source_value,
@@ -211,7 +223,7 @@ def submit_counterproposal(
                 proposer_actor_id,
             ],
         )
-        con.execute(
+    con.execute(
             """
             INSERT INTO mapping_provenance (
                 target_table, target_id, source_value, normalized_value,
@@ -240,18 +252,14 @@ def submit_counterproposal(
             """,
             [candidate[0], candidate_concept_id, decision_id, duplicate_ids],
         )
-        audit_security_event(
-            con, "CLINICAL_MAPPING_COUNTERPROPOSAL", proposer, "RECORDED",
-            {
-                "candidate_concept_id": candidate_concept_id,
-                "domain": expected_domain,
-            },
-            run_id="HUMAN-CURATION",
-        )
-        con.execute("COMMIT")
-    except Exception:
-        con.execute("ROLLBACK")
-        raise
+    audit_security_event(
+        con, "CLINICAL_MAPPING_COUNTERPROPOSAL", proposer, "RECORDED",
+        {
+            "candidate_concept_id": candidate_concept_id,
+            "domain": expected_domain,
+        },
+        run_id="HUMAN-CURATION",
+    )
     return {
         "mapping_decision_id": decision_id,
         "candidate_concept_id": candidate_concept_id,
