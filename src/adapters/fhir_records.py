@@ -96,6 +96,7 @@ class FHIRObservationRecord:
     event_date: str
     event_datetime: str
     source_event_key: str
+    source_resource_type: str
     component_path: str | None = None
     value_as_number: float | None = None
     value_as_string: str | None = None
@@ -125,6 +126,7 @@ class FHIRObservationRecord:
             self.coding.source_vocabulary_id,
             self.coding.version,
             self.source_event_key,
+            self.source_resource_type,
             self.component_path,
             value.system_uri if value else None,
             value.athena_vocabulary_id if value else None,

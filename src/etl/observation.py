@@ -34,6 +34,7 @@ from src.utils.helpers import (
     stable_person_id,
     stable_resource_fingerprint,
 )
+from src.utils.quarantine import ensure_quarantine_table
 from src.utils.unit_mapping import canonical_ucum_code
 
 
@@ -92,6 +93,7 @@ def extract_observation_candidates(file_path):
                     event_date=date,
                     event_datetime=event_datetime,
                     source_event_key=source_event_key,
+                    source_resource_type="Condition",
                 ))
 
             # 2. Route every coded FHIR Observation by its Standard OMOP
@@ -174,6 +176,7 @@ def extract_observation_candidates(file_path):
                         event_date=date,
                         event_datetime=event_datetime,
                         source_event_key=source_event_key,
+                        source_resource_type="Observation",
                         component_path=component_path,
                         value_as_number=value_as_number,
                         value_as_string=value_as_string,
@@ -210,6 +213,7 @@ def run_observation_etl():
             con, "FHIR_R4_Observation", all_exclusions,
             run_id=current_run_id(),
         )
+        ensure_quarantine_table(con)
         con.execute("DROP TABLE IF EXISTS observation")
 
         con.execute(create_table_sql("observation"))
@@ -234,6 +238,7 @@ def run_observation_etl():
                 source_vocabulary_id VARCHAR,
                 source_version VARCHAR,
                 source_event_key VARCHAR,
+                source_resource_type VARCHAR,
                 component_path VARCHAR,
                 value_source_system_uri VARCHAR,
                 value_athena_vocabulary_id VARCHAR,
@@ -245,7 +250,7 @@ def run_observation_etl():
         """)
 
         con.executemany(
-            "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [record.as_staging_row() for record in all_records],
         )
 
@@ -275,7 +280,69 @@ def run_observation_etl():
                 "multiple Standard Maps to targets; explicit review is required."
             )
 
-        # DOMAIN ROUTING ESTRITO: O INNER JOIN garante que apenas os conceitos de Observação entram
+        # Condition->Observation and Observation->Measurement are handled by
+        # their existing domain owners. Any other Standard-domain target lacks
+        # a safe, resource-specific projection and must remain visible.
+        con.execute("""
+            UPDATE etl_quarantine
+            SET active = FALSE, last_seen_at = CURRENT_TIMESTAMP
+            WHERE target_table IN ('condition_occurrence', 'observation')
+              AND reason_code = 'UNSUPPORTED_CROSS_DOMAIN_ROUTE'
+        """)
+        con.execute("""
+            INSERT INTO etl_quarantine (
+                target_table, target_id, source_event_key, source_code,
+                source_value, reason_code, reason_detail, active
+            )
+            SELECT
+                CASE
+                    WHEN stg.source_resource_type = 'Condition'
+                        THEN 'condition_occurrence'
+                    ELSE 'observation'
+                END,
+                stg.observation_id,
+                stg.source_event_key,
+                stg.code,
+                stg.display_text,
+                'UNSUPPORTED_CROSS_DOMAIN_ROUTE',
+                'FHIR ' || stg.source_resource_type ||
+                    ' maps to unsupported OMOP domain ' || c_std.domain_id,
+                TRUE
+            FROM stg_observation stg
+            JOIN concept c_src
+              ON stg.code = c_src.concept_code
+             AND stg.athena_vocabulary_id = c_src.vocabulary_id
+            JOIN concept_relationship cr
+              ON c_src.concept_id = cr.concept_id_1
+             AND cr.relationship_id = 'Maps to'
+             AND cr.invalid_reason IS NULL
+            JOIN concept c_std
+              ON cr.concept_id_2 = c_std.concept_id
+             AND c_std.standard_concept = 'S'
+             AND c_std.invalid_reason IS NULL
+            WHERE (
+                stg.source_resource_type = 'Condition'
+                AND c_std.domain_id NOT IN ('Condition', 'Observation')
+            ) OR (
+                stg.source_resource_type = 'Observation'
+                AND c_std.domain_id NOT IN ('Measurement', 'Observation')
+            )
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY stg.source_resource_type, stg.observation_id
+                ORDER BY c_std.concept_id
+            ) = 1
+            ON CONFLICT (target_table, target_id, reason_code) DO UPDATE SET
+                source_event_key = EXCLUDED.source_event_key,
+                source_code = EXCLUDED.source_code,
+                source_value = EXCLUDED.source_value,
+                reason_detail = EXCLUDED.reason_detail,
+                active = TRUE,
+                last_seen_at = now()
+        """)
+
+        # Publish only events owned by OMOP Observation. Unresolved Conditions
+        # remain solely in CONDITION_OCCURRENCE; unresolved numeric/coded FHIR
+        # Observations remain solely in MEASUREMENT for human mapping.
         con.execute("""
             INSERT INTO observation (
                 observation_id, person_id, observation_concept_id,
@@ -341,7 +408,13 @@ def run_observation_etl():
                 ON cr_value.concept_id_2 = c_value_std.concept_id
                 AND c_value_std.standard_concept = 'S'
                 AND c_value_std.invalid_reason IS NULL
-            WHERE c_std.domain_id = 'Observation' OR c_std.concept_id IS NULL
+            WHERE c_std.domain_id = 'Observation'
+               OR (
+                    c_std.concept_id IS NULL
+                    AND stg.source_resource_type = 'Observation'
+                    AND stg.value_as_number IS NULL
+                    AND stg.value_source_code IS NULL
+               )
             QUALIFY ROW_NUMBER() OVER (
                 PARTITION BY stg.observation_id
                 ORDER BY c_std.concept_id DESC, c_unit_std.concept_id DESC,

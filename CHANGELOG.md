@@ -10,6 +10,9 @@ All notable changes to this project are documented here. The format follows
 
 - Treat empty, null or malformed FHIR race and ethnicity extensions as
   unmapped demographics instead of raising or inferring an ethnicity.
+- Reconcile Condition and Observation domain ownership so unresolved events
+  are published once, while unsupported Standard-domain routes are retained in
+  auditable quarantine instead of disappearing silently.
 
 ## [0.3.0] - 2026-09-06
 
