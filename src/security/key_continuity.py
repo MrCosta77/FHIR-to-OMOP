@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -25,6 +26,7 @@ CLINICAL_ID_TABLES = (
     "device_exposure",
 )
 TRANSACTION_RETRY_ATTEMPTS = 3
+_KEY_CONTINUITY_LOCK = threading.RLock()
 
 
 class KeyContinuityError(RuntimeError):
@@ -114,12 +116,12 @@ def _ensure_key_continuity_transaction(con, settings, env) -> str:
         raise
 
 
-def ensure_key_continuity(
+def _ensure_key_continuity_locked(
     database_path=DB_PATH,
     settings: RuntimeSettings = SETTINGS,
     environ: Mapping[str, str] | None = None,
 ) -> str:
-    """Register a new key identity or reject an incompatible existing database."""
+    """Run continuity registration while the process-level lock is held."""
     env = os.environ if environ is None else environ
     for attempt in range(TRANSACTION_RETRY_ATTEMPTS):
         try:
@@ -134,13 +136,28 @@ def ensure_key_continuity(
                     )
                 """)
                 return _ensure_key_continuity_transaction(con, settings, env)
-        except duckdb.TransactionException:
+        except (duckdb.TransactionException, duckdb.ConstraintException) as exc:
+            if (
+                isinstance(exc, duckdb.ConstraintException)
+                and 'Duplicate key "singleton_id: 1"' not in str(exc)
+            ):
+                raise
             if attempt + 1 == TRANSACTION_RETRY_ATTEMPTS:
                 raise KeyContinuityError(
                     "Concurrent pseudonymization key registration did not "
                     "stabilize; retry the pipeline."
                 ) from None
     raise AssertionError("unreachable")
+
+
+def ensure_key_continuity(
+    database_path=DB_PATH,
+    settings: RuntimeSettings = SETTINGS,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Register a key identity exactly once or reject an incompatible database."""
+    with _KEY_CONTINUITY_LOCK:
+        return _ensure_key_continuity_locked(database_path, settings, environ)
 
 
 def main() -> None:

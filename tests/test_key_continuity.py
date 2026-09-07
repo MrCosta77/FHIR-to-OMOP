@@ -62,8 +62,9 @@ def test_populated_synthetic_database_bootstraps_without_phi_approval(tmp_path):
     ) == "BOOTSTRAPPED"
 
 
-def test_concurrent_registration_converges_on_one_manifest(tmp_path):
-    database = tmp_path / "concurrent.duckdb"
+@pytest.mark.parametrize("run", range(5))
+def test_concurrent_registration_converges_on_one_manifest(tmp_path, run):
+    database = tmp_path / f"concurrent-{run}.duckdb"
     settings = _settings()
     with duckdb.connect(str(database)) as con:
         con.execute("""
