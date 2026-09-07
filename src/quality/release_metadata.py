@@ -96,6 +96,11 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
             "pyproject.toml project.version does not match VERSION: "
             f"{package_version!r} != {version!r}"
         )
+    requires_python = str(project_metadata.get("project", {}).get("requires-python", ""))
+    if requires_python != ">=3.12":
+        raise ReleaseMetadataError(
+            "pyproject.toml must declare the tested Python contract >=3.12"
+        )
 
     requirements_in = _read(root / "requirements.in")
     requirements_lock = _read(root / "requirements.lock")
@@ -147,6 +152,24 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
     quality_workflow = _read(root / ".github" / "workflows" / "quality.yml")
     if "requirements.lock" not in quality_workflow or "--require-hashes" not in quality_workflow:
         raise ReleaseMetadataError("Quality CI does not install the hashed Python lock")
+    if 'python-version: "3.12"' not in quality_workflow:
+        raise ReleaseMetadataError("Quality CI does not test the declared Python 3.12 contract")
+
+    ruff_match = re.search(r"(?m)^ruff==([^\s]+)$", requirements_in)
+    if not ruff_match:
+        raise ReleaseMetadataError("requirements.in does not pin Ruff")
+    ruff_version = ruff_match.group(1)
+    pre_commit = _read(root / ".pre-commit-config.yaml")
+    if f"rev: v{ruff_version}" not in pre_commit:
+        raise ReleaseMetadataError("pre-commit Ruff version does not match requirements.in")
+    if "ruff-format" in pre_commit or "--fix" in pre_commit:
+        raise ReleaseMetadataError(
+            "pre-commit must match CI lint checks without unreviewed formatting or fixes"
+        )
+
+    environment_example = _read(root / ".env.example")
+    if "CMF_OLLAMA_TIMEOUT_SECONDS" not in environment_example:
+        raise ReleaseMetadataError(".env.example does not document the Ollama timeout")
 
     if release:
         if "Select and add the project license" in changelog:

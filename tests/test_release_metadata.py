@@ -18,6 +18,8 @@ RELEASE_FILES = [
     "NOTICE",
     "CITATION.cff",
     ".github/workflows/quality.yml",
+    ".pre-commit-config.yaml",
+    ".env.example",
 ]
 
 
@@ -107,4 +109,28 @@ def test_release_validator_rejects_citation_version_mismatch(tmp_path):
     )
 
     with pytest.raises(ReleaseMetadataError, match="CITATION.cff version"):
+        validate_release_metadata(tmp_path)
+
+
+def test_release_validator_rejects_python_contract_drift(tmp_path):
+    _copy_release_files(tmp_path)
+    pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        pyproject.replace('requires-python = ">=3.12"', 'requires-python = ">=3.11"'),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="Python contract"):
+        validate_release_metadata(tmp_path)
+
+
+def test_release_validator_rejects_precommit_ruff_drift(tmp_path):
+    _copy_release_files(tmp_path)
+    pre_commit = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    (tmp_path / ".pre-commit-config.yaml").write_text(
+        pre_commit.replace("rev: v0.16.5", "rev: v0.3.0"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="Ruff version"):
         validate_release_metadata(tmp_path)

@@ -13,6 +13,12 @@ All notable changes to this project are documented here. The format follows
 - Reconcile Condition and Observation domain ownership so unresolved events
   are published once, while unsupported Standard-domain routes are retained in
   auditable quarantine instead of disappearing silently.
+- Align local pre-commit Ruff checks with the pinned CI toolchain and declare
+  Python 3.12 as the supported runtime already enforced by CI and lockfiles.
+
+### Documentation
+
+- Document the configurable Ollama timeout in the environment example.
 
 ## [0.3.0] - 2026-09-06
 
