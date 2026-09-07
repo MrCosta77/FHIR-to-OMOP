@@ -17,6 +17,26 @@ from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
 
 
+def _extension_display_text(extension):
+    """Collect usable text from a complex FHIR extension without assuming shape."""
+    nested = extension.get("extension")
+    if not isinstance(nested, list):
+        return ""
+    values = []
+    for item in nested:
+        if not isinstance(item, dict):
+            continue
+        coding = item.get("valueCoding")
+        if isinstance(coding, dict):
+            display = str(coding.get("display") or "").strip()
+            if display:
+                values.append(display)
+        value_string = str(item.get("valueString") or "").strip()
+        if value_string:
+            values.append(value_string)
+    return " ".join(values).casefold()
+
+
 def extract_persons(file_path):
     records = []
     with open(file_path, encoding='utf-8') as f:
@@ -58,17 +78,25 @@ def extract_persons(file_path):
                 # Extrair Raça e Etnia (crítica do revisor resolvida)
                 race_concept_id = 0
                 ethnicity_concept_id = 0
-                for ext in resource.get('extension', []):
-                    url = ext.get('url', '')
+                extensions = resource.get('extension')
+                if not isinstance(extensions, list):
+                    extensions = []
+                for ext in extensions:
+                    if not isinstance(ext, dict):
+                        continue
+                    url = str(ext.get('url') or '').casefold()
+                    text = _extension_display_text(ext)
+                    if not text:
+                        continue
                     if 'race' in url:
-                        text = ext.get('extension', [{}])[0].get('valueCoding', {}).get('display', '').lower()
                         if 'white' in text: race_concept_id = 8527
                         elif 'black' in text or 'african' in text: race_concept_id = 8516
                         elif 'asian' in text: race_concept_id = 8515
                     elif 'ethnicity' in url:
-                        text = ext.get('extension', [{}])[0].get('valueCoding', {}).get('display', '').lower()
-                        if 'hispanic' in text: ethnicity_concept_id = 38003563
-                        else: ethnicity_concept_id = 38003564
+                        if 'not hispanic' in text or 'non-hispanic' in text:
+                            ethnicity_concept_id = 38003564
+                        elif 'hispanic' in text:
+                            ethnicity_concept_id = 38003563
 
                 records.append(FHIRPersonRecord(
                     person_id=person_id,
