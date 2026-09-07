@@ -104,6 +104,20 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
 
     requirements_in = _read(root / "requirements.in")
     requirements_lock = _read(root / "requirements.lock")
+    declared_dependencies = set(
+        project_metadata.get("project", {}).get("dependencies", ())
+    )
+    direct_requirements = {
+        line.strip()
+        for line in requirements_in.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    missing_declarations = sorted(declared_dependencies - direct_requirements)
+    if missing_declarations:
+        raise ReleaseMetadataError(
+            "pyproject runtime dependencies differ from requirements.in: "
+            + ", ".join(missing_declarations)
+        )
     if "--generate-hashes" not in requirements_lock or "--hash=sha256:" not in requirements_lock:
         raise ReleaseMetadataError("requirements.lock is not a generated hashed lock")
     direct_python = _direct_python_packages(requirements_in)

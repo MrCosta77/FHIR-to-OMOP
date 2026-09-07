@@ -124,6 +124,18 @@ def test_release_validator_rejects_python_contract_drift(tmp_path):
         validate_release_metadata(tmp_path)
 
 
+def test_release_validator_rejects_runtime_dependency_drift(tmp_path):
+    _copy_release_files(tmp_path)
+    pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        pyproject.replace("streamlit==1.62.0", "streamlit>=1.30.0,<2"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="requirements.in"):
+        validate_release_metadata(tmp_path)
+
+
 def test_release_validator_rejects_precommit_ruff_drift(tmp_path):
     _copy_release_files(tmp_path)
     pre_commit = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")

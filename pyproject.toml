@@ -17,7 +17,7 @@ dependencies = [
     "ollama==0.6.2",
     "sentence-transformers==2.5.1",
     "pandas==3.0.5",
-    "streamlit>=1.30.0,<2"
+    "streamlit==1.62.0"
 ]
 
 [project.optional-dependencies]
