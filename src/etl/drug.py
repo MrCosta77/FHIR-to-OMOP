@@ -12,7 +12,7 @@ sys.path.append(str(PROJECT_ROOT))
 from src.adapters.fhir_coding import (
     RXNORM_URI,
     replace_fhir_source_codings,
-    select_source_coding,
+    select_source_coding_or_text,
 )
 from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.adapters.fhir_semantics import (
@@ -50,9 +50,8 @@ def extract_drugs(file_path):
             res = entry.get('resource', {})
             if res.get('resourceType') == 'Medication':
                 med_id = normalise_fhir_reference(res.get('id', ''))
-                codings = res.get('code', {}).get('coding', [])
-                coding = select_source_coding(
-                    codings, preferred_systems=(RXNORM_URI,)
+                coding = select_source_coding_or_text(
+                    res.get('code'), preferred_systems=(RXNORM_URI,)
                 )
                 if med_id and coding:
                     medications[med_id] = coding
@@ -74,11 +73,9 @@ def extract_drugs(file_path):
 
                 # Try inline coding first
                 med_cc = res.get('medicationCodeableConcept', {})
-                codings = med_cc.get('coding', [])
-                if codings:
-                    coding = select_source_coding(
-                        codings, preferred_systems=(RXNORM_URI,)
-                    )
+                coding = select_source_coding_or_text(
+                    med_cc, preferred_systems=(RXNORM_URI,)
+                )
 
                 # If not inline, use two-pass medicationReference lookup
                 if coding is None:

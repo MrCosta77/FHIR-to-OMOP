@@ -14,7 +14,7 @@ from src.adapters.fhir_coding import (
     SNOMED_URI,
     iter_observation_elements,
     replace_fhir_source_codings,
-    select_source_coding,
+    select_source_coding_or_text,
 )
 from src.adapters.fhir_records import FHIRMeasurementRecord
 from src.adapters.fhir_semantics import (
@@ -80,15 +80,13 @@ def extract_measurements(file_path):
                 for component_path, codeable, value_holder in (
                     iter_observation_elements(resource)
                 ):
-                    coding = select_source_coding(
-                        codeable.get('coding', []),
+                    coding = select_source_coding_or_text(
+                        codeable,
                         preferred_systems=(LOINC_URI,),
                     )
                     quantity = value_holder.get('valueQuantity')
-                    value_coding = select_source_coding(
-                        value_holder.get('valueCodeableConcept', {}).get(
-                            'coding', []
-                        ),
+                    value_coding = select_source_coding_or_text(
+                        value_holder.get('valueCodeableConcept'),
                         preferred_systems=(SNOMED_URI, LOINC_URI),
                     )
                     if coding is None or (

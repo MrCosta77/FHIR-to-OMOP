@@ -3,12 +3,15 @@ import json
 import duckdb
 
 from src.adapters.fhir_coding import (
+    FHIR_MISSING_SYSTEM_URI,
+    FHIR_UNCODED_TEXT_URI,
     LOINC_URI,
     RXNORM_URI,
     SNOMED_URI,
     SourceCoding,
     replace_fhir_source_codings,
     select_source_coding,
+    select_source_coding_or_text,
 )
 from src.adapters.fhir_semantics import (
     extract_fhir_publication_exclusions,
@@ -45,6 +48,101 @@ def test_preferred_system_is_selected_without_relabelling_fallback():
     assert fallback.code == "830020009"
     assert fallback.athena_vocabulary_id is None
     assert fallback.source_vocabulary_id.startswith("FHIR_")
+
+
+def test_incomplete_codeable_concepts_get_explicit_non_athena_identity():
+    missing_system = select_source_coding_or_text({
+        "coding": [{"code": "LOCAL-1", "display": "Local diagnosis"}]
+    })
+    assert missing_system.system_uri == FHIR_MISSING_SYSTEM_URI
+    assert missing_system.code == "LOCAL-1"
+    assert missing_system.source_value == "Local diagnosis"
+    assert missing_system.athena_vocabulary_id is None
+
+    text_only = select_source_coding_or_text({"text": "Uncoded clinical finding"})
+    assert text_only.system_uri == FHIR_UNCODED_TEXT_URI
+    assert text_only.code.startswith("text-")
+    assert text_only.source_value == "Uncoded clinical finding"
+    assert text_only.athena_vocabulary_id is None
+    assert select_source_coding_or_text({"coding": []}) is None
+
+
+def test_text_only_clinical_events_are_preserved_for_governed_mapping(tmp_path):
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "fullUrl": "Condition/text-1",
+                "resource": {
+                    "resourceType": "Condition",
+                    "subject": {"reference": "Patient/patient-1"},
+                    "code": {"text": "Uncoded chronic condition"},
+                    "onsetDateTime": "2026-01-01T10:00:00Z",
+                },
+            },
+            {
+                "fullUrl": "MedicationRequest/text-1",
+                "resource": {
+                    "resourceType": "MedicationRequest",
+                    "status": "active",
+                    "subject": {"reference": "Patient/patient-1"},
+                    "medicationCodeableConcept": {"text": "Uncoded medicine"},
+                    "authoredOn": "2026-01-01T10:00:00Z",
+                },
+            },
+            {
+                "fullUrl": "Procedure/text-1",
+                "resource": {
+                    "resourceType": "Procedure",
+                    "status": "completed",
+                    "subject": {"reference": "Patient/patient-1"},
+                    "code": {"text": "Uncoded clinical procedure"},
+                    "performedDateTime": "2026-01-01T10:00:00Z",
+                },
+            },
+            {
+                "fullUrl": "Observation/text-1",
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",
+                    "subject": {"reference": "Patient/patient-1"},
+                    "code": {"text": "Uncoded numeric result"},
+                    "effectiveDateTime": "2026-01-01T10:00:00Z",
+                    "valueQuantity": {"value": 7.5, "unit": "score"},
+                },
+            },
+        ],
+    }
+    path = tmp_path / "text-only.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    extracted = {
+        "condition": extract_conditions(path),
+        "drug": extract_drugs(path),
+        "procedure": extract_procedures(path),
+        "measurement": extract_measurements(path),
+    }
+    assert all(len(records) == 1 for records in extracted.values())
+    assert {
+        records[0].coding.source_value for records in extracted.values()
+    } == {
+        "Uncoded chronic condition",
+        "Uncoded medicine",
+        "Uncoded clinical procedure",
+        "Uncoded numeric result",
+    }
+    assert all(
+        records[0].coding.system_uri == FHIR_UNCODED_TEXT_URI
+        and records[0].coding.athena_vocabulary_id is None
+        for records in extracted.values()
+    )
+
+    observation_candidates = extract_observation_candidates(path)
+    assert len(observation_candidates) == 2
+    assert {record.coding.source_value for record in observation_candidates} == {
+        "Uncoded chronic condition",
+        "Uncoded numeric result",
+    }
 
 
 def test_uri_normalization_is_safe_and_known_vocabularies_are_explicit():

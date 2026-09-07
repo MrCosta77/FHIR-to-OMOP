@@ -15,6 +15,8 @@ SNOMED_URI = "http://snomed.info/sct"
 LOINC_URI = "http://loinc.org"
 RXNORM_URI = "http://www.nlm.nih.gov/research/umls/rxnorm"
 UCUM_URI = "http://unitsofmeasure.org"
+FHIR_MISSING_SYSTEM_URI = "urn:cmf:fhir:missing-system"
+FHIR_UNCODED_TEXT_URI = "urn:cmf:fhir:uncoded-text"
 
 SYSTEM_TO_ATHENA_VOCABULARY = {
     SNOMED_URI: "SNOMED",
@@ -105,6 +107,64 @@ def select_source_coding(
             if coding.system_uri == preferred:
                 return coding
     return parsed[0]
+
+
+def select_source_coding_or_text(
+    codeable: Mapping | None,
+    *,
+    preferred_systems: Sequence[str] = (),
+) -> SourceCoding | None:
+    """Preserve a semantically useful incomplete CodeableConcept.
+
+    Complete ``system + code`` identities always win. A code without a system
+    is retained under an explicit sentinel namespace. When only human-readable
+    text remains, a stable digest becomes the source code while the original
+    text remains the source value. The sentinels deliberately have no Athena
+    vocabulary mapping, so downstream OMOP publication remains ``concept_id=0``
+    until governed mapping occurs.
+    """
+    if not isinstance(codeable, Mapping):
+        return None
+
+    codings = codeable.get("coding", ()) or ()
+    selected = select_source_coding(
+        codings,
+        preferred_systems=preferred_systems,
+    )
+    if selected is not None:
+        return selected
+
+    for value in codings:
+        if not isinstance(value, Mapping):
+            continue
+        code = str(value.get("code") or "").strip()
+        if code:
+            return SourceCoding(
+                value.get("system") or FHIR_MISSING_SYSTEM_URI,
+                code,
+                value.get("display") or code,
+                value.get("version"),
+            )
+
+    text = str(codeable.get("text") or "").strip()
+    if not text:
+        text = next(
+            (
+                str(value.get("display") or "").strip()
+                for value in codings
+                if isinstance(value, Mapping) and value.get("display")
+            ),
+            "",
+        )
+    if not text:
+        return None
+
+    digest = hashlib.sha256(text.casefold().encode("utf-8")).hexdigest()[:24]
+    return SourceCoding(
+        FHIR_UNCODED_TEXT_URI,
+        f"text-{digest}",
+        text,
+    )
 
 
 def iter_observation_elements(

@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Preserve clinically meaningful FHIR events that only provide local codes or
+  `CodeableConcept.text` as governed `concept_id = 0` mapping candidates,
+  without mislabelling them as Athena vocabulary identities.
 - Treat empty, null or malformed FHIR race and ethnicity extensions as
   unmapped demographics instead of raising or inferring an ethnicity.
 - Reconcile Condition and Observation domain ownership so unresolved events

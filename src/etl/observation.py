@@ -14,7 +14,7 @@ from src.adapters.fhir_coding import (
     SNOMED_URI,
     iter_observation_elements,
     replace_fhir_source_codings,
-    select_source_coding,
+    select_source_coding_or_text,
 )
 from src.adapters.fhir_records import FHIRObservationRecord
 from src.adapters.fhir_semantics import (
@@ -60,9 +60,8 @@ def extract_observation_candidates(file_path):
                 )
                 if not person_id: continue
 
-                codings = resource.get('code', {}).get('coding', [])
-                coding = select_source_coding(
-                    codings, preferred_systems=(SNOMED_URI,)
+                coding = select_source_coding_or_text(
+                    resource.get('code'), preferred_systems=(SNOMED_URI,)
                 )
                 if coding is None:
                     continue
@@ -125,8 +124,8 @@ def extract_observation_candidates(file_path):
                 for component_path, codeable, value_holder in (
                     iter_observation_elements(resource)
                 ):
-                    coding = select_source_coding(
-                        codeable.get('coding', []),
+                    coding = select_source_coding_or_text(
+                        codeable,
                         preferred_systems=(LOINC_URI, SNOMED_URI),
                     )
                     if coding is None:
@@ -164,8 +163,8 @@ def extract_observation_candidates(file_path):
                             value_holder.get('valueBoolean')
                         ).lower()
                     elif 'valueCodeableConcept' in value_holder:
-                        value_coding = select_source_coding(
-                            value_holder['valueCodeableConcept'].get('coding', []),
+                        value_coding = select_source_coding_or_text(
+                            value_holder['valueCodeableConcept'],
                             preferred_systems=(SNOMED_URI, LOINC_URI),
                         )
 
