@@ -68,6 +68,11 @@ This project was built with strict adherence to clinical data management standar
 3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
 4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
 5. **Standards-Based Era Derivation:** After approved STCM mappings are applied, mapped conditions are collapsed into `CONDITION_ERA` with a 30-day persistence window. Drug products are expanded through `CONCEPT_ANCESTOR` to every current Standard Ingredient before `DRUG_ERA` is derived. Both tables use deterministic IDs and are published together only after coverage and integrity checks pass.
+6. **Identity and Source Continuity:** Every successful database records governed
+   `cdm_source` metadata and a singleton pseudonymization-key fingerprint. A
+   hospital run fails closed if the institution-managed key identity changes;
+   historical identifiers require an explicitly governed migration rather than
+   silent re-pseudonymization.
 
 ## 🤖 The AI Mapping Engine & Governance Loop
 
@@ -303,6 +308,10 @@ python main.py
 Successful publications are written to `data/omop_clinical.duckdb`. Run
 manifests are retained under `data/run_manifests/`; failed working databases are
 kept under `data/runs/` and can be removed after investigation.
+The active profile populates the OMOP `cdm_source` record. In the `hospital`
+profile, the source identity fields and pseudonymization key/version must be
+provided by the institution; see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+and [`docs/PHI_CONTROL_POLICY.md`](docs/PHI_CONTROL_POLICY.md).
 
 Each successful publication also writes a content-addressed, immutable evidence
 report under `data/run_reports/` (or the active profile override). It aggregates

@@ -8,8 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Enclose governance eligibility checks and writes in the same transaction,
+  and align the declared Streamlit version with the reproducible lock.
 - Make pseudonymization-key manifest registration transactional and
-  idempotent under concurrent in-process pipeline starts.
+  idempotent under concurrent in-process pipeline starts, including the
+  snapshot-visible duplicate-key race reported by DuckDB.
 - Preserve clinically meaningful FHIR events that only provide local codes or
   `CodeableConcept.text` as governed `concept_id = 0` mapping candidates,
   without mislabelling them as Athena vocabulary identities.
