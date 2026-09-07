@@ -24,6 +24,7 @@ CLINICAL_ID_TABLES = (
     "procedure_occurrence",
     "device_exposure",
 )
+TRANSACTION_RETRY_ATTEMPTS = 3
 
 
 class KeyContinuityError(RuntimeError):
@@ -45,35 +46,27 @@ def _has_existing_clinical_ids(con) -> bool:
     )
 
 
-def ensure_key_continuity(
-    database_path=DB_PATH,
-    settings: RuntimeSettings = SETTINGS,
-    environ: Mapping[str, str] | None = None,
-) -> str:
-    """Register a new key identity or reject an incompatible existing database."""
-    env = os.environ if environ is None else environ
-    with duckdb.connect(str(database_path)) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS cmf_pseudonymization_key_manifest (
-                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-                key_version VARCHAR NOT NULL,
-                key_fingerprint VARCHAR NOT NULL,
-                data_classification VARCHAR NOT NULL,
-                registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+def _verify_manifest_identity(existing, settings: RuntimeSettings) -> None:
+    expected = (settings.phi_key_version, settings.phi_key_fingerprint)
+    if tuple(existing) != expected:
+        raise KeyContinuityError(
+            "Pseudonymization key identity differs from the published database; "
+            "a governed identifier migration is required."
+        )
+
+
+def _ensure_key_continuity_transaction(con, settings, env) -> str:
+    """Register or verify the singleton manifest in one ACID transaction."""
+    con.execute("BEGIN TRANSACTION")
+    try:
         existing = con.execute("""
             SELECT key_version, key_fingerprint
             FROM cmf_pseudonymization_key_manifest
             WHERE singleton_id = 1
         """).fetchone()
         if existing:
-            expected = (settings.phi_key_version, settings.phi_key_fingerprint)
-            if tuple(existing) != expected:
-                raise KeyContinuityError(
-                    "Pseudonymization key identity differs from the published database; "
-                    "a governed identifier migration is required."
-                )
+            _verify_manifest_identity(existing, settings)
+            con.execute("COMMIT")
             return "VERIFIED"
 
         populated = _has_existing_clinical_ids(con)
@@ -86,16 +79,68 @@ def ensure_key_continuity(
                 "Existing hospital data has no pseudonymization key manifest; "
                 "institutional bootstrap approval is required."
             )
-        con.execute("""
+
+        inserted = con.execute("""
             INSERT INTO cmf_pseudonymization_key_manifest (
                 singleton_id, key_version, key_fingerprint, data_classification
             ) VALUES (1, ?, ?, ?)
+            ON CONFLICT (singleton_id) DO NOTHING
+            RETURNING singleton_id
         """, [
             settings.phi_key_version,
             settings.phi_key_fingerprint,
             settings.data_classification,
-        ])
-        return "BOOTSTRAPPED" if populated else "REGISTERED"
+        ]).fetchone()
+
+        if not inserted:
+            winner = con.execute("""
+                SELECT key_version, key_fingerprint
+                FROM cmf_pseudonymization_key_manifest
+                WHERE singleton_id = 1
+            """).fetchone()
+            if not winner:
+                raise RuntimeError(
+                    "Concurrent key registration completed without a visible manifest"
+                )
+            _verify_manifest_identity(winner, settings)
+            outcome = "VERIFIED"
+        else:
+            outcome = "BOOTSTRAPPED" if populated else "REGISTERED"
+
+        con.execute("COMMIT")
+        return outcome
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+
+
+def ensure_key_continuity(
+    database_path=DB_PATH,
+    settings: RuntimeSettings = SETTINGS,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Register a new key identity or reject an incompatible existing database."""
+    env = os.environ if environ is None else environ
+    for attempt in range(TRANSACTION_RETRY_ATTEMPTS):
+        try:
+            with duckdb.connect(str(database_path)) as con:
+                con.execute("""
+                    CREATE TABLE IF NOT EXISTS cmf_pseudonymization_key_manifest (
+                        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                        key_version VARCHAR NOT NULL,
+                        key_fingerprint VARCHAR NOT NULL,
+                        data_classification VARCHAR NOT NULL,
+                        registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                return _ensure_key_continuity_transaction(con, settings, env)
+        except duckdb.TransactionException:
+            if attempt + 1 == TRANSACTION_RETRY_ATTEMPTS:
+                raise KeyContinuityError(
+                    "Concurrent pseudonymization key registration did not "
+                    "stabilize; retry the pipeline."
+                ) from None
+    raise AssertionError("unreachable")
 
 
 def main() -> None:

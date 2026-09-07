@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Make pseudonymization-key manifest registration transactional and
+  idempotent under concurrent in-process pipeline starts.
 - Preserve clinically meaningful FHIR events that only provide local codes or
   `CodeableConcept.text` as governed `concept_id = 0` mapping candidates,
   without mislabelling them as Athena vocabulary identities.
