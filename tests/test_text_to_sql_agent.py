@@ -51,3 +51,30 @@ def test_read_only_sql_guard_accepts_bounded_query_shapes(query):
 def test_read_only_sql_guard_rejects_unsafe_queries(query):
     with pytest.raises(ValueError):
         validate_read_only_sql(query)
+
+from src.analytics.text_to_sql_agent import generate_sql_query, MODEL_NAME
+
+def test_generate_sql_query_success(monkeypatch):
+    def mock_chat(*args, **kwargs):
+        assert kwargs["model"] == MODEL_NAME
+        assert len(kwargs["messages"]) == 2
+        assert kwargs["messages"][1]["role"] == "user"
+        assert "temperature" in kwargs["options"]
+        return {"message": {"content": "```sql\nSELECT * FROM person\n```"}}
+    
+    monkeypatch.setattr("src.analytics.text_to_sql_agent.ollama.chat", mock_chat)
+    
+    query = generate_sql_query("Count all persons")
+    assert query == "SELECT * FROM person"
+
+def test_generate_sql_query_handles_api_errors(monkeypatch, capsys):
+    def mock_chat_error(*args, **kwargs):
+        raise Exception("Connection Refused")
+    
+    monkeypatch.setattr("src.analytics.text_to_sql_agent.ollama.chat", mock_chat_error)
+    
+    query = generate_sql_query("Count all persons")
+    assert query is None
+    
+    captured = capsys.readouterr()
+    assert "LLM Error: Connection Refused" in captured.out
