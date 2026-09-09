@@ -51,8 +51,11 @@ def test_portuguese_and_financial_identifiers_are_redacted():
     assert set(categories) == {"IBAN", "LOCAL_IDENTIFIER"}
 
 
-def test_uuid_metadata_is_not_misclassified_as_a_phone_number():
-    value = "e41dbff8-3134-5258-8461-a893dc5a7716"
+@pytest.mark.parametrize("value", [
+    "e41dbff8-3134-5258-8461-a893dc5a7716",
+    "cc5a0a89-135f-5406-8a5d-f91d3d90ed03",
+])
+def test_uuid_metadata_is_not_misclassified_as_a_direct_identifier(value):
     redacted, categories = redact_direct_identifiers(value)
     assert redacted == value
     assert categories == []

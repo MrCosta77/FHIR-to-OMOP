@@ -25,7 +25,9 @@ DIRECT_IDENTIFIER_PATTERNS = (
     ("IBAN", re.compile(r"(?i)\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b")),
     ("IP_ADDRESS", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
     ("LOCAL_IDENTIFIER", re.compile(
-        r"(?i)\b(?:MRN|NHS|NIF|NISS|SNS|CC|CITIZEN[ _-]?CARD)"
+        r"(?i)(?!\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\b)"
+        r"\b(?:MRN|NHS|NIF|NISS|SNS|CC|CITIZEN[ _-]?CARD)"
         r"\s*[:#-]?\s*[A-Z0-9-]{4,}\b"
     )),
     ("FHIR_PATIENT_REFERENCE", re.compile(r"(?i)\bPatient/[A-Za-z0-9.-]+\b")),
