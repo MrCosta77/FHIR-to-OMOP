@@ -28,6 +28,7 @@ from src.mapping.mapping_service import (
     record_mapping_proposal,
     selected_candidate,
 )
+from src.mapping.retrieval_normalization import normalize_retrieval_text
 from src.security.privacy import (
     audit_security_event,
     redact_direct_identifiers,
@@ -52,7 +53,12 @@ DOMAIN_PROMPTS = {
     "measurement": {
         "label": "LOINC Measurement",
         "role": "laboratory terminology specialist",
-        "guidance": "Check analyte, specimen, property, timing, method and units; abstain on ambiguity.",
+        "guidance": (
+            "Check analyte, specimen, property, timing, method and units. "
+            "Prefer the best clinically defensible candidate despite harmless "
+            "legacy spelling or abbreviation noise; abstain when essential "
+            "meaning conflicts or is missing."
+        ),
     },
     "procedure_occurrence": {
         "label": "SNOMED Procedure",
@@ -202,7 +208,10 @@ def run_semantic_mapping(
 
         for position, source_term in enumerate(terms, start=1):
             source_value = source_term.source_value
-            search = collection.query(query_texts=[source_value], n_results=5)
+            normalization = normalize_retrieval_text(source_value, target_table)
+            search = collection.query(
+                query_texts=[normalization.retrieval_text], n_results=5
+            )
             ids = search.get("ids", [[]])[0]
             documents = search.get("documents", [[]])[0]
             if not ids:
@@ -284,6 +293,9 @@ def run_semantic_mapping(
                     "decision": decision["decision"],
                     "redaction_categories": redaction_categories,
                     "data_classification": privacy["classification"],
+                    "retrieval_alias_id": normalization.alias_id,
+                    "retrieval_lexicon_version": normalization.lexicon_version,
+                    "retrieval_lexicon_sha256": normalization.lexicon_sha256,
                 },
                 run_id=current_run_id(),
             )

@@ -4,6 +4,7 @@ from src.utils.assets import PACKAGE_DATA_ROOT, PROJECT_ROOT, runtime_asset
 
 RUNTIME_ASSETS = (
     ("config", "privacy_policy.json"),
+    ("config", "lis_aliases.json"),
     ("config", "profiles", "development.json"),
     ("config", "profiles", "benchmark.json"),
     ("config", "profiles", "hospital.json"),

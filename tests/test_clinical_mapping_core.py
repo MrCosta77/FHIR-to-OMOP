@@ -44,6 +44,20 @@ def test_core_models_abstention_as_a_normal_typed_result():
     assert decision.selected_concept_id is None
 
 
+@pytest.mark.parametrize("confidence", [True, "0.94", -0.1, 1.1, float("nan")])
+def test_core_rejects_invalid_or_uncalibrated_confidence(confidence):
+    payload = json.loads(_payload())
+    payload["confidence"] = confidence
+
+    with pytest.raises(ValueError, match="confidence"):
+        parse_mapping_decision(json.dumps(payload), [1004])
+
+
+def test_core_rejects_inconsistent_abstention_payload():
+    with pytest.raises(ValueError, match="selected_concept_id=null"):
+        parse_mapping_decision(_payload(decision="ABSTAIN", concept_id=1004), [1004])
+
+
 def test_core_renders_a_stable_prompt_without_adapter_or_storage_objects():
     request = MappingRequest(
         source_value="legacy appendectomy",
@@ -60,8 +74,10 @@ def test_core_renders_a_stable_prompt_without_adapter_or_storage_objects():
 
     assert "Target domain: Procedure" in prompt
     assert '"concept_id": 1004' in prompt
+    assert "only when it is clinically defensible" in prompt
+    assert "use ABSTAIN" in prompt
     assert "Never invent an ID" in prompt
-
+    assert "MUST be a decimal" in prompt
 
 def test_model_provenance_attaches_only_portable_decision_metadata():
     decision = parse_mapping_decision(_payload(), [1004])

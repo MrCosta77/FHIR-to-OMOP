@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "lexicon_version": "lis-aliases-v1",
+  "scope": "generic-synthetic-development",
+  "target_table": "measurement",
+  "aliases": [
+    {
+      "alias_id": "LIS-CREA",
+      "alias": "CREA",
+      "retrieval_expansion": "Creatinine [Mass/volume] in Serum or Plasma"
+    },
+    {
+      "alias_id": "LIS-CHOL-TOTAL",
+      "alias": "Cholesterol total",
+      "retrieval_expansion": "Cholesterol [Mass/volume] in Serum or Plasma"
+    },
+    {
+      "alias_id": "LIS-CREATININE-SERUM",
+      "alias": "Creatinine serum",
+      "retrieval_expansion": "Creatinine [Mass/volume] in Serum or Plasma"
+    },
+    {
+      "alias_id": "LIS-GLU-BLOOD",
+      "alias": "Glu (Blood)",
+      "retrieval_expansion": "Glucose [Mass/volume] in Blood"
+    },
+    {
+      "alias_id": "LIS-HGB",
+      "alias": "HGB",
+      "retrieval_expansion": "Hemoglobin [Mass/volume] in Blood"
+    },
+    {
+      "alias_id": "LIS-HB-BLOOD",
+      "alias": "Hb blood test",
+      "retrieval_expansion": "Hemoglobin [Mass/volume] in Blood"
+    },
+    {
+      "alias_id": "LIS-RBC-COUNT",
+      "alias": "RBC count",
+      "retrieval_expansion": "Erythrocytes [#/volume] in Blood by Automated count"
+    },
+    {
+      "alias_id": "LIS-WBC-COUNT",
+      "alias": "WBC count",
+      "retrieval_expansion": "Leukocytes [#/volume] in Blood by Automated count"
+    }
+  ]
+}

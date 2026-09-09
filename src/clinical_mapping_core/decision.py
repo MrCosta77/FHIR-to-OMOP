@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 from src.clinical_mapping_core.contracts import (
     DecisionKind,
@@ -10,7 +11,7 @@ from src.clinical_mapping_core.contracts import (
     MappingRequest,
 )
 
-PROMPT_VERSION = "mapping-json-v2"
+PROMPT_VERSION = "mapping-json-v3"
 DECISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -49,8 +50,9 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
     confidence = payload["confidence"]
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise ValueError("LLM confidence must be numeric")
-    if not 0.0 <= float(confidence) <= 1.0:
-        raise ValueError("LLM confidence must be between 0 and 1")
+    confidence = float(confidence)
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        raise ValueError("LLM confidence must be finite and between 0 and 1")
     reason = payload["reason"]
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("LLM reason must be non-empty")
@@ -76,6 +78,7 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
         or selected not in allowed_ids
     ):
         raise ValueError("SELECT must use exactly one retrieved candidate ID")
+
     return MappingDecision(
         decision=DecisionKind(payload["decision"]),
         selected_concept_id=selected,
@@ -103,8 +106,11 @@ def render_mapping_prompt(
         f"Target domain: {request.target_domain}. "
         f"Target vocabulary: {request.target_vocabulary}.\n"
         f"{guidance}\n"
-        "You may select only a concept_id from the supplied candidates. "
-        "If no candidate is clinically safe, use ABSTAIN. Never invent an ID.\n"
+        "Select the most likely candidate only when it is clinically defensible, "
+        "even if human review is still required. If no candidate is clinically "
+        "defensible, use ABSTAIN. You may select only a supplied concept_id; "
+        "Never invent an ID.\n"
+        "The confidence field MUST be a decimal between 0.0 and 1.0 (e.g., 0.85, never 85).\n"
         "Keep reason under 300 characters and provide at most 6 concise clinical signals.\n"
         f"{few_shot}"
         f"Source value: {json.dumps(request.source_value, ensure_ascii=False)}\n"
