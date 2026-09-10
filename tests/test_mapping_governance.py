@@ -13,6 +13,7 @@ from src.mapping.governance import (
     rejection_policy_exists,
     review_mapping_decision,
     review_queue_metrics,
+    reviewable_mapping_runs,
     submit_blinded_review,
     submit_counterproposal,
 )
@@ -370,6 +371,40 @@ def test_review_queue_deduplicates_same_semantic_mapping_across_runs():
         assert blinded_review_queue(con, "Reviewer Three") == []
         adjudication = blinded_adjudication_queue(con, "Clinical Adjudicator")
         assert [row["mapping_decision_id"] for row in adjudication] == [first]
+
+
+def test_review_queue_can_isolate_novel_proposals_from_one_run():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _proposal(con, run_id="RUN-first", source_value="Repeated")
+        _proposal(con, run_id="RUN-second", source_value="Repeated")
+        novel = _proposal(con, run_id="RUN-second", source_value="Novel")
+
+        run_queue = blinded_review_queue(
+            con, "Reviewer One", run_id="RUN-second"
+        )
+        assert {row["source_value"] for row in run_queue} == {"Repeated", "Novel"}
+
+        novel_queue = blinded_review_queue(
+            con, "Reviewer One", run_id="RUN-second", novel_only=True
+        )
+        assert [row["mapping_decision_id"] for row in novel_queue] == [novel]
+        assert [row["run_id"] for row in novel_queue] == ["RUN-second"]
+
+        runs = reviewable_mapping_runs(con)
+        assert {row["run_id"] for row in runs} == {"RUN-first", "RUN-second"}
+
+
+def test_novel_review_filter_requires_a_run():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _proposal(con)
+        try:
+            blinded_review_queue(con, "Reviewer One", novel_only=True)
+        except ValueError as exc:
+            assert "run must be selected" in str(exc)
+        else:
+            raise AssertionError("Novel-only review was accepted without a run")
 
 
 def test_semantic_duplicate_votes_from_identity_variants_count_once():

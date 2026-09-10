@@ -100,7 +100,30 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
         "ready_for_adjudication": count == 2,
     }
 
-def blinded_review_queue(con, reviewer):
+def reviewable_mapping_runs(con) -> list[dict]:
+    """List runs containing publication-eligible pending decisions, newest first."""
+    ensure_governance_tables(con)
+    rows = con.execute("""
+        SELECT run_id, MAX(proposed_at) AS latest_proposal,
+               COUNT(*) AS decision_count
+        FROM mapping_decision
+        WHERE status = 'PENDING'
+          AND COALESCE(publication_eligible, TRUE)
+          AND run_id IS NOT NULL
+        GROUP BY run_id
+        ORDER BY latest_proposal DESC, run_id DESC
+    """).fetchall()
+    return [
+        {
+            "run_id": row[0],
+            "latest_proposal": row[1],
+            "decision_count": int(row[2]),
+        }
+        for row in rows
+    ]
+
+
+def blinded_review_queue(con, reviewer, *, run_id=None, novel_only=False):
     """Return proposals not yet reviewed by this reviewer, without peer votes."""
     reviewer = (reviewer or "").strip()
     if not reviewer:
@@ -115,6 +138,9 @@ def blinded_review_queue(con, reviewer):
         "normalized_value", "assigned_concept_id", "mapping_method", "score",
         "model_name", "affected_events",
     ]
+    run_id = (run_id or "").strip() or None
+    if novel_only and run_id is None:
+        raise ValueError("A run must be selected when requesting novel proposals.")
     rows = con.execute("""
         WITH review_counts AS (
             SELECT mapping_decision_id, COUNT(DISTINCT review_id) AS review_count
@@ -150,6 +176,7 @@ def blinded_review_queue(con, reviewer):
             LEFT JOIN provenance_counts p USING (mapping_decision_id)
             WHERE d.status = 'PENDING'
               AND COALESCE(d.publication_eligible, TRUE)
+              AND (? IS NULL OR d.run_id = ?)
         )
         SELECT mapping_decision_id, run_id, target_table, source_value,
                normalized_value, assigned_concept_id, mapping_method, score,
@@ -176,12 +203,42 @@ def blinded_review_queue(con, reviewer):
                 AND LOWER(TRIM(peer.source_value)) = LOWER(TRIM(d.source_value))
                 AND peer.assigned_concept_id = d.assigned_concept_id
           )
+          AND (
+              NOT ?
+              OR NOT EXISTS (
+                  SELECT 1
+                  FROM mapping_decision prior
+                  WHERE prior.run_id <> d.run_id
+                    AND prior.target_table = d.target_table
+                    AND COALESCE(prior.source_adapter, '') =
+                        COALESCE(d.source_adapter, '')
+                    AND COALESCE(prior.source_vocabulary_id, '') =
+                        COALESCE(d.source_vocabulary_id, '')
+                    AND COALESCE(prior.source_code, '') =
+                        COALESCE(d.source_code, '')
+                    AND LOWER(TRIM(prior.source_value)) =
+                        LOWER(TRIM(d.source_value))
+                    AND prior.assigned_concept_id = d.assigned_concept_id
+                    AND (
+                        prior.proposed_at < d.proposed_at
+                        OR (
+                            prior.proposed_at = d.proposed_at
+                            AND prior.mapping_decision_id < d.mapping_decision_id
+                        )
+                    )
+              )
+          )
         ORDER BY proposed_at, mapping_decision_id
-    """, [reviewer_actor_id, reviewer_actor_id]).fetchall()
+    """, [
+        run_id, run_id, reviewer_actor_id, reviewer_actor_id, bool(novel_only),
+    ]).fetchall()
     result = [dict(zip(columns, row, strict=True)) for row in rows]
     audit_security_event(
         con, "CLINICAL_REVIEW_QUEUE_ACCESS", reviewer, "ALLOWED",
-        {"role": "reviewer", "result_count": len(result)},
+        {
+            "role": "reviewer", "result_count": len(result),
+            "run_id": run_id, "novel_only": bool(novel_only),
+        },
     )
     return result
 

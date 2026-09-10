@@ -23,6 +23,7 @@ from src.mapping.governance import (
     list_governed_actors,
     register_governed_actor,
     review_queue_metrics,
+    reviewable_mapping_runs,
     submit_blinded_review,
     submit_counterproposal,
 )
@@ -34,9 +35,18 @@ st.set_page_config(
 )
 
 
-def get_review_queue(reviewer):
+def get_review_queue(reviewer, *, run_id=None, novel_only=False):
     with duckdb.connect(DB_PATH) as con:
-        return pd.DataFrame(blinded_review_queue(con, reviewer))
+        return pd.DataFrame(
+            blinded_review_queue(
+                con, reviewer, run_id=run_id, novel_only=novel_only
+            )
+        )
+
+
+def get_reviewable_runs():
+    with duckdb.connect(DB_PATH) as con:
+        return reviewable_mapping_runs(con)
 
 
 def get_adjudication_queue(adjudicator):
@@ -217,8 +227,27 @@ with review_tab:
     if not identity.strip():
         st.info("Enter your full professional name to receive a blinded queue.")
     else:
+        runs = get_reviewable_runs()
+        run_options = ["All runs", *[row["run_id"] for row in runs]]
+        selected_run = st.selectbox(
+            "Pipeline run",
+            run_options,
+            help="Select a run to isolate proposals created by that pipeline execution.",
+        )
+        novel_only = st.toggle(
+            "Only semantically new proposals",
+            value=False,
+            disabled=selected_run == "All runs",
+            help=(
+                "Exclude the same source-to-concept mapping when it already existed "
+                "in an earlier run."
+            ),
+        )
+        run_id = None if selected_run == "All runs" else selected_run
         try:
-            queue = get_review_queue(identity)
+            queue = get_review_queue(
+                identity, run_id=run_id, novel_only=novel_only
+            )
         except ValueError as exc:
             st.warning(str(exc))
             queue = None

@@ -24,6 +24,7 @@ from .review import (
     clinical_review_agreement,
     review_mapping_decision,
     review_queue_metrics,
+    reviewable_mapping_runs,
     submit_blinded_review,
 )
 from .schema import ensure_governance_tables
