@@ -28,6 +28,16 @@ def test_unknown_and_nonmeasurement_terms_remain_unchanged():
     assert condition.lexicon_version is None
 
 
+def test_synthetic_aliases_are_not_applied_to_phi():
+    result = normalize_retrieval_text(
+        "HGB", "measurement", data_classification="PHI"
+    )
+
+    assert result.original_text == "HGB"
+    assert result.retrieval_text == "HGB"
+    assert result.alias_applied is False
+
+
 def test_alias_lexicon_rejects_duplicate_normalized_aliases(tmp_path):
     path = tmp_path / "aliases.json"
     path.write_text(json.dumps({

@@ -29,6 +29,7 @@ from src.mapping.mapping_service import (
     selected_candidate,
 )
 from src.mapping.retrieval_normalization import normalize_retrieval_text
+from src.mapping.retrieval_queue import record_retrieval_suggestion
 from src.security.privacy import (
     audit_security_event,
     redact_direct_identifiers,
@@ -55,9 +56,11 @@ DOMAIN_PROMPTS = {
         "role": "laboratory terminology specialist",
         "guidance": (
             "Check analyte, specimen, property, timing, method and units. "
-            "Prefer the best clinically defensible candidate despite harmless "
-            "legacy spelling or abbreviation noise; abstain when essential "
-            "meaning conflicts or is missing."
+            "Select a candidate when the available analyte and specimen meaning "
+            "matches, despite harmless legacy spelling or abbreviation noise. "
+            "Do not require unspecified axes to appear in a short LIS label. "
+            "Abstain when a known axis conflicts or no candidate represents the "
+            "known meaning."
         ),
     },
     "procedure_occurrence": {
@@ -179,7 +182,13 @@ def run_semantic_mapping(
         timeout=OLLAMA_TIMEOUT,
     )
     config = TARGETS[target_table]
-    result = {"target_table": target_table, "terms": 0, "proposals": 0, "abstentions": 0}
+    result = {
+        "target_table": target_table,
+        "terms": 0,
+        "proposals": 0,
+        "abstentions": 0,
+        "retrieval_suggestions": 0,
+    }
     print(f"STARTING GOVERNED LOCAL-LLM MAPPING: {target_table}")
     with duckdb.connect(str(db_path)) as con:
         retired = reconcile_resolved_proposals(con, target_table)
@@ -208,7 +217,11 @@ def run_semantic_mapping(
 
         for position, source_term in enumerate(terms, start=1):
             source_value = source_term.source_value
-            normalization = normalize_retrieval_text(source_value, target_table)
+            normalization = normalize_retrieval_text(
+                source_value,
+                target_table,
+                data_classification=privacy["classification"],
+            )
             search = collection.query(
                 query_texts=[normalization.retrieval_text], n_results=5
             )
@@ -267,6 +280,31 @@ def run_semantic_mapping(
                     source_term=source_term,
                 )
                 result["abstentions"] += 1
+                metric = (collection.metadata or {}).get(
+                    "distance_metric", "cosine"
+                )
+                top_match = selected_candidate(search, str(ids[0]), metric)
+                if top_match is not None:
+                    concept_id, concept_name, _distance, retrieval_score = top_match
+                    created = record_retrieval_suggestion(
+                        con,
+                        run_id=current_run_id(),
+                        target_table=target_table,
+                        source_value=source_value,
+                        candidate_concept_id=concept_id,
+                        candidate_concept_name=concept_name,
+                        retrieval_score=retrieval_score,
+                        candidate_rank=1,
+                        alias_id=normalization.alias_id,
+                        lexicon_version=normalization.lexicon_version,
+                        lexicon_sha256=normalization.lexicon_sha256,
+                        model_name=MODEL_NAME,
+                        prompt_version=PROMPT_VERSION,
+                        llm_confidence=decision["confidence"],
+                        llm_reason=decision["reason"],
+                        affected_events=event_count,
+                    )
+                    result["retrieval_suggestions"] += int(created)
             else:
                 match = selected_candidate(
                     search, str(decision["selected_concept_id"]),

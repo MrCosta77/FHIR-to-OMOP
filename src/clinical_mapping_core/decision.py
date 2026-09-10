@@ -11,7 +11,7 @@ from src.clinical_mapping_core.contracts import (
     MappingRequest,
 )
 
-PROMPT_VERSION = "mapping-json-v3"
+PROMPT_VERSION = "mapping-json-v4"
 DECISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -106,10 +106,15 @@ def render_mapping_prompt(
         f"Target domain: {request.target_domain}. "
         f"Target vocabulary: {request.target_vocabulary}.\n"
         f"{guidance}\n"
-        "Select the most likely candidate only when it is clinically defensible, "
-        "even if human review is still required. If no candidate is clinically "
-        "defensible, use ABSTAIN. You may select only a supplied concept_id; "
-        "Never invent an ID.\n"
+        "Select a candidate when it directly represents the known source meaning, "
+        "including a recognizable synonym, abbreviation, translation, formatting "
+        "variation, or legacy label. Missing detail should lower confidence; it "
+        "does not by itself require ABSTAIN. Evaluate each candidate independently: "
+        "unrelated distractors elsewhere in the list do not make a good candidate "
+        "ambiguous. Use ABSTAIN when no supplied candidate represents the known "
+        "meaning or when known attributes explicitly conflict. Every SELECT is only "
+        "a proposal requiring human review. You may select only a supplied "
+        "concept_id; Never invent an ID.\n"
         "The confidence field MUST be a decimal between 0.0 and 1.0 (e.g., 0.85, never 85).\n"
         "Keep reason under 300 characters and provide at most 6 concise clinical signals.\n"
         f"{few_shot}"

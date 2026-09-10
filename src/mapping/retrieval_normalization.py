@@ -75,6 +75,7 @@ def normalize_retrieval_text(
     source_value: str,
     target_table: str,
     *,
+    data_classification: str = "SYNTHETIC",
     lexicon: dict | None = None,
 ) -> RetrievalNormalization:
     """Expand exact governed aliases for retrieval without assigning a concept."""
@@ -82,6 +83,17 @@ def normalize_retrieval_text(
     if target_table != "measurement":
         return RetrievalNormalization(source_value, source_value, None, None, None)
     lexicon = lexicon or load_lis_aliases()
+    if (
+        lexicon["scope"] == "generic-synthetic-development"
+        and data_classification.strip().upper() != "SYNTHETIC"
+    ):
+        return RetrievalNormalization(
+            source_value,
+            source_value,
+            None,
+            lexicon["lexicon_version"],
+            lexicon["sha256"],
+        )
     entry = lexicon["index"].get(_key(source_value))
     if entry is None:
         return RetrievalNormalization(

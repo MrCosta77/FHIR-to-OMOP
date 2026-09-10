@@ -249,6 +249,11 @@ def test_procedure_adapter_persists_abstention_as_non_publishable(monkeypatch, t
         )
         assert con.execute("SELECT reviewed_by FROM mapping_provenance").fetchone()[0] == "LLM_ABSTAIN"
         assert con.execute("SELECT procedure_concept_id FROM procedure_occurrence").fetchone()[0] == 0
+        suggestion = con.execute("""
+            SELECT candidate_concept_id, retrieval_score, status
+            FROM retrieval_candidate_suggestion
+        """).fetchone()
+        assert suggestion == (1004, 0.95, "PENDING")
 
 
 def test_adapter_redacts_direct_identifiers_from_prompt_and_persisted_llm_text(

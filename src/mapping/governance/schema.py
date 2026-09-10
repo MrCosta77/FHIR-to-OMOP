@@ -27,6 +27,8 @@ def _add_column(con, table, name, datatype):
 
 def ensure_governance_tables(con):
     """Install the review schema and non-destructively upgrade legacy audit data."""
+    from src.mapping.retrieval_queue import ensure_retrieval_suggestion_table
+
     con.execute("CREATE SEQUENCE IF NOT EXISTS seq_provenance_id START 1")
     con.execute("""
         CREATE TABLE IF NOT EXISTS mapping_provenance (
@@ -181,6 +183,7 @@ def ensure_governance_tables(con):
             UNIQUE (mapping_decision_id, reviewer)
         )
     """)
+    ensure_retrieval_suggestion_table(con)
     for name, datatype in (
         ("reviewer_key", "VARCHAR"),
         ("active", "BOOLEAN DEFAULT TRUE"),

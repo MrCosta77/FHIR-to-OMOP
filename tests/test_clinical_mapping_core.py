@@ -74,8 +74,10 @@ def test_core_renders_a_stable_prompt_without_adapter_or_storage_objects():
 
     assert "Target domain: Procedure" in prompt
     assert '"concept_id": 1004' in prompt
-    assert "only when it is clinically defensible" in prompt
-    assert "use ABSTAIN" in prompt
+    assert "Missing detail should lower confidence" in prompt
+    assert "unrelated distractors" in prompt
+    assert "Use ABSTAIN" in prompt
+    assert "only a proposal requiring human review" in prompt
     assert "Never invent an ID" in prompt
     assert "MUST be a decimal" in prompt
 

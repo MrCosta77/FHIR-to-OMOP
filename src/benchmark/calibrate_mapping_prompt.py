@@ -132,12 +132,14 @@ def calibrate_prompt(
     chroma_path: Path,
     *,
     top_k: int = 5,
+    model: str | None = None,
     client=None,
     collection=None,
 ) -> dict:
     """Run a non-publishing prompt probe against synthetic labelled cases."""
     if SETTINGS.data_classification != "SYNTHETIC":
         raise ValueError("Prompt calibration is restricted to SYNTHETIC data.")
+    model = model or SETTINGS.model_name
     client = client or ollama.Client(timeout=OLLAMA_TIMEOUT)
     with duckdb.connect(str(database_path), read_only=True) as con:
         cases = load_probe_cases(con)
@@ -159,7 +161,9 @@ def calibrate_prompt(
         results = []
         for case in cases:
             normalization = normalize_retrieval_text(
-                case["source_value"], TARGET_TABLE
+                case["source_value"],
+                TARGET_TABLE,
+                data_classification=SETTINGS.data_classification,
             )
             candidates = query_candidates(
                 collection, normalization.retrieval_text, top_k
@@ -170,7 +174,7 @@ def calibrate_prompt(
             )
             started = time.perf_counter()
             response = client.chat(
-                model=SETTINGS.model_name,
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 format=DECISION_SCHEMA,
                 options=GENERATION_PARAMETERS,
@@ -221,8 +225,8 @@ def calibrate_prompt(
         "status": "DEVELOPMENT_ONLY",
         "deployment_authorized": False,
         "generated_at": datetime.now(UTC).isoformat(),
-        "model": SETTINGS.model_name,
-        "model_digest": _model_digest(client, SETTINGS.model_name),
+        "model": model,
+        "model_digest": _model_digest(client, model),
         "prompt_version": PROMPT_VERSION,
         "generation_parameters": GENERATION_PARAMETERS,
         "top_k": top_k,
@@ -237,6 +241,7 @@ def main():
     parser.add_argument("--database", type=Path, default=SETTINGS.db_path)
     parser.add_argument("--chroma", type=Path, default=SETTINGS.chroma_path)
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--model", default=SETTINGS.model_name)
     parser.add_argument(
         "--output",
         type=Path,
@@ -246,7 +251,7 @@ def main():
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
     report = calibrate_prompt(
-        args.database, args.chroma, top_k=args.top_k
+        args.database, args.chroma, top_k=args.top_k, model=args.model
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

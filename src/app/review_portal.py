@@ -25,6 +25,7 @@ from src.mapping.governance import (
     submit_blinded_review,
     submit_counterproposal,
 )
+from src.mapping.retrieval_queue import retrieval_suggestion_queue
 from src.utils.config import DB_PATH
 
 st.set_page_config(
@@ -45,6 +46,11 @@ def get_adjudication_queue(adjudicator):
 def get_counterproposal_queue(proposer):
     with duckdb.connect(DB_PATH) as con:
         return pd.DataFrame(counterproposal_source_queue(con, proposer))
+
+
+def get_retrieval_suggestion_queue():
+    with duckdb.connect(DB_PATH) as con:
+        return pd.DataFrame(retrieval_suggestion_queue(con))
 
 
 def get_governed_actors():
@@ -218,10 +224,18 @@ metric_columns[3].metric("Rejected", rejected)
 kappa = agreement["overall"]["cohens_kappa"]
 metric_columns[4].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
 
-review_tab, adjudication_tab, correction_tab, agreement_tab, identity_tab = st.tabs(
+(
+    review_tab,
+    adjudication_tab,
+    retrieval_tab,
+    correction_tab,
+    agreement_tab,
+    identity_tab,
+) = st.tabs(
     [
         "Independent review", "Blinded adjudication",
-        "Candidate correction", "Agreement", "Identity administration",
+        "Retrieval suggestions", "Candidate correction", "Agreement",
+        "Identity administration",
     ]
 )
 
@@ -263,6 +277,37 @@ with adjudication_tab:
             for _, mapping in queue.head(50).iterrows():
                 render_mapping(mapping, identity, "adjudicate")
                 st.divider()
+
+with retrieval_tab:
+    st.subheader("Retrieval suggestions after LLM abstention")
+    st.caption(
+        "These are high-similarity search candidates, not LLM mapping decisions. "
+        "They are non-publishable and shown only for clinical investigation."
+    )
+    suggestions = get_retrieval_suggestion_queue()
+    if suggestions.empty:
+        st.info("No strong retrieval suggestions are awaiting investigation.")
+    else:
+        safe_columns = [
+            "target_table", "source_value", "candidate_concept_name",
+            "candidate_concept_id", "retrieval_score", "alias_id",
+            "lexicon_version", "affected_events", "model_name",
+            "prompt_version", "llm_confidence", "llm_reason",
+        ]
+        st.dataframe(
+            suggestions[safe_columns],
+            hide_index=True,
+            column_config={
+                "retrieval_score": st.column_config.ProgressColumn(
+                    "Retrieval score", min_value=0.0, max_value=1.0,
+                    format="percent",
+                ),
+                "llm_confidence": st.column_config.ProgressColumn(
+                    "LLM abstention confidence", min_value=0.0, max_value=1.0,
+                    format="percent",
+                ),
+            },
+        )
 
 with correction_tab:
     if not identity.strip():
