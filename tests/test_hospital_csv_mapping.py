@@ -22,7 +22,7 @@ class _FakeCollection:
         return 1
 
     def query(self, query_texts, n_results):
-        assert n_results == 5
+        assert n_results in {5, 20}
         assert "ana@example.org" not in query_texts[0]
         assert "MRN: ABC-12345" not in query_texts[0]
         return {

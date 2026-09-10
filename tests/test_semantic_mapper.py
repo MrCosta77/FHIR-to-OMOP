@@ -90,7 +90,7 @@ class _FakeCollection:
         return 1
 
     def query(self, query_texts, n_results):
-        assert n_results == 5
+        assert n_results in {5, 20}
         return {
             "ids": [["1004"]],
             "documents": [["Appendectomy"]],

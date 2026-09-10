@@ -14,6 +14,11 @@ import duckdb
 import ollama
 
 from src.clinical_mapping_core import DECISION_SCHEMA, parse_mapping_decision
+from src.mapping.loinc_reranking import (
+    LOINC_RERANKER_VERSION,
+    render_measurement_context,
+    retrieve_mapping_candidates,
+)
 from src.mapping.mapping_service import (
     TARGETS,
     get_few_shot_prompt,
@@ -149,8 +154,16 @@ def load_expanded_cases(
     return positives + negatives
 
 
-def query_candidates(collection, source_value: str, top_k: int) -> list[dict]:
-    result = collection.query(query_texts=[source_value], n_results=top_k)
+def query_candidates(
+    collection, source_value: str, top_k: int, *, rerank_context: str = ""
+) -> list[dict]:
+    result, _reranking = retrieve_mapping_candidates(
+        collection,
+        source_value,
+        TARGET_TABLE,
+        top_k=top_k,
+        rerank_context=rerank_context,
+    )
     ids = result.get("ids", [[]])[0]
     names = result.get("documents", [[]])[0]
     distances = result.get("distances", [[]])[0]
@@ -163,6 +176,34 @@ def query_candidates(collection, source_value: str, top_k: int) -> list[dict]:
         }
         for index, concept_id in enumerate(ids)
     ]
+
+
+def measurement_context(con, source_value: str) -> str:
+    """Return observed synthetic value/unit context without consulting truth labels."""
+    has_measurement = con.execute("""
+        SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = 'main' AND table_name = 'measurement'
+    """).fetchone()[0]
+    if not has_measurement:
+        return ""
+    row = con.execute("""
+        SELECT LIST(DISTINCT m.unit_source_value) FILTER (
+                   WHERE m.unit_source_value IS NOT NULL
+                     AND TRIM(m.unit_source_value) <> ''
+               ),
+               BOOL_OR(m.value_as_number IS NOT NULL),
+               BOOL_OR(m.value_as_concept_id IS NOT NULL OR (
+                   m.value_source_value IS NOT NULL
+                   AND TRY_CAST(m.value_source_value AS DOUBLE) IS NULL
+               ))
+        FROM lis_noise_ground_truth g
+        JOIN measurement m USING (measurement_id)
+        WHERE g.corrupted_source_value = ?
+    """, [source_value]).fetchone()
+    units, has_numeric, has_coded = row or ([], False, False)
+    return render_measurement_context(
+        units or [], has_numeric=bool(has_numeric), has_coded=bool(has_coded)
+    )
 
 
 def summarize(cases: list[dict]) -> dict:
@@ -254,12 +295,19 @@ def calibrate_prompt(
                 TARGET_TABLE,
                 data_classification=SETTINGS.data_classification,
             )
+            clinical_context = measurement_context(con, case["source_value"])
             candidates = query_candidates(
-                collection, normalization.retrieval_text, top_k
+                collection,
+                normalization.retrieval_text,
+                top_k,
+                rerank_context=clinical_context,
             )
             candidate_ids = [candidate["concept_id"] for candidate in candidates]
             prompt = build_prompt(
-                TARGET_TABLE, case["source_value"], candidates, few_shot
+                TARGET_TABLE,
+                case["source_value"],
+                candidates,
+                few_shot,
             )
             started = time.perf_counter()
             response = client.chat(
@@ -287,6 +335,7 @@ def calibrate_prompt(
             result = {
                 **case,
                 "retrieval_text": normalization.retrieval_text,
+                "clinical_context": clinical_context,
                 "retrieval_alias_id": normalization.alias_id,
                 "retrieval_lexicon_version": normalization.lexicon_version,
                 "retrieval_lexicon_sha256": normalization.lexicon_sha256,
@@ -338,6 +387,7 @@ def calibrate_prompt(
         "model": model,
         "model_digest": _model_digest(client, model),
         "prompt_version": PROMPT_VERSION,
+        "loinc_reranker_version": LOINC_RERANKER_VERSION,
         "generation_parameters": GENERATION_PARAMETERS,
         "top_k": top_k,
         "sample_mode": sample_mode,

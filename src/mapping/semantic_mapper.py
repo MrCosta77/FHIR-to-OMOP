@@ -19,6 +19,11 @@ from src.clinical_mapping_core import (
     render_mapping_prompt,
 )
 from src.mapping.governance import current_run_id
+from src.mapping.loinc_reranking import (
+    LOINC_RERANKER_VERSION,
+    render_measurement_context,
+    retrieve_mapping_candidates,
+)
 from src.mapping.mapping_service import (
     TARGETS,
     MappingSourceTerm,
@@ -167,6 +172,29 @@ def _unmapped_terms(con, target_table: str) -> list[MappingSourceTerm]:
     ]
 
 
+def _measurement_context(con, source_term: MappingSourceTerm) -> str:
+    if source_term.source_value is None:
+        return ""
+    row = con.execute("""
+        SELECT LIST(DISTINCT unit_source_value) FILTER (
+                   WHERE unit_source_value IS NOT NULL
+                     AND TRIM(unit_source_value) <> ''
+               ),
+               BOOL_OR(value_as_number IS NOT NULL),
+               BOOL_OR(value_as_concept_id IS NOT NULL OR (
+                   value_source_value IS NOT NULL
+                   AND TRY_CAST(value_source_value AS DOUBLE) IS NULL
+               ))
+        FROM measurement
+        WHERE measurement_concept_id = 0
+          AND measurement_source_value = ?
+    """, [source_term.source_value]).fetchone()
+    units, has_numeric, has_coded = row or ([], False, False)
+    return render_measurement_context(
+        units or [], has_numeric=bool(has_numeric), has_coded=bool(has_coded)
+    )
+
+
 def run_semantic_mapping(
     target_table: str,
     *,
@@ -224,8 +252,16 @@ def run_semantic_mapping(
                 target_table,
                 data_classification=privacy["classification"],
             )
-            search = collection.query(
-                query_texts=[normalization.retrieval_text], n_results=5
+            clinical_context = (
+                _measurement_context(con, source_term)
+                if target_table == "measurement" else ""
+            )
+            search, reranking = retrieve_mapping_candidates(
+                collection,
+                normalization.retrieval_text,
+                target_table,
+                top_k=5,
+                rerank_context=clinical_context,
             )
             ids = search.get("ids", [[]])[0]
             documents = search.get("documents", [[]])[0]
@@ -354,6 +390,11 @@ def run_semantic_mapping(
                     "retrieval_alias_id": normalization.alias_id,
                     "retrieval_lexicon_version": normalization.lexicon_version,
                     "retrieval_lexicon_sha256": normalization.lexicon_sha256,
+                    "loinc_reranker_version": (
+                        LOINC_RERANKER_VERSION
+                        if target_table == "measurement" else None
+                    ),
+                    "loinc_reranked_candidates": len(reranking),
                 },
                 run_id=current_run_id(),
             )

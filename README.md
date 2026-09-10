@@ -78,7 +78,7 @@ This project was built with strict adherence to clinical data management standar
 
 Standard OMOP vocabularies handle the majority of clinical data, but real-world data (like legacy LIS lab results) is messy. This framework uses a progressive retrieval-adjudication system:
 
-1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies (e.g., LOINC) to retrieve the top 5 clinically valid candidates.
+1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies. Measurement retrieves a wider LOINC pool and deterministically reranks it by explicit specimen, property and method signals; observed unit and value kind may inform reranking but individual values are never sent to the model. Only the final top 5 candidates reach the local LLM.
 2. **LLM Adjudication:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed.
 3. **Blinded Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Governed `actor_id` values—not typed names—enforce two distinct reviewers and a third adjudicator; approved aliases handle accents and verified name variants without weakening separation of duties. Rejections become active policy and suppress identical future proposals.
 4. **Fail-closed privacy boundary:** The default classification is synthetic. PHI mode requires explicit institutional approval and retention configuration, authenticated role allowlists, a loopback-only Ollama endpoint, direct-identifier redaction before prompting, and metadata-only security audit logs. The standalone portal is not an identity provider and must not be used with PHI without institution-managed authentication.
@@ -94,6 +94,10 @@ exact membership. `PROPOSAL_REVIEW_THRESHOLD` is applied to the conservative
 `min(retrieval_score, llm_confidence)` score before an LLM selection can enter
 the clinical review queue. Lower-scoring selections remain auditable but are
 not presented as review-ready proposals.
+
+LOINC reranking is versioned as `loinc-axes-v1`, preserves original Chroma
+distances for governed scoring, and is recorded in mapping audit metadata. It
+never imputes a missing clinical axis or bypasses human review.
 
 The six domain adapters share one governed semantic-mapping engine. Procedure
 and Device retrieval is restricted to current Standard SNOMED concepts in the

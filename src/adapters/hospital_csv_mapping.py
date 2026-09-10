@@ -20,6 +20,10 @@ from src.clinical_mapping_core import (
     render_mapping_prompt,
 )
 from src.mapping.governance import current_run_id, ensure_governance_tables
+from src.mapping.loinc_reranking import (
+    LOINC_RERANKER_VERSION,
+    retrieve_mapping_candidates,
+)
 from src.mapping.mapping_service import (
     get_few_shot_prompt,
     get_versioned_collection,
@@ -86,7 +90,9 @@ def run_hospital_csv_mapping(
                 )
             collection, few_shot, provenance = runtime[record.target_table]
             retrieval_text, retrieval_categories = record.prepare_retrieval_text()
-            search = collection.query(query_texts=[retrieval_text], n_results=5)
+            search, reranking = retrieve_mapping_candidates(
+                collection, retrieval_text, record.target_table, top_k=5
+            )
             ids = search.get("ids", [[]])[0]
             documents = search.get("documents", [[]])[0]
             if not ids:
@@ -190,6 +196,11 @@ def run_hospital_csv_mapping(
                     "redaction_categories": categories,
                     "data_classification": privacy["classification"],
                     "publication_eligible": False,
+                    "loinc_reranker_version": (
+                        LOINC_RERANKER_VERSION
+                        if record.target_table == "measurement" else None
+                    ),
+                    "loinc_reranked_candidates": len(reranking),
                 },
                 run_id=current_run_id(),
             )
