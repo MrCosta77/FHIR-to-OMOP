@@ -185,6 +185,58 @@ def blinded_review_queue(con, reviewer):
     )
     return result
 
+
+def review_queue_metrics(con) -> dict[str, int]:
+    """Return reviewer-neutral canonical counts aligned with queue semantics."""
+    ensure_governance_tables(con)
+    row = con.execute("""
+        WITH review_counts AS (
+            SELECT mapping_decision_id,
+                   COUNT(DISTINCT review_id) AS review_count
+            FROM clinical_mapping_review
+            WHERE COALESCE(active, TRUE)
+            GROUP BY mapping_decision_id
+        ), ranked AS (
+            SELECT d.status,
+                   COALESCE(r.review_count, 0) AS review_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY d.target_table,
+                                    COALESCE(d.source_adapter, ''),
+                                    COALESCE(d.source_vocabulary_id, ''),
+                                    COALESCE(d.source_code, ''),
+                                    LOWER(TRIM(d.source_value)),
+                                    d.assigned_concept_id
+                       ORDER BY CASE WHEN d.status = 'PENDING' THEN 0 ELSE 1 END,
+                                COALESCE(r.review_count, 0) DESC,
+                                d.proposed_at,
+                                d.mapping_decision_id
+                   ) AS canonical_rank
+            FROM mapping_decision d
+            LEFT JOIN review_counts r USING (mapping_decision_id)
+            WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+              AND COALESCE(d.publication_eligible, TRUE)
+        )
+        SELECT COUNT(*) FILTER (
+                   WHERE canonical_rank = 1
+                     AND status = 'PENDING'
+                     AND review_count < 2
+               ),
+               COUNT(*) FILTER (
+                   WHERE canonical_rank = 1
+                     AND status = 'LOW_CONFIDENCE'
+               ),
+               COUNT(*) FILTER (
+                   WHERE canonical_rank = 1
+                     AND review_count >= 2
+               )
+        FROM ranked
+    """).fetchone()
+    return {
+        "review_ready": int(row[0]),
+        "low_confidence": int(row[1]),
+        "ready_to_adjudicate": int(row[2]),
+    }
+
 def blinded_adjudication_queue(con, adjudicator):
     """Return two-review cases without exposing reviewer identities or votes."""
     adjudicator = (adjudicator or "").strip()

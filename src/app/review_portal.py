@@ -22,6 +22,7 @@ from src.mapping.governance import (
     ensure_governance_tables,
     list_governed_actors,
     register_governed_actor,
+    review_queue_metrics,
     submit_blinded_review,
     submit_counterproposal,
 )
@@ -84,37 +85,7 @@ def bootstrap_identity_admin(display_name, reason):
 def get_dashboard_metrics():
     with duckdb.connect(DB_PATH) as con:
         ensure_governance_tables(con)
-        pending, ready = con.execute("""
-            WITH review_counts AS (
-                SELECT mapping_decision_id,
-                       COUNT(DISTINCT review_id) AS review_count
-                FROM clinical_mapping_review
-                WHERE COALESCE(active, TRUE)
-                GROUP BY mapping_decision_id
-            ), ranked AS (
-                SELECT d.mapping_decision_id,
-                       COALESCE(r.review_count, 0) AS review_count,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY d.target_table,
-                                        COALESCE(d.source_adapter, ''),
-                                        COALESCE(d.source_vocabulary_id, ''),
-                                        COALESCE(d.source_code, ''),
-                                        LOWER(TRIM(d.source_value)),
-                                        d.assigned_concept_id
-                           ORDER BY COALESCE(r.review_count, 0) DESC,
-                                    d.proposed_at, d.mapping_decision_id
-                       ) AS canonical_rank
-                FROM mapping_decision d
-                LEFT JOIN review_counts r USING (mapping_decision_id)
-                WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
-                  AND COALESCE(d.publication_eligible, TRUE)
-            )
-            SELECT COUNT(*) FILTER (WHERE canonical_rank = 1),
-                   COUNT(*) FILTER (
-                       WHERE canonical_rank = 1 AND review_count >= 2
-                   )
-            FROM ranked
-        """).fetchone()
+        queue_metrics = review_queue_metrics(con)
         approved = con.execute(
             "SELECT COUNT(*) FROM mapping_decision WHERE status = 'APPROVED'"
         ).fetchone()[0]
@@ -122,7 +93,7 @@ def get_dashboard_metrics():
             "SELECT COUNT(*) FROM mapping_decision WHERE status = 'REJECTED'"
         ).fetchone()[0]
         agreement = clinical_review_agreement(con)
-    return pending, ready, approved, rejected, agreement
+    return queue_metrics, approved, rejected, agreement
 
 
 def submit_review(decision_id, action, reviewer, rationale):
@@ -215,14 +186,17 @@ identity = st.text_input(
     placeholder="Full professional name",
 )
 
-pending, ready, approved, rejected, agreement = get_dashboard_metrics()
-metric_columns = st.columns(5)
-metric_columns[0].metric("Pending decisions", pending)
-metric_columns[1].metric("Ready to adjudicate", ready)
-metric_columns[2].metric("Approved", approved)
-metric_columns[3].metric("Rejected", rejected)
+queue_metrics, approved, rejected, agreement = get_dashboard_metrics()
+metric_columns = st.columns(6)
+metric_columns[0].metric("Review-ready", queue_metrics["review_ready"])
+metric_columns[1].metric("Low confidence", queue_metrics["low_confidence"])
+metric_columns[2].metric(
+    "Ready to adjudicate", queue_metrics["ready_to_adjudicate"]
+)
+metric_columns[3].metric("Approved", approved)
+metric_columns[4].metric("Rejected", rejected)
 kappa = agreement["overall"]["cohens_kappa"]
-metric_columns[4].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
+metric_columns[5].metric("Cohen's κ", "—" if kappa is None else f"{kappa:.3f}")
 
 (
     review_tab,

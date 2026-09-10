@@ -23,6 +23,7 @@ from .review import (
     blinded_review_queue,
     clinical_review_agreement,
     review_mapping_decision,
+    review_queue_metrics,
     submit_blinded_review,
 )
 from .schema import ensure_governance_tables

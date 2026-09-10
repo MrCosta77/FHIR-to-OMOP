@@ -12,6 +12,7 @@ from src.mapping.governance import (
     register_governed_actor,
     rejection_policy_exists,
     review_mapping_decision,
+    review_queue_metrics,
     submit_blinded_review,
     submit_counterproposal,
 )
@@ -319,6 +320,32 @@ def test_low_confidence_decision_is_audited_but_not_sent_to_clinical_review():
             [decision_id],
         ).fetchone()[0] == "LOW_CONFIDENCE"
         assert blinded_review_queue(con, "Reviewer One") == []
+
+
+def test_queue_metrics_separate_review_ready_from_low_confidence():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        pending = _proposal(con, run_id="RUN-pending")
+        register_decision(
+            con, "measurement", "Legacy", 300, "Candidate",
+            "llm_rag_json", 0.70, "test-model", "v-test", "LOW_CONFIDENCE",
+            run_id="RUN-low-duplicate",
+        )
+        register_decision(
+            con, "measurement", "Only low", 301, "Other candidate",
+            "llm_rag_json", 0.70, "test-model", "v-test", "LOW_CONFIDENCE",
+            run_id="RUN-low-only",
+        )
+
+        assert review_queue_metrics(con) == {
+            "review_ready": 1,
+            "low_confidence": 1,
+            "ready_to_adjudicate": 0,
+        }
+        assert [
+            row["mapping_decision_id"]
+            for row in blinded_review_queue(con, "Reviewer One")
+        ] == [pending]
 
 
 def test_review_queue_deduplicates_same_semantic_mapping_across_runs():
