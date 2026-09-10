@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ NEGATIVE_TERMS = (
     "Recurrent opioid use in situations in which it is physically hazardous",
     "Operative Status Value",
 )
+CALIBRATION_THRESHOLDS = (0.70, 0.75, 0.80, 0.85, 0.90)
 
 
 def load_probe_cases(con) -> list[dict]:
@@ -81,6 +83,62 @@ def load_probe_cases(con) -> list[dict]:
     negatives = [
         {
             "case_id": f"NEG-{index:02d}",
+            "source_value": source,
+            "expected_decision": "ABSTAIN",
+            "expected_concept_id": None,
+            "expected_concept_name": None,
+        }
+        for index, source in enumerate(NEGATIVE_TERMS, start=1)
+    ]
+    return positives + negatives
+
+
+def load_expanded_cases(
+    con, *, positive_limit: int = 40, split: str = "development"
+) -> list[dict]:
+    """Load a deterministic, unambiguous synthetic LIS calibration sample."""
+    if positive_limit <= 0:
+        raise ValueError("positive_limit must be positive")
+    if split not in {"development", "holdout", "all"}:
+        raise ValueError("split must be development, holdout or all")
+    rows = con.execute("""
+        SELECT corrupted_source_value,
+               MIN(true_concept_id) AS true_concept_id,
+               MIN(true_source_value) AS true_source_value
+        FROM lis_noise_ground_truth
+        WHERE corrupted_source_value IS NOT NULL
+          AND TRIM(corrupted_source_value) <> ''
+          AND true_concept_id IS NOT NULL
+        GROUP BY corrupted_source_value
+        HAVING COUNT(DISTINCT true_concept_id) = 1
+    """).fetchall()
+
+    selected = []
+    for source, concept_id, concept_name in rows:
+        digest = hashlib.sha256(source.encode("utf-8")).digest()
+        case_split = "development" if digest[0] < 204 else "holdout"
+        if split == "all" or split == case_split:
+            selected.append((digest.hex(), source, concept_id, concept_name))
+    selected.sort(key=lambda row: (row[0], row[1].casefold()))
+    selected = selected[:positive_limit]
+    if not selected:
+        raise ValueError(f"No unambiguous LIS cases are available for split {split!r}.")
+
+    positives = [
+        {
+            "case_id": f"POS-{index:03d}",
+            "source_value": source,
+            "expected_decision": "SELECT",
+            "expected_concept_id": int(concept_id),
+            "expected_concept_name": concept_name,
+        }
+        for index, (_digest, source, concept_id, concept_name) in enumerate(
+            selected, start=1
+        )
+    ]
+    negatives = [
+        {
+            "case_id": f"NEG-{index:03d}",
             "source_value": source,
             "expected_decision": "ABSTAIN",
             "expected_concept_id": None,
@@ -127,12 +185,37 @@ def summarize(cases: list[dict]) -> dict:
     }
 
 
+def threshold_analysis(cases: list[dict]) -> list[dict]:
+    """Report review-queue precision and coverage without authorizing publication."""
+    positives = [case for case in cases if case["expected_decision"] == "SELECT"]
+    rows = []
+    for threshold in CALIBRATION_THRESHOLDS:
+        admitted = [
+            case for case in cases
+            if case["decision"] == "SELECT"
+            and case.get("governed_score", 0.0) >= threshold
+        ]
+        correct = sum(case.get("selected_correctly") is True for case in admitted)
+        rows.append({
+            "threshold": threshold,
+            "admitted_proposals": len(admitted),
+            "correct_proposals": correct,
+            "incorrect_proposals": len(admitted) - correct,
+            "review_queue_precision": correct / len(admitted) if admitted else None,
+            "positive_case_coverage": correct / len(positives) if positives else None,
+        })
+    return rows
+
+
 def calibrate_prompt(
     database_path: Path,
     chroma_path: Path,
     *,
     top_k: int = 5,
     model: str | None = None,
+    sample_mode: str = "expanded",
+    positive_limit: int = 40,
+    split: str = "development",
     client=None,
     collection=None,
 ) -> dict:
@@ -142,7 +225,13 @@ def calibrate_prompt(
     model = model or SETTINGS.model_name
     client = client or ollama.Client(timeout=OLLAMA_TIMEOUT)
     with duckdb.connect(str(database_path), read_only=True) as con:
-        cases = load_probe_cases(con)
+        cases = (
+            load_probe_cases(con)
+            if sample_mode == "fixed"
+            else load_expanded_cases(
+                con, positive_limit=positive_limit, split=split
+            )
+        )
         few_shot = get_few_shot_prompt(
             con, TARGET_TABLE, "LOINC Measurement", 3
         )
@@ -211,6 +300,27 @@ def calibrate_prompt(
                 "contract_error": contract_error,
                 "wall_seconds": elapsed,
             }
+            selected = next(
+                (
+                    candidate for candidate in candidates
+                    if candidate["concept_id"] == decision["selected_concept_id"]
+                ),
+                None,
+            )
+            distance = selected["distance"] if selected else None
+            metric = metadata.get("distance_metric", "cosine")
+            retrieval_score = None
+            if distance is not None:
+                retrieval_score = (
+                    max(0.0, min(1.0, 1.0 - distance))
+                    if metric == "cosine"
+                    else 1.0 / (1.0 + max(0.0, distance))
+                )
+            result["selected_retrieval_score"] = retrieval_score
+            result["governed_score"] = (
+                min(retrieval_score, decision["confidence"])
+                if retrieval_score is not None else 0.0
+            )
             results.append(result)
             print(
                 f"{case['case_id']} {case['source_value']!r}: "
@@ -230,8 +340,12 @@ def calibrate_prompt(
         "prompt_version": PROMPT_VERSION,
         "generation_parameters": GENERATION_PARAMETERS,
         "top_k": top_k,
+        "sample_mode": sample_mode,
+        "positive_limit": positive_limit,
+        "split": split,
         "index_signature": metadata.get("index_signature"),
         "summary": summarize(results),
+        "threshold_analysis": threshold_analysis(results),
         "cases": results,
     }
 
@@ -243,6 +357,14 @@ def main():
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--model", default=SETTINGS.model_name)
     parser.add_argument(
+        "--sample-mode", choices=("fixed", "expanded"), default="expanded"
+    )
+    parser.add_argument("--positive-limit", type=int, default=40)
+    parser.add_argument(
+        "--split", choices=("development", "holdout", "all"),
+        default="development",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("benchmark_results") / "prompt_calibration.json",
@@ -251,7 +373,9 @@ def main():
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
     report = calibrate_prompt(
-        args.database, args.chroma, top_k=args.top_k, model=args.model
+        args.database, args.chroma, top_k=args.top_k, model=args.model,
+        sample_mode=args.sample_mode, positive_limit=args.positive_limit,
+        split=args.split,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
@@ -260,6 +384,7 @@ def main():
     )
     print(f"Wrote {args.output}")
     print(json.dumps(report["summary"], indent=2, sort_keys=True))
+    print(json.dumps(report["threshold_analysis"], indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

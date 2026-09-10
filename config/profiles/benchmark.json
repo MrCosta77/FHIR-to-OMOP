@@ -13,6 +13,7 @@
         "ollama_url": "http://localhost:11434/api/generate",
         "model_name": "llama3.1",
         "similarity_threshold": 0.9,
+        "proposal_review_threshold": 0.8,
         "data_classification": "SYNTHETIC",
         "simulate_lis_noise": false,
         "require_integration": true,

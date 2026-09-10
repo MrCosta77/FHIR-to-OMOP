@@ -148,7 +148,7 @@ def blinded_review_queue(con, reviewer):
             FROM mapping_decision d
             LEFT JOIN review_counts r USING (mapping_decision_id)
             LEFT JOIN provenance_counts p USING (mapping_decision_id)
-            WHERE d.status IN ('PENDING', 'LOW_CONFIDENCE')
+            WHERE d.status = 'PENDING'
               AND COALESCE(d.publication_eligible, TRUE)
         )
         SELECT mapping_decision_id, run_id, target_table, source_value,

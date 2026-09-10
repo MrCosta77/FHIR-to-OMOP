@@ -32,16 +32,24 @@ def test_environment_overrides_profile_without_loading_dotenv(tmp_path):
         "CMF_DB_PATH": str(tmp_path / "isolated.duckdb"),
         "CMF_MODEL_NAME": "local-test-model",
         "CMF_SIMILARITY_THRESHOLD": "0.75",
+        "CMF_PROPOSAL_REVIEW_THRESHOLD": "0.80",
     })
     assert settings.db_path == (tmp_path / "isolated.duckdb").resolve()
     assert settings.model_name == "local-test-model"
     assert settings.similarity_threshold == 0.75
+    assert settings.proposal_review_threshold == 0.80
 
 
 @pytest.mark.parametrize("value", ["-0.1", "1.1", "not-a-number"])
 def test_invalid_threshold_fails_closed(value):
     with pytest.raises(SettingsError, match="SIMILARITY_THRESHOLD"):
         load_settings({"CMF_SIMILARITY_THRESHOLD": value})
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.1", "not-a-number"])
+def test_invalid_proposal_review_threshold_fails_closed(value):
+    with pytest.raises(SettingsError, match="PROPOSAL_REVIEW_THRESHOLD"):
+        load_settings({"CMF_PROPOSAL_REVIEW_THRESHOLD": value})
 
 
 @pytest.mark.parametrize("value", ["-1", "0", "nan", "inf", "-inf", "not-a-number"])

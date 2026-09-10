@@ -304,6 +304,23 @@ def test_review_and_adjudication_queues_remain_blind():
         assert "verdict" not in adjudication[0]
 
 
+def test_low_confidence_decision_is_audited_but_not_sent_to_clinical_review():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _register_test_actors(con)
+        decision_id = register_decision(
+            con, "measurement", "Uncertain legacy label", 300, "Candidate",
+            "llm_rag_json", 0.79, "test-model", "v-test", "LOW_CONFIDENCE",
+            run_id="RUN-low-confidence",
+        )
+
+        assert con.execute(
+            "SELECT status FROM mapping_decision WHERE mapping_decision_id = ?",
+            [decision_id],
+        ).fetchone()[0] == "LOW_CONFIDENCE"
+        assert blinded_review_queue(con, "Reviewer One") == []
+
+
 def test_review_queue_deduplicates_same_semantic_mapping_across_runs():
     with duckdb.connect(":memory:") as con:
         ensure_governance_tables(con)

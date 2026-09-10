@@ -17,17 +17,20 @@ the execution environment using the mechanism appropriate to that platform.
 - `benchmark` isolates generated outputs, requires integration checks and uses
   the Llama candidate selected for development calibration.
 - `hospital` defaults to PHI, local `qwen2.5-coder:7b` and a provisional review
-  priority threshold of `0.9`. Every LLM proposal still requires human approval,
+  admission threshold of `0.8`. Every admitted LLM proposal still requires two
+  blinded human reviews and governed adjudication,
   irrespective of score. The profile fails at import/startup unless PHI
   activation, named approval, positive retention, an institution-managed
   `CMF_PHI_SALT` of at least 32 characters and an institution-managed
   `CMF_PHI_KEY_VERSION` are provided. It also requires the complete integration
   and OHDSI DQD gates. It is a safety template, not deployment authorization.
 
-`similarity_threshold` is a retrieval-quality gate for admitting a proposal
-to the human-review queue. It is not an automatic acceptance threshold and
-never authorizes STCM or OMOP publication; governed human decisions remain
-mandatory at every configured value.
+`proposal_review_threshold` controls admission to the clinical-review queue and
+is applied to `min(retrieval_score, llm_confidence)`. Selections below it remain
+stored as `LOW_CONFIDENCE` audit evidence but are excluded from that queue.
+`similarity_threshold` remains the compatibility gate used by pre-ingestion
+proposal workflows. Neither setting is an automatic acceptance threshold or
+authorizes STCM/OMOP publication; governed human decisions remain mandatory.
 
 Relative paths are anchored at the repository root, independent of the current
 working directory. Absolute paths are accepted on the host platform. No profile

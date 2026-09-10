@@ -21,7 +21,8 @@ DEVELOPMENT_PHI_SALT = "synthea-dev-secret-2026"
 PROFILE_KEYS = {
     "db_path", "fhir_dir", "vocab_dir", "chroma_path", "runs_dir",
     "manifests_dir", "reports_dir", "dqd_results_dir", "ollama_url",
-    "ollama_timeout", "model_name", "similarity_threshold", "data_classification",
+    "ollama_timeout", "model_name", "similarity_threshold",
+    "proposal_review_threshold", "data_classification",
     "simulate_lis_noise", "lis_noise_ratio", "require_integration", "include_dqd",
     "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
     "cdm_source_description", "cdm_source_release_date",
@@ -40,6 +41,7 @@ ENVIRONMENT_KEYS = {
     "ollama_timeout": "CMF_OLLAMA_TIMEOUT_SECONDS",
     "model_name": "CMF_MODEL_NAME",
     "similarity_threshold": "CMF_SIMILARITY_THRESHOLD",
+    "proposal_review_threshold": "CMF_PROPOSAL_REVIEW_THRESHOLD",
     "data_classification": "CMF_DATA_CLASSIFICATION",
     "simulate_lis_noise": "CMF_SIMULATE_LIS_NOISE",
     "lis_noise_ratio": "CMF_LIS_NOISE_RATIO",
@@ -79,6 +81,7 @@ class RuntimeSettings:
     ollama_timeout: float
     model_name: str
     similarity_threshold: float
+    proposal_review_threshold: float
     data_classification: str
     simulate_lis_noise: bool
     lis_noise_ratio: float
@@ -111,6 +114,7 @@ class RuntimeSettings:
             "ollama_timeout": self.ollama_timeout,
             "model_name": self.model_name,
             "similarity_threshold": self.similarity_threshold,
+            "proposal_review_threshold": self.proposal_review_threshold,
             "data_classification": self.data_classification,
             "simulate_lis_noise": self.simulate_lis_noise,
             "lis_noise_ratio": self.lis_noise_ratio,
@@ -206,6 +210,14 @@ def load_settings(
         raise SettingsError("CMF_SIMILARITY_THRESHOLD must be numeric.") from exc
     if not 0.0 <= threshold <= 1.0:
         raise SettingsError("CMF_SIMILARITY_THRESHOLD must be between 0 and 1.")
+    try:
+        proposal_review_threshold = float(values["proposal_review_threshold"])
+    except (TypeError, ValueError) as exc:
+        raise SettingsError("CMF_PROPOSAL_REVIEW_THRESHOLD must be numeric.") from exc
+    if not 0.0 <= proposal_review_threshold <= 1.0:
+        raise SettingsError(
+            "CMF_PROPOSAL_REVIEW_THRESHOLD must be between 0 and 1."
+        )
 
     try:
         ollama_timeout = float(values.get("ollama_timeout", 120.0))
@@ -296,6 +308,7 @@ def load_settings(
         ollama_timeout=ollama_timeout,
         model_name=model_name,
         similarity_threshold=threshold,
+        proposal_review_threshold=proposal_review_threshold,
         data_classification=privacy["classification"],
         simulate_lis_noise=simulate_lis_noise,
         lis_noise_ratio=lis_noise_ratio,
@@ -325,6 +338,7 @@ OLLAMA_URL = SETTINGS.ollama_url
 OLLAMA_TIMEOUT = SETTINGS.ollama_timeout
 MODEL_NAME = SETTINGS.model_name
 SIMILARITY_THRESHOLD = SETTINGS.similarity_threshold
+PROPOSAL_REVIEW_THRESHOLD = SETTINGS.proposal_review_threshold
 SIMULATE_LIS_NOISE = SETTINGS.simulate_lis_noise
 LIS_NOISE_RATIO = SETTINGS.lis_noise_ratio
 REQUIRE_INTEGRATION = SETTINGS.require_integration

@@ -90,8 +90,10 @@ a fingerprint of the valid vocabulary/domain slice, index schema version,
 distance metric, and `build_complete` marker. Changed vocabularies trigger a
 resumable rebuild; matching legacy collections are adopted without recomputing
 embeddings. Few-shot examples use a stable order, candidate IDs are parsed by
-exact membership, and `SIMILARITY_THRESHOLD` is enforced before a proposal can
-enter the review queue.
+exact membership. `PROPOSAL_REVIEW_THRESHOLD` is applied to the conservative
+`min(retrieval_score, llm_confidence)` score before an LLM selection can enter
+the clinical review queue. Lower-scoring selections remain auditable but are
+not presented as review-ready proposals.
 
 The six domain adapters share one governed semantic-mapping engine. Procedure
 and Device retrieval is restricted to current Standard SNOMED concepts in the

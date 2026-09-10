@@ -4,8 +4,10 @@ import pytest
 from src.benchmark.calibrate_mapping_prompt import (
     NEGATIVE_TERMS,
     POSITIVE_TERMS,
+    load_expanded_cases,
     load_probe_cases,
     summarize,
+    threshold_analysis,
 )
 
 
@@ -47,6 +49,34 @@ def test_probe_refuses_missing_ground_truth():
             load_probe_cases(con)
 
 
+def test_expanded_cases_are_deterministic_split_and_exclude_ambiguous_labels():
+    with duckdb.connect(":memory:") as con:
+        con.execute("""
+            CREATE TABLE lis_noise_ground_truth (
+                measurement_id BIGINT, true_concept_id INTEGER,
+                true_source_value VARCHAR, corrupted_source_value VARCHAR
+            )
+        """)
+        con.executemany(
+            "INSERT INTO lis_noise_ground_truth VALUES (?, ?, ?, ?)",
+            [
+                (1, 100, "Truth A", "LIS-A"),
+                (2, 101, "Truth B", "LIS-B"),
+                (3, 102, "Truth C", "AMBIG"),
+                (4, 103, "Truth D", "AMBIG"),
+            ],
+        )
+        first = load_expanded_cases(con, positive_limit=10, split="all")
+        second = load_expanded_cases(con, positive_limit=10, split="all")
+
+    assert first == second
+    positive_sources = {
+        case["source_value"] for case in first
+        if case["expected_decision"] == "SELECT"
+    }
+    assert positive_sources == {"LIS-A", "LIS-B"}
+
+
 def test_probe_summary_separates_retrieval_llm_and_negative_safety():
     cases = [
         {
@@ -74,4 +104,33 @@ def test_probe_summary_separates_retrieval_llm_and_negative_safety():
         "negative_cases": 1,
         "safe_negative_abstentions": 1,
         "contract_failures": 0,
+    }
+
+
+def test_threshold_analysis_never_treats_abstention_as_review_proposal():
+    cases = [
+        {
+            "expected_decision": "SELECT", "decision": "SELECT",
+            "selected_correctly": True, "governed_score": 0.82,
+        },
+        {
+            "expected_decision": "SELECT", "decision": "SELECT",
+            "selected_correctly": False, "governed_score": 0.78,
+        },
+        {
+            "expected_decision": "ABSTAIN", "decision": "ABSTAIN",
+            "selected_correctly": None, "governed_score": 0.99,
+        },
+    ]
+
+    at_080 = next(
+        row for row in threshold_analysis(cases) if row["threshold"] == 0.80
+    )
+    assert at_080 == {
+        "threshold": 0.80,
+        "admitted_proposals": 1,
+        "correct_proposals": 1,
+        "incorrect_proposals": 0,
+        "review_queue_precision": 1.0,
+        "positive_case_coverage": 0.5,
     }

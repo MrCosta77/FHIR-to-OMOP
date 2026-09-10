@@ -13,7 +13,11 @@ from src.mapping.governance import (
     rejection_policy_exists,
 )
 from src.omop.mapping_targets import TARGETS
-from src.utils.config import MODEL_NAME, SIMILARITY_THRESHOLD
+from src.utils.config import (
+    MODEL_NAME,
+    PROPOSAL_REVIEW_THRESHOLD,
+    SIMILARITY_THRESHOLD,
+)
 
 INDEX_SCHEMA_VERSION = "omop-rag-index-v1"
 
@@ -398,7 +402,7 @@ def record_mapping_proposal(
     )
     review_status = (
         "Pending_Human_Review"
-        if score >= SIMILARITY_THRESHOLD
+        if score >= PROPOSAL_REVIEW_THRESHOLD
         else "Below_Confidence_Threshold"
     )
     vocabulary_version = con.execute("""
