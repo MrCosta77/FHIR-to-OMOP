@@ -141,6 +141,7 @@ def test_csv_runner_retrieves_calls_local_llm_and_persists_non_publishable_propo
         "proposals": 1,
         "abstentions": 0,
         "persisted": 1,
+        "contract_failures": 0,
     }
     assert second["persisted"] == 0
     assert "row-private-1" not in client.prompts[0]
@@ -216,3 +217,40 @@ def test_csv_abstention_is_persisted_and_never_reviewable(monkeypatch, tmp_path)
         assert con.execute(
             "SELECT reviewed_by FROM mapping_provenance"
         ).fetchone()[0] == "LLM_ABSTAIN"
+
+
+def test_csv_invalid_llm_response_becomes_audited_technical_abstention(
+    monkeypatch, tmp_path
+):
+    class InvalidOllama(_FakeOllama):
+        def chat(self, **kwargs):
+            self.prompts.append(kwargs["messages"][0]["content"])
+            return {"message": {"content": "{not-json"}}
+
+    database = tmp_path / "invalid-contract.duckdb"
+    source = tmp_path / "hospital.csv"
+    _database(database)
+    _csv(source)
+    monkeypatch.setattr(
+        "src.adapters.hospital_csv_mapping.get_versioned_collection",
+        lambda con, path, target: _FakeCollection(),
+    )
+
+    result = run_hospital_csv_mapping(
+        source, db_path=database, chroma_path=tmp_path, client=InvalidOllama()
+    )
+
+    assert result["contract_failures"] == 1
+    assert result["abstentions"] == 1
+    assert result["proposals"] == 0
+    with duckdb.connect(str(database), read_only=True) as con:
+        assert con.execute("""
+            SELECT status, llm_reason, llm_confidence, publication_eligible
+            FROM mapping_decision
+        """).fetchone() == (
+            "ABSTAINED", "INVALID_LLM_RESPONSE", 0.0, False,
+        )
+        assert con.execute("""
+            SELECT COUNT(*) FROM security_audit_log
+            WHERE event_type = 'HOSPITAL_CSV_LLM_CONTRACT_FAILURE'
+        """).fetchone()[0] == 1

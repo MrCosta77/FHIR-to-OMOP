@@ -11,6 +11,7 @@ from src.clinical_mapping_core.decision import (
     DECISION_SCHEMA,
     PROMPT_VERSION,
     parse_mapping_decision,
+    parse_mapping_decision_fail_safe,
     render_mapping_prompt,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "ModelProvenance",
     "PROMPT_VERSION",
     "parse_mapping_decision",
+    "parse_mapping_decision_fail_safe",
     "render_mapping_prompt",
 ]

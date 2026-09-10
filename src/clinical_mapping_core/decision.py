@@ -88,6 +88,30 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
     )
 
 
+def parse_mapping_decision_fail_safe(
+    content: str, candidate_ids
+) -> tuple[MappingDecision, str | None]:
+    """Convert a strict contract failure into an explicit technical abstention.
+
+    The parser remains fail-closed. This operational boundary prevents one
+    malformed local-model response from terminating a batch, while returning
+    only a controlled validator message and never the raw model response.
+    """
+    try:
+        return parse_mapping_decision(content, candidate_ids), None
+    except ValueError as exc:
+        return (
+            MappingDecision(
+                decision=DecisionKind.ABSTAIN,
+                selected_concept_id=None,
+                confidence=0.0,
+                reason="INVALID_LLM_RESPONSE",
+                clinical_signals=(),
+            ),
+            str(exc),
+        )
+
+
 def render_mapping_prompt(
     request: MappingRequest,
     *,

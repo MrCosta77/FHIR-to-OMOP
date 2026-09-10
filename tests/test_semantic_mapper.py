@@ -256,6 +256,40 @@ def test_procedure_adapter_persists_abstention_as_non_publishable(monkeypatch, t
         assert suggestion == (1004, 0.95, "PENDING")
 
 
+def test_invalid_llm_response_becomes_audited_abstention_without_crashing(
+    monkeypatch, tmp_path
+):
+    database = tmp_path / "invalid-contract.duckdb"
+    _procedure_database(database)
+    monkeypatch.setattr(
+        "src.mapping.semantic_mapper.get_versioned_collection",
+        lambda con, path, target: _FakeCollection(),
+    )
+
+    result = run_semantic_mapping(
+        "procedure_occurrence", db_path=database, chroma_path=tmp_path,
+        client=_FakeOllama("{not-json"),
+    )
+
+    assert result["contract_failures"] == 1
+    assert result["abstentions"] == 1
+    assert result["proposals"] == 0
+    with duckdb.connect(str(database), read_only=True) as con:
+        assert con.execute("""
+            SELECT status, llm_reason, llm_confidence, publication_eligible
+            FROM mapping_decision
+        """).fetchone() == (
+            "ABSTAINED", "INVALID_LLM_RESPONSE", 0.0, False,
+        )
+        assert con.execute("""
+            SELECT COUNT(*) FROM security_audit_log
+            WHERE event_type = 'LOCAL_LLM_CONTRACT_FAILURE'
+        """).fetchone()[0] == 1
+        assert con.execute(
+            "SELECT procedure_concept_id FROM procedure_occurrence"
+        ).fetchone()[0] == 0
+
+
 def test_adapter_redacts_direct_identifiers_from_prompt_and_persisted_llm_text(
     monkeypatch, tmp_path,
 ):

@@ -10,6 +10,7 @@ from src.clinical_mapping_core import (
     MappingRequest,
     ModelProvenance,
     parse_mapping_decision,
+    parse_mapping_decision_fail_safe,
     render_mapping_prompt,
 )
 
@@ -56,6 +57,39 @@ def test_core_rejects_invalid_or_uncalibrated_confidence(confidence):
 def test_core_rejects_inconsistent_abstention_payload():
     with pytest.raises(ValueError, match="selected_concept_id=null"):
         parse_mapping_decision(_payload(decision="ABSTAIN", concept_id=1004), [1004])
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not-json",
+        _payload(concept_id=9999),
+        json.dumps({
+            "decision": "SELECT",
+            "selected_concept_id": 1004,
+            "confidence": 85,
+            "reason": "Invalid confidence scale.",
+            "clinical_signals": [],
+        }),
+    ],
+)
+def test_fail_safe_parser_converts_contract_errors_to_technical_abstention(content):
+    decision, error = parse_mapping_decision_fail_safe(content, [1004])
+
+    assert decision.decision is DecisionKind.ABSTAIN
+    assert decision.selected_concept_id is None
+    assert decision.confidence == 0.0
+    assert decision.reason == "INVALID_LLM_RESPONSE"
+    assert error
+    assert content not in error
+
+
+def test_fail_safe_parser_preserves_valid_decision_without_error():
+    decision, error = parse_mapping_decision_fail_safe(_payload(), [1004])
+
+    assert decision.decision is DecisionKind.SELECT
+    assert decision.selected_concept_id == 1004
+    assert error is None
 
 
 def test_core_renders_a_stable_prompt_without_adapter_or_storage_objects():

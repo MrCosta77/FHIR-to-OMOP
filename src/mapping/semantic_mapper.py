@@ -15,6 +15,7 @@ from src.clinical_mapping_core import (
     MappingRequest,
     ModelProvenance,
     parse_mapping_decision,
+    parse_mapping_decision_fail_safe,
     render_mapping_prompt,
 )
 from src.mapping.governance import current_run_id
@@ -188,6 +189,7 @@ def run_semantic_mapping(
         "proposals": 0,
         "abstentions": 0,
         "retrieval_suggestions": 0,
+        "contract_failures": 0,
     }
     print(f"STARTING GOVERNED LOCAL-LLM MAPPING: {target_table}")
     with duckdb.connect(str(db_path)) as con:
@@ -251,7 +253,24 @@ def run_semantic_mapping(
                 format=DECISION_SCHEMA,
                 options=GENERATION_PARAMETERS,
             )
-            decision_contract = parse_mapping_decision(_response_content(response), ids)
+            decision_contract, contract_error = parse_mapping_decision_fail_safe(
+                _response_content(response), ids
+            )
+            if contract_error is not None:
+                result["contract_failures"] += 1
+                audit_security_event(
+                    con,
+                    "LOCAL_LLM_CONTRACT_FAILURE",
+                    "LOCAL_MAPPING_ENGINE",
+                    "TECHNICAL_ABSTENTION",
+                    {
+                        "target_table": target_table,
+                        "model": MODEL_NAME,
+                        "validation_error": contract_error,
+                        "data_classification": privacy["classification"],
+                    },
+                    run_id=current_run_id(),
+                )
             sanitized_reason, reason_categories = redact_direct_identifiers(
                 decision_contract.reason
             )
@@ -329,6 +348,7 @@ def run_semantic_mapping(
                     "target_table": target_table,
                     "model": MODEL_NAME,
                     "decision": decision["decision"],
+                    "contract_failure": contract_error,
                     "redaction_categories": redaction_categories,
                     "data_classification": privacy["classification"],
                     "retrieval_alias_id": normalization.alias_id,

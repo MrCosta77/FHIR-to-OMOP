@@ -508,6 +508,7 @@ def record_mapping_abstention(
             source_term.source_vocabulary_id if source_term else None
         ),
         source_code=source_term.source_code if source_term else None,
+        publication_eligible=False,
         **metadata_kwargs,
     )
     for target_id in target_ids:

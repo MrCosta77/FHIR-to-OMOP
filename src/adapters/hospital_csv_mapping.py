@@ -16,7 +16,7 @@ from src.clinical_mapping_core import (
     PROMPT_VERSION,
     Candidate,
     ModelProvenance,
-    parse_mapping_decision,
+    parse_mapping_decision_fail_safe,
     render_mapping_prompt,
 )
 from src.mapping.governance import current_run_id, ensure_governance_tables
@@ -56,6 +56,7 @@ def run_hospital_csv_mapping(
         "proposals": 0,
         "abstentions": 0,
         "persisted": 0,
+        "contract_failures": 0,
     }
     with duckdb.connect(str(db_path)) as con:
         ensure_governance_tables(con)
@@ -109,7 +110,24 @@ def run_hospital_csv_mapping(
                 format=DECISION_SCHEMA,
                 options=GENERATION_PARAMETERS,
             )
-            decision = parse_mapping_decision(_response_content(response), ids)
+            decision, contract_error = parse_mapping_decision_fail_safe(
+                _response_content(response), ids
+            )
+            if contract_error is not None:
+                result["contract_failures"] += 1
+                audit_security_event(
+                    con,
+                    "HOSPITAL_CSV_LLM_CONTRACT_FAILURE",
+                    "LOCAL_MAPPING_ENGINE",
+                    "TECHNICAL_ABSTENTION",
+                    {
+                        "target_table": record.target_table,
+                        "model": MODEL_NAME,
+                        "validation_error": contract_error,
+                        "data_classification": privacy["classification"],
+                    },
+                    run_id=current_run_id(),
+                )
             reason, reason_categories = redact_direct_identifiers(decision.reason)
             signals = []
             signal_categories = []
@@ -168,6 +186,7 @@ def run_hospital_csv_mapping(
                     "target_table": record.target_table,
                     "model": MODEL_NAME,
                     "decision": decision.decision.value,
+                    "contract_failure": contract_error,
                     "redaction_categories": categories,
                     "data_classification": privacy["classification"],
                     "publication_eligible": False,
