@@ -16,7 +16,7 @@ _FORBIDDEN_SQL = re.compile(
     r"\b(?:ALTER|ATTACH|CALL|COPY|CREATE|DELETE|DETACH|DROP|EXPORT|IMPORT|"
     r"INSERT|INSTALL|LOAD|PRAGMA|RESET|SET|TRUNCATE|UPDATE|VACUUM)\b|"
     r"\b(?:GLOB|PARQUET_SCAN|POSTGRES_SCAN|SQLITE_SCAN)\s*\(|"
-    r"\bREAD_(?:CSV|JSON|PARQUET)(?:_AUTO)?\s*\(",
+    r"\bREAD_(?:CSV|JSON|PARQUET|TEXT|BLOB)(?:_AUTO)?\s*\(",
     re.IGNORECASE,
 )
 
@@ -98,6 +98,12 @@ def validate_read_only_sql(sql_query: str) -> str:
         raise ValueError("The query contains a forbidden SQL operation or external data access.")
     return query
 
+
+def harden_analytics_connection(con) -> None:
+    """Disable DuckDB filesystem/network access and lock that security setting."""
+    con.execute("SET enable_external_access = false")
+    con.execute("SET lock_configuration = true")
+
 def run_agent():
     print("\n" + "🤖"*25)
     print("      CLINICAL AI AGENT (TEXT-TO-SQL)")
@@ -106,7 +112,12 @@ def run_agent():
     print("Type your clinical question in English (or 'exit' to quit).")
 
     # Open the database in read_only mode for safety (prevents the LLM from accidentally deleting data)
-    with duckdb.connect(DB_PATH, read_only=True) as con:
+    with duckdb.connect(
+        DB_PATH,
+        read_only=True,
+        config={"enable_external_access": "false"},
+    ) as con:
+        harden_analytics_connection(con)
         while True:
             print("-" * 50)
             question = input("🩺 Ask a question: ")

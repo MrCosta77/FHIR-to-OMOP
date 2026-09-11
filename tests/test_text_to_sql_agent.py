@@ -1,6 +1,11 @@
+import duckdb
 import pytest
 
-from src.analytics.text_to_sql_agent import extract_sql_query, validate_read_only_sql
+from src.analytics.text_to_sql_agent import (
+    extract_sql_query,
+    harden_analytics_connection,
+    validate_read_only_sql,
+)
 
 
 @pytest.mark.parametrize(
@@ -44,6 +49,8 @@ def test_read_only_sql_guard_accepts_bounded_query_shapes(query):
         "WITH removed AS (DELETE FROM person RETURNING *) SELECT * FROM removed",
         "SELECT 1; SELECT 2",
         "SELECT * FROM read_csv_auto('hospital.csv')",
+        "SELECT * FROM read_text('secrets.txt')",
+        "SELECT * FROM read_blob('secrets.bin')",
         "SELECT * FROM parquet_scan('https://example.test/data.parquet')",
         "PRAGMA database_list",
     ],
@@ -51,6 +58,24 @@ def test_read_only_sql_guard_accepts_bounded_query_shapes(query):
 def test_read_only_sql_guard_rejects_unsafe_queries(query):
     with pytest.raises(ValueError):
         validate_read_only_sql(query)
+
+
+def test_hardened_connection_blocks_external_file_access_and_reenable(tmp_path):
+    public_fixture = tmp_path / "public.txt"
+    public_fixture.write_text("safe test fixture", encoding="utf-8")
+    with duckdb.connect() as con:
+        assert con.execute(
+            "SELECT content FROM read_text(?)", [str(public_fixture)]
+        ).fetchone()[0] == "safe test fixture"
+
+        harden_analytics_connection(con)
+
+        with pytest.raises(duckdb.PermissionException, match="disabled"):
+            con.execute(
+                "SELECT content FROM read_text(?)", [str(public_fixture)]
+            ).fetchall()
+        with pytest.raises(duckdb.Error):
+            con.execute("SET enable_external_access = true")
 
 from src.analytics.text_to_sql_agent import MODEL_NAME, generate_sql_query
 
