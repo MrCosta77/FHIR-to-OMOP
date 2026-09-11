@@ -31,14 +31,21 @@ def _is_absolute_fhir_uri(value: object) -> bool:
     return bool(parsed.scheme and (parsed.netloc or parsed.scheme.casefold() == "urn"))
 
 
-def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
+def validate_bundle(
+    path: Path,
+    *,
+    require_patient: bool = True,
+    seen_identities: set[tuple[str, str]] | None = None,
+    seen_full_urls: set[str] | None = None,
+) -> Counter:
+    """Validate one bundle, optionally against directory-wide identity state."""
     bundle = json.loads(Path(path).read_text(encoding="utf-8"))
     _require(bundle.get("resourceType") == "Bundle", f"{path}: resourceType must be Bundle")
     entries = bundle.get("entry")
     _require(isinstance(entries, list) and entries, f"{path}: Bundle.entry is empty")
 
     resources = [entry.get("resource", {}) for entry in entries]
-    full_urls: set[str] = set()
+    full_urls = seen_full_urls if seen_full_urls is not None else set()
     for entry, resource in zip(entries, resources, strict=False):
         resource_type = resource.get("resourceType")
         if resource_type not in IDENTITY_SCOPED_TYPES:
@@ -60,7 +67,7 @@ def validate_bundle(path: Path, *, require_patient: bool = True) -> Counter:
     }
     encounters.discard(None)
 
-    identities: set[tuple[str, str]] = set()
+    identities = seen_identities if seen_identities is not None else set()
     counts: Counter = Counter()
     for resource in resources:
         resource_type = resource.get("resourceType")
@@ -100,9 +107,16 @@ def validate_directory(directory: Path) -> Counter:
     paths = sorted(Path(directory).glob("*.json"))
     _require(bool(paths), f"No FHIR JSON bundles found in {directory}")
     total: Counter = Counter()
+    seen_identities: set[tuple[str, str]] = set()
+    seen_full_urls: set[str] = set()
     for path in paths:
         is_auxiliary = path.name.startswith(AUXILIARY_BUNDLE_PREFIXES)
-        total.update(validate_bundle(path, require_patient=not is_auxiliary))
+        total.update(validate_bundle(
+            path,
+            require_patient=not is_auxiliary,
+            seen_identities=seen_identities,
+            seen_full_urls=seen_full_urls,
+        ))
     return total
 
 

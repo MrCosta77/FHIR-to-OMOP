@@ -114,6 +114,53 @@ def test_duplicate_resource_identity_is_rejected(tmp_path):
         validate_bundle(path)
 
 
+def _write_patient_bundle(path, *, patient_id, full_url):
+    path.write_text(
+        json.dumps({
+            "resourceType": "Bundle",
+            "type": "batch",
+            "entry": [{
+                "fullUrl": full_url,
+                "resource": {"resourceType": "Patient", "id": patient_id},
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_directory_rejects_resource_identity_repeated_across_bundles(tmp_path):
+    _write_patient_bundle(
+        tmp_path / "patient-a.json",
+        patient_id="patient-1",
+        full_url="https://hospital.example/fhir/Patient/patient-1-a",
+    )
+    _write_patient_bundle(
+        tmp_path / "patient-b.json",
+        patient_id="patient-1",
+        full_url="https://hospital.example/fhir/Patient/patient-1-b",
+    )
+
+    with pytest.raises(ValueError, match="duplicate resource Patient/patient-1"):
+        validate_directory(tmp_path)
+
+
+def test_directory_rejects_full_url_repeated_across_bundles(tmp_path):
+    shared_url = "https://hospital.example/fhir/Patient/shared"
+    _write_patient_bundle(
+        tmp_path / "patient-a.json",
+        patient_id="patient-1",
+        full_url=shared_url,
+    )
+    _write_patient_bundle(
+        tmp_path / "patient-b.json",
+        patient_id="patient-2",
+        full_url=shared_url,
+    )
+
+    with pytest.raises(ValueError, match=f"duplicate fullUrl {shared_url}"):
+        validate_directory(tmp_path)
+
+
 def test_relative_clinical_full_url_is_rejected(tmp_path):
     path = _mutated_bundle(
         tmp_path,
