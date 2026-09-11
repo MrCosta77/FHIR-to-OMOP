@@ -1,7 +1,9 @@
 import glob
 import json
 import os
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -15,6 +17,30 @@ from src.adapters.fhir_records import FHIRPersonRecord
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import stable_person_id
+
+FHIR_PARTIAL_DATE = re.compile(
+    r"^(?P<year>\d{4})(?:-(?P<month>\d{2})(?:-(?P<day>\d{2}))?)?$"
+)
+
+
+def parse_fhir_birth_date(value: str) -> tuple[int, int | None, int | None, str | None]:
+    """Preserve FHIR date precision without inventing an unknown month or day."""
+    match = FHIR_PARTIAL_DATE.fullmatch(str(value or "").strip())
+    if not match:
+        raise ValueError("Patient.birthDate must be a valid FHIR date.")
+    year = int(match.group("year"))
+    month = int(match.group("month")) if match.group("month") else None
+    day = int(match.group("day")) if match.group("day") else None
+    try:
+        date(year, month or 1, day or 1)
+    except ValueError as exc:
+        raise ValueError("Patient.birthDate must be a valid FHIR date.") from exc
+    birth_datetime = (
+        f"{year:04d}-{month:02d}-{day:02d} 00:00:00"
+        if month is not None and day is not None
+        else None
+    )
+    return year, month, day, birth_datetime
 
 
 def _extension_display_text(extension):
@@ -65,11 +91,12 @@ def extract_persons(file_path):
                 birth_datetime = None
 
                 if birth_date:
-                    parts = birth_date.split('-')
-                    year_of_birth = int(parts[0]) if len(parts) > 0 else None
-                    month_of_birth = int(parts[1]) if len(parts) > 1 else None
-                    day_of_birth = int(parts[2]) if len(parts) > 2 else None
-                    birth_datetime = f"{birth_date} 00:00:00"
+                    (
+                        year_of_birth,
+                        month_of_birth,
+                        day_of_birth,
+                        birth_datetime,
+                    ) = parse_fhir_birth_date(birth_date)
 
                 # Ignorar doentes com year_of_birth a 0 (crítica do revisor resolvida)
                 if not year_of_birth or year_of_birth == 0:

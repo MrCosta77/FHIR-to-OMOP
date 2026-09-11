@@ -9,6 +9,31 @@ sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH
 
 
+def mapping_accuracy_metrics(con) -> dict[str, int | float]:
+    """Measure against every ground-truth row, including quarantined events."""
+    total, mapped, correct = con.execute("""
+        SELECT
+            COUNT(*) AS total_corrupted,
+            SUM(CASE WHEN m.measurement_concept_id != 0 THEN 1 ELSE 0 END)
+                AS total_mapped,
+            SUM(CASE WHEN m.measurement_concept_id = g.true_concept_id THEN 1 ELSE 0 END)
+                AS correct_matches
+        FROM lis_noise_ground_truth g
+        LEFT JOIN measurement m ON g.measurement_id = m.measurement_id
+    """).fetchone()
+    total = int(total or 0)
+    mapped = int(mapped or 0)
+    correct = int(correct or 0)
+    return {
+        "total_corrupted": total,
+        "total_mapped": mapped,
+        "correct_matches": correct,
+        "coverage": (mapped / total) * 100 if total else 0.0,
+        "precision": (correct / mapped) * 100 if mapped else 0.0,
+        "recall": (correct / total) * 100 if total else 0.0,
+    }
+
+
 def evaluate_accuracy():
     print("📊 EVALUATING AI MAPPING ACCURACY (RAG + FEW-SHOT)")
     print("-" * 50)
@@ -25,25 +50,13 @@ def evaluate_accuracy():
             print('$env:CMF_SIMULATE_LIS_NOISE="true"; python main.py')
             return
 
-        # Evaluate Precision and Recall by joining STCM-mapped measurements with ground truth
-        query = """
-            SELECT
-                COUNT(*) as total_corrupted,
-                SUM(CASE WHEN m.measurement_concept_id != 0 THEN 1 ELSE 0 END) as total_mapped,
-                SUM(CASE WHEN m.measurement_concept_id = g.true_concept_id THEN 1 ELSE 0 END) as correct_matches
-            FROM lis_noise_ground_truth g
-            JOIN measurement m ON g.measurement_id = m.measurement_id
-        """
-
-        result = con.execute(query).fetchone()
-        total = result[0]
-        mapped = result[1]
-        correct = result[2]
-
-        # Scientific Model Evaluation Formulas
-        coverage = (mapped / total) * 100 if total else 0
-        precision = (correct / mapped) * 100 if mapped else 0
-        recall = (correct / total) * 100 if total else 0
+        metrics = mapping_accuracy_metrics(con)
+        total = metrics["total_corrupted"]
+        mapped = metrics["total_mapped"]
+        correct = metrics["correct_matches"]
+        coverage = metrics["coverage"]
+        precision = metrics["precision"]
+        recall = metrics["recall"]
 
         print(f"Total Simulated/Corrupted Records: {total}")
         print(f"Total Mapped by AI: {mapped}")
