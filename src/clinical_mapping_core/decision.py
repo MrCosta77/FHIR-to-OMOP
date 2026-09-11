@@ -11,7 +11,7 @@ from src.clinical_mapping_core.contracts import (
     MappingRequest,
 )
 
-PROMPT_VERSION = "mapping-json-v4"
+PROMPT_VERSION = "mapping-json-v5"
 DECISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,

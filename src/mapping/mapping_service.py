@@ -169,7 +169,7 @@ def get_versioned_collection(con, chroma_path, target_table):
 
 
 def get_few_shot_prompt(con, target_table, label, limit=3):
-    """Build stable few-shot context from distinct human-approved mappings."""
+    """Build stable JSON context from distinct human-approved mappings."""
     rows = con.execute("""
         SELECT source_value, assigned_concept_id, normalized_value
         FROM mapping_provenance
@@ -183,12 +183,26 @@ def get_few_shot_prompt(con, target_table, label, limit=3):
     """, [target_table, int(limit)]).fetchall()
     if not rows:
         return ""
-    lines = [f"Human-approved {label} examples:"]
-    lines.extend(
-        f"- '{source}' -> {concept_id} ({name})"
+    examples = [
+        {
+            "source_value": source,
+            "approved_mapping": {
+                "selected_concept_id": int(concept_id),
+                "concept_name": name,
+            },
+        }
         for source, concept_id, name in rows
+    ]
+    payload = json.dumps(
+        {"label": label, "human_approved_examples": examples},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return "\n".join(lines) + "\n"
+    return (
+        "Human-approved mapping evidence (JSON; approval is not model confidence):\n"
+        f"{payload}\n"
+    )
 
 
 def reconcile_resolved_proposals(con, target_table):

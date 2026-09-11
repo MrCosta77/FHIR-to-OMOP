@@ -1,3 +1,5 @@
+import json
+
 import duckdb
 
 from src.adapters.fhir_coding import replace_fhir_source_codings
@@ -61,7 +63,13 @@ def test_few_shot_examples_have_stable_order():
 
         prompt = get_few_shot_prompt(con, "measurement", "LOINC", 3)
 
-    assert prompt.index("'Alpha'") < prompt.index("'Zulu'")
+    payload = json.loads(prompt.splitlines()[1])
+    examples = payload["human_approved_examples"]
+    assert [example["source_value"] for example in examples] == ["Alpha", "Zulu"]
+    assert examples[0]["approved_mapping"] == {
+        "concept_name": "A", "selected_concept_id": 1,
+    }
+    assert "->" not in prompt
 
 
 def test_stale_chroma_index_is_rebuilt(monkeypatch, tmp_path):
