@@ -35,7 +35,11 @@ def _case_signature(report: dict) -> list[tuple]:
 
 
 def _validate_compatible(before: dict, after: dict) -> None:
-    for field in ("model", "prompt_version", "top_k", "sample_mode", "split"):
+    for field in (
+        "model", "model_digest", "prompt_version", "generation_parameters",
+        "top_k", "sample_mode", "positive_limit", "split", "index_signature",
+        "loinc_reranker_version",
+    ):
         if before.get(field) != after.get(field):
             raise ValueError(f"Incompatible calibration field: {field}")
     if _case_signature(before) != _case_signature(after):
@@ -120,6 +124,8 @@ def compare_reports(before: dict, after: dict) -> dict:
         "split": after["split"],
         "before_reranker_version": before.get("loinc_reranker_version"),
         "after_reranker_version": after.get("loinc_reranker_version"),
+        "before_few_shot_mode": before.get("few_shot_mode", "approved"),
+        "after_few_shot_mode": after.get("few_shot_mode", "approved"),
         "summary": summary,
         "threshold_analysis": thresholds,
         "case_transitions": transitions,
@@ -146,6 +152,8 @@ def render_markdown(report: dict) -> str:
         f"- Prompt: `{report['prompt_version']}`",
         f"- Reranker: `{report['before_reranker_version']}` → "
         f"`{report['after_reranker_version']}`",
+        f"- Few-shot: `{report['before_few_shot_mode']}` → "
+        f"`{report['after_few_shot_mode']}`",
         "- Safety status: development-only; no deployment authorization",
         "",
         "## Summary",

@@ -15,7 +15,8 @@ def _report():
     return {
         "status": "DEVELOPMENT_ONLY", "deployment_authorized": False,
         "model": "qwen", "prompt_version": "v1", "top_k": 5,
-        "sample_mode": "expanded", "split": "holdout",
+        "sample_mode": "expanded", "positive_limit": 1, "split": "holdout",
+        "few_shot_mode": "none",
         "loinc_reranker_version": "before", "cases": cases,
         "summary": {
             "positive_cases": 1, "retrieval_hits": 0,
@@ -48,11 +49,15 @@ def test_comparison_reports_improvement_and_transition():
         "review_queue_precision": 1.0, "positive_case_coverage": 1.0,
     })
 
+    before["loinc_reranker_version"] = "after"
+    after["few_shot_mode"] = "synthetic-development"
     comparison = compare_reports(before, after)
 
     assert comparison["summary"]["retrieval_hits"]["delta"] == 1
     assert comparison["summary"]["positive_abstentions"]["delta"] == -1
     assert comparison["case_transitions"][0]["case_id"] == "POS-001"
+    assert comparison["before_few_shot_mode"] == "none"
+    assert comparison["after_few_shot_mode"] == "synthetic-development"
     assert "0 → 1" in render_markdown(comparison)
 
 

@@ -21,7 +21,8 @@ from src.mapping.loinc_reranking import (
 )
 from src.mapping.mapping_service import (
     TARGETS,
-    get_few_shot_prompt,
+    approved_mapping_examples,
+    render_mapping_examples,
     vocabulary_signature,
 )
 from src.mapping.retrieval_normalization import normalize_retrieval_text
@@ -54,6 +55,7 @@ NEGATIVE_TERMS = (
     "Operative Status Value",
 )
 CALIBRATION_THRESHOLDS = (0.70, 0.75, 0.80, 0.85, 0.90)
+FEW_SHOT_MODES = ("approved", "none", "synthetic-development")
 
 
 def load_probe_cases(con) -> list[dict]:
@@ -152,6 +154,66 @@ def load_expanded_cases(
         for index, source in enumerate(NEGATIVE_TERMS, start=1)
     ]
     return positives + negatives
+
+
+def calibration_few_shot(
+    con,
+    *,
+    mode: str,
+    sample_mode: str,
+    evaluation_split: str,
+    example_limit: int = 3,
+) -> tuple[str, list[dict]]:
+    """Build one explicit calibration arm without contaminating holdout."""
+    if mode not in FEW_SHOT_MODES:
+        raise ValueError(f"Unsupported few-shot mode: {mode}")
+    if mode == "none":
+        return "", []
+    if mode == "approved":
+        rows = approved_mapping_examples(con, TARGET_TABLE, example_limit)
+        prompt = render_mapping_examples(
+            rows, "LOINC Measurement", evidence_type="human-approved"
+        )
+        manifest = [
+            {
+                "source_value": source,
+                "expected_concept_id": int(concept_id),
+            }
+            for source, concept_id, _name in rows
+        ]
+        return prompt, manifest
+    if sample_mode != "expanded" or evaluation_split != "holdout":
+        raise ValueError(
+            "synthetic-development few-shot is restricted to expanded holdout "
+            "evaluation to prevent calibration leakage."
+        )
+    development = load_expanded_cases(
+        con, positive_limit=example_limit, split="development"
+    )
+    examples = [
+        case for case in development if case["expected_decision"] == "SELECT"
+    ]
+    rows = [
+        (
+            case["source_value"],
+            case["expected_concept_id"],
+            case["expected_concept_name"],
+        )
+        for case in examples
+    ]
+    prompt = render_mapping_examples(
+        rows,
+        "LOINC Measurement",
+        evidence_type="synthetic-development",
+    )
+    manifest = [
+        {
+            "case_id": case["case_id"],
+            "expected_concept_id": case["expected_concept_id"],
+        }
+        for case in examples
+    ]
+    return prompt, manifest
 
 
 def query_candidates(
@@ -257,6 +319,8 @@ def calibrate_prompt(
     sample_mode: str = "expanded",
     positive_limit: int = 40,
     split: str = "development",
+    few_shot_mode: str = "approved",
+    few_shot_examples: int = 3,
     client=None,
     collection=None,
 ) -> dict:
@@ -273,8 +337,12 @@ def calibrate_prompt(
                 con, positive_limit=positive_limit, split=split
             )
         )
-        few_shot = get_few_shot_prompt(
-            con, TARGET_TABLE, "LOINC Measurement", 3
+        few_shot, few_shot_manifest = calibration_few_shot(
+            con,
+            mode=few_shot_mode,
+            sample_mode=sample_mode,
+            evaluation_split=split,
+            example_limit=few_shot_examples,
         )
         expected_signature = vocabulary_signature(con, TARGET_TABLE)
         if collection is None:
@@ -393,6 +461,16 @@ def calibrate_prompt(
         "sample_mode": sample_mode,
         "positive_limit": positive_limit,
         "split": split,
+        "few_shot_mode": few_shot_mode,
+        "few_shot_example_count": len(few_shot_manifest),
+        "few_shot_example_manifest": few_shot_manifest,
+        "few_shot_example_manifest_sha256": hashlib.sha256(
+            json.dumps(
+                few_shot_manifest,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
         "index_signature": metadata.get("index_signature"),
         "summary": summarize(results),
         "threshold_analysis": threshold_analysis(results),
@@ -415,6 +493,10 @@ def main():
         default="development",
     )
     parser.add_argument(
+        "--few-shot-mode", choices=FEW_SHOT_MODES, default="approved",
+    )
+    parser.add_argument("--few-shot-examples", type=int, default=3)
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("benchmark_results") / "prompt_calibration.json",
@@ -422,10 +504,13 @@ def main():
     args = parser.parse_args()
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
+    if args.few_shot_examples <= 0:
+        parser.error("--few-shot-examples must be positive")
     report = calibrate_prompt(
         args.database, args.chroma, top_k=args.top_k, model=args.model,
         sample_mode=args.sample_mode, positive_limit=args.positive_limit,
-        split=args.split,
+        split=args.split, few_shot_mode=args.few_shot_mode,
+        few_shot_examples=args.few_shot_examples,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

@@ -4,6 +4,7 @@ import pytest
 from src.benchmark.calibrate_mapping_prompt import (
     NEGATIVE_TERMS,
     POSITIVE_TERMS,
+    calibration_few_shot,
     load_expanded_cases,
     load_probe_cases,
     summarize,
@@ -75,6 +76,77 @@ def test_expanded_cases_are_deterministic_split_and_exclude_ambiguous_labels():
         if case["expected_decision"] == "SELECT"
     }
     assert positive_sources == {"LIS-A", "LIS-B"}
+
+
+def test_synthetic_few_shot_is_holdout_only_and_uses_development_cases():
+    with duckdb.connect(":memory:") as con:
+        con.execute("""
+            CREATE TABLE lis_noise_ground_truth (
+                measurement_id BIGINT, true_concept_id INTEGER,
+                true_source_value VARCHAR, corrupted_source_value VARCHAR
+            )
+        """)
+        con.executemany(
+            "INSERT INTO lis_noise_ground_truth VALUES (?, ?, ?, ?)",
+            [
+                (index, 1000 + index, f"Truth {index}", f"LIS-{index:03d}")
+                for index in range(1, 101)
+            ],
+        )
+        prompt, manifest = calibration_few_shot(
+            con,
+            mode="synthetic-development",
+            sample_mode="expanded",
+            evaluation_split="holdout",
+            example_limit=3,
+        )
+
+        development_ids = {
+            case["expected_concept_id"]
+            for case in load_expanded_cases(
+                con, positive_limit=100, split="development"
+            )
+            if case["expected_decision"] == "SELECT"
+        }
+        assert len(manifest) == 3
+        assert {row["expected_concept_id"] for row in manifest} <= development_ids
+        assert "synthetic_development_examples" in prompt
+
+        with pytest.raises(ValueError, match="prevent calibration leakage"):
+            calibration_few_shot(
+                con,
+                mode="synthetic-development",
+                sample_mode="expanded",
+                evaluation_split="development",
+            )
+
+
+def test_approved_arm_reports_the_examples_injected_into_the_prompt():
+    with duckdb.connect(":memory:") as con:
+        con.execute("""
+            CREATE TABLE mapping_provenance (
+                provenance_id BIGINT, target_table VARCHAR,
+                source_value VARCHAR, assigned_concept_id INTEGER,
+                normalized_value VARCHAR, reviewed_by VARCHAR,
+                created_at TIMESTAMP
+            );
+            INSERT INTO mapping_provenance VALUES (
+                1, 'measurement', 'CREA', 3016723, 'Creatinine',
+                'Approved_by_Human', '2026-01-01'
+            );
+        """)
+
+        prompt, manifest = calibration_few_shot(
+            con,
+            mode="approved",
+            sample_mode="expanded",
+            evaluation_split="holdout",
+        )
+
+    assert manifest == [{
+        "source_value": "CREA", "expected_concept_id": 3016723,
+    }]
+    assert "human_approved_examples" in prompt
 
 
 def test_probe_summary_separates_retrieval_llm_and_negative_safety():

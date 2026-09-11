@@ -168,19 +168,17 @@ def get_versioned_collection(con, chroma_path, target_table):
     return collection
 
 
-def get_few_shot_prompt(con, target_table, label, limit=3):
-    """Build stable JSON context from distinct human-approved mappings."""
-    rows = con.execute("""
-        SELECT source_value, assigned_concept_id, normalized_value
-        FROM mapping_provenance
-        WHERE reviewed_by = 'Approved_by_Human' AND target_table = ?
-        QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY LOWER(TRIM(source_value)), assigned_concept_id
-            ORDER BY created_at, provenance_id
-        ) = 1
-        ORDER BY LOWER(TRIM(source_value)), assigned_concept_id
-        LIMIT ?
-    """, [target_table, int(limit)]).fetchall()
+def render_mapping_examples(rows, label, *, evidence_type):
+    """Render typed mapping evidence without inventing model confidence."""
+    if evidence_type == "human-approved":
+        heading = "Human-approved mapping evidence"
+        payload_key = "human_approved_examples"
+    elif evidence_type == "synthetic-development":
+        heading = "Synthetic development evidence (calibration only)"
+        payload_key = "synthetic_development_examples"
+    else:
+        raise ValueError(f"Unsupported mapping evidence type: {evidence_type}")
+    rows = list(rows)
     if not rows:
         return ""
     examples = [
@@ -194,14 +192,36 @@ def get_few_shot_prompt(con, target_table, label, limit=3):
         for source, concept_id, name in rows
     ]
     payload = json.dumps(
-        {"label": label, "human_approved_examples": examples},
+        {"label": label, "evidence_type": evidence_type, payload_key: examples},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     )
-    return (
-        "Human-approved mapping evidence (JSON; approval is not model confidence):\n"
-        f"{payload}\n"
+    return f"{heading} (JSON; evidence is not model confidence):\n{payload}\n"
+
+
+def approved_mapping_examples(con, target_table, limit=3):
+    """Return stable distinct human-approved mappings for prompt evidence."""
+    return con.execute("""
+        SELECT source_value, assigned_concept_id, normalized_value
+        FROM mapping_provenance
+        WHERE reviewed_by = 'Approved_by_Human' AND target_table = ?
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY LOWER(TRIM(source_value)), assigned_concept_id
+            ORDER BY created_at, provenance_id
+        ) = 1
+        ORDER BY LOWER(TRIM(source_value)), assigned_concept_id
+        LIMIT ?
+    """, [target_table, int(limit)]).fetchall()
+
+
+def get_few_shot_prompt(con, target_table, label, limit=3):
+    """Build stable JSON context from distinct human-approved mappings."""
+    rows = approved_mapping_examples(con, target_table, limit)
+    return render_mapping_examples(
+        rows,
+        label,
+        evidence_type="human-approved",
     )
 
 
