@@ -145,10 +145,11 @@ def run_procedure_etl():
             )
         """)
 
-        con.executemany(
-            "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [record.as_staging_row() for record in all_records],
-        )
+        if all_records:
+            con.executemany(
+                "INSERT INTO stg_procedure VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [record.as_staging_row() for record in all_records],
+            )
 
         ambiguous = con.execute("""
             SELECT COUNT(*)

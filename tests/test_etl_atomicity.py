@@ -4,6 +4,7 @@ import pytest
 from src.adapters.fhir_coding import RXNORM_URI, SourceCoding
 from src.adapters.fhir_records import CodedFHIRPeriodRecord
 from src.etl import condition, drug, measurement, observation, person, procedure, visit
+from src.utils import setup_audit, setup_cdm_schema
 
 
 @pytest.mark.parametrize(
@@ -49,6 +50,44 @@ def test_base_etl_rolls_back_target_drop_on_schema_failure(
         assert con.execute(
             f'SELECT marker FROM "{target_table}"'
         ).fetchall() == [("published-before-run",)]
+
+
+@pytest.mark.parametrize(
+    ("module", "runner", "target_table"),
+    [
+        (person, person.run_person_etl, "person"),
+        (visit, visit.run_visit_etl, "visit_occurrence"),
+        (condition, condition.run_condition_etl, "condition_occurrence"),
+        (drug, drug.run_drug_etl, "drug_exposure"),
+        (measurement, measurement.run_measurement_etl, "measurement"),
+        (observation, observation.run_observation_etl, "observation"),
+        (procedure, procedure.run_procedure_etl, "procedure_occurrence"),
+    ],
+    ids=[
+        "person", "visit", "condition", "drug", "measurement",
+        "observation", "procedure",
+    ],
+)
+def test_base_etl_publishes_empty_table_for_absent_domain(
+    monkeypatch, tmp_path, module, runner, target_table
+):
+    database = tmp_path / f"empty-{target_table}.duckdb"
+    monkeypatch.setattr(setup_cdm_schema, "DB_PATH", str(database))
+    monkeypatch.setattr(setup_audit, "DB_PATH", str(database))
+    setup_cdm_schema.create_omop_skeleton()
+    setup_audit.setup_audit_tables()
+
+    fhir_directory = tmp_path / "empty-fhir"
+    fhir_directory.mkdir()
+    monkeypatch.setattr(module, "DB_PATH", str(database))
+    monkeypatch.setattr(module, "FHIR_DIR", str(fhir_directory))
+
+    runner()
+
+    with duckdb.connect(str(database), read_only=True) as con:
+        assert con.execute(
+            f'SELECT COUNT(*) FROM "{target_table}"'
+        ).fetchone()[0] == 0
 
 
 def test_drug_etl_rolls_back_rebuild_after_mid_transaction_failure(

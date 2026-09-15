@@ -188,10 +188,11 @@ def run_measurement_etl():
             )
         """)
 
-        con.executemany(
-            "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [record.as_staging_row() for record in all_records],
-        )
+        if all_records:
+            con.executemany(
+                "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [record.as_staging_row() for record in all_records],
+            )
 
         # LOINC 788-0 is RDW expressed as a ratio/percent. Synthea also emits
         # it with fL (RDW-SD semantics). Preserve those records in quarantine

@@ -169,10 +169,11 @@ def run_drug_etl():
                 )
             """)
 
-            con.executemany(
-                "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [record.as_staging_row() for record in all_records],
-            )
+            if all_records:
+                con.executemany(
+                    "INSERT INTO stg_drug VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [record.as_staging_row() for record in all_records],
+                )
 
             con.execute("""
                 INSERT INTO drug_exposure (

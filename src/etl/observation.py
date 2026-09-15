@@ -248,10 +248,11 @@ def run_observation_etl():
             )
         """)
 
-        con.executemany(
-            "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [record.as_staging_row() for record in all_records],
-        )
+        if all_records:
+            con.executemany(
+                "INSERT INTO stg_observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [record.as_staging_row() for record in all_records],
+            )
 
         ambiguous = con.execute("""
             SELECT COUNT(*)

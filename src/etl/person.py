@@ -176,10 +176,11 @@ def run_person_etl():
                 )
             """)
 
-            con.executemany(
-                "INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [record.as_staging_row() for record in all_records],
-            )
+            if all_records:
+                con.executemany(
+                    "INSERT INTO stg_person VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [record.as_staging_row() for record in all_records],
+                )
 
             # Inserção com DISTINCT para garantir unicidade absoluta
             con.execute("""
