@@ -45,7 +45,11 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
     }
     if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("LLM response does not match the decision schema")
-    if payload["decision"] not in {"SELECT", "ABSTAIN"}:
+    decision = payload["decision"]
+    if (
+        not isinstance(decision, str)
+        or decision not in {"SELECT", "ABSTAIN"}
+    ):
         raise ValueError("LLM decision must be SELECT or ABSTAIN")
     confidence = payload["confidence"]
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
@@ -70,7 +74,7 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
 
     allowed_ids = {int(value) for value in candidate_ids}
     selected = payload["selected_concept_id"]
-    if payload["decision"] == "ABSTAIN":
+    if decision == "ABSTAIN":
         if selected is not None:
             raise ValueError("ABSTAIN requires selected_concept_id=null")
     elif (
@@ -80,7 +84,7 @@ def parse_mapping_decision(content: str, candidate_ids) -> MappingDecision:
         raise ValueError("SELECT must use exactly one retrieved candidate ID")
 
     return MappingDecision(
-        decision=DecisionKind(payload["decision"]),
+        decision=DecisionKind(decision),
         selected_concept_id=selected,
         confidence=float(confidence),
         reason=reason.strip(),

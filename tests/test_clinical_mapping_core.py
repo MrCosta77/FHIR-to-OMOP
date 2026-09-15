@@ -59,10 +59,29 @@ def test_core_rejects_inconsistent_abstention_payload():
         parse_mapping_decision(_payload(decision="ABSTAIN", concept_id=1004), [1004])
 
 
+@pytest.mark.parametrize("invalid_decision", [[], {}, None, 1, True])
+def test_core_rejects_non_string_decision_without_type_error(invalid_decision):
+    payload = json.loads(_payload())
+    payload["decision"] = invalid_decision
+
+    with pytest.raises(ValueError, match="SELECT or ABSTAIN"):
+        parse_mapping_decision(json.dumps(payload), [1004])
+
+
 @pytest.mark.parametrize(
     "content",
     [
         "{not-json",
+        "[]",
+        "{}",
+        json.dumps({
+            **json.loads(_payload()),
+            "decision": [],
+        }),
+        json.dumps({
+            **json.loads(_payload()),
+            "decision": {},
+        }),
         _payload(concept_id=9999),
         json.dumps({
             "decision": "SELECT",
