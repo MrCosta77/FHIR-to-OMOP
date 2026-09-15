@@ -7,12 +7,22 @@ import pytest
 from src.security.key_continuity import KeyContinuityError, ensure_key_continuity
 
 
-def _settings(*, profile="hospital", version="hospital-v1", fingerprint="abc123"):
+def _settings(
+    *,
+    profile="hospital",
+    version="hospital-v1",
+    fingerprint="abc123",
+    classification=None,
+):
     return SimpleNamespace(
         profile=profile,
         phi_key_version=version,
         phi_key_fingerprint=fingerprint,
-        data_classification="PHI" if profile == "hospital" else "SYNTHETIC",
+        data_classification=(
+            classification
+            if classification is not None
+            else ("PHI" if profile == "hospital" else "SYNTHETIC")
+        ),
     )
 
 
@@ -60,6 +70,17 @@ def test_populated_synthetic_database_bootstraps_without_phi_approval(tmp_path):
     assert ensure_key_continuity(
         database, _settings(profile="development"), {}
     ) == "BOOTSTRAPPED"
+
+
+def test_populated_phi_database_requires_bootstrap_outside_hospital_profile(tmp_path):
+    database = tmp_path / "development-phi.duckdb"
+    with duckdb.connect(str(database)) as con:
+        con.execute("CREATE TABLE person (person_id BIGINT)")
+        con.execute("INSERT INTO person VALUES (1)")
+
+    settings = _settings(profile="development", classification="PHI")
+    with pytest.raises(KeyContinuityError, match="bootstrap approval"):
+        ensure_key_continuity(database, settings, {})
 
 
 @pytest.mark.parametrize("run", range(5))

@@ -259,21 +259,22 @@ def load_settings(
             ) from exc
     if not model_name:
         raise SettingsError("CMF_MODEL_NAME must not be empty.")
-    if profile == "hospital":
-        if classification != "PHI":
-            raise SettingsError("The hospital profile cannot downgrade PHI classification.")
+    if classification == "PHI":
         if phi_salt == DEVELOPMENT_PHI_SALT:
             raise SettingsError(
-                "The hospital profile requires institution-managed CMF_PHI_SALT."
+                "PHI data requires institution-managed CMF_PHI_SALT."
             )
         if len(phi_salt) < 32:
             raise SettingsError(
-                "CMF_PHI_SALT must contain at least 32 characters in the hospital profile."
+                "CMF_PHI_SALT must contain at least 32 characters for PHI data."
             )
         if not phi_key_version or phi_key_version == "development-v1":
             raise SettingsError(
-                "The hospital profile requires institution-managed CMF_PHI_KEY_VERSION."
+                "PHI data requires institution-managed CMF_PHI_KEY_VERSION."
             )
+    if profile == "hospital":
+        if classification != "PHI":
+            raise SettingsError("The hospital profile cannot downgrade PHI classification.")
         required_cdm = {
             "cdm_source_name", "cdm_source_abbreviation", "cdm_holder",
             "cdm_source_description", "cdm_source_release_date",

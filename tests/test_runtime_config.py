@@ -164,6 +164,42 @@ def test_hospital_profile_requires_institution_managed_key(override):
         load_settings(environment)
 
 
+@pytest.mark.parametrize("override", [
+    {},
+    {"CMF_PHI_SALT": "too-short", "CMF_PHI_KEY_VERSION": "institution-v1"},
+    {
+        "CMF_PHI_SALT": "institution-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "development-v1",
+    },
+])
+def test_phi_classification_requires_institution_managed_key_in_any_profile(
+    override,
+):
+    environment = {
+        "CMF_DATA_CLASSIFICATION": "PHI",
+        "CMF_PHI_ENABLED": "true",
+        "CMF_PHI_POLICY_APPROVED_BY": "Institution DPO",
+        "CMF_PHI_RETENTION_DAYS": "30",
+        **override,
+    }
+    with pytest.raises(SettingsError, match="CMF_PHI"):
+        load_settings(environment)
+
+
+def test_development_profile_accepts_phi_only_with_institution_managed_key():
+    settings = load_settings({
+        "CMF_DATA_CLASSIFICATION": "PHI",
+        "CMF_PHI_ENABLED": "true",
+        "CMF_PHI_POLICY_APPROVED_BY": "Institution DPO",
+        "CMF_PHI_RETENTION_DAYS": "30",
+        "CMF_PHI_SALT": "institution-secret-with-at-least-32-characters",
+        "CMF_PHI_KEY_VERSION": "institution-v1",
+    })
+    assert settings.profile == "development"
+    assert settings.data_classification == "PHI"
+    assert settings.phi_key_version == "institution-v1"
+
+
 def test_profile_rejects_unknown_keys(tmp_path):
     profiles = tmp_path / "profiles"
     profiles.mkdir()

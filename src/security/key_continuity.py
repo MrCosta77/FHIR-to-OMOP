@@ -76,9 +76,13 @@ def _ensure_key_continuity_transaction(con, settings, env) -> str:
             env.get("CMF_PHI_KEY_BOOTSTRAP_APPROVED", "").strip().casefold()
             == "true"
         )
-        if settings.profile == "hospital" and populated and not bootstrap_approved:
+        if (
+            settings.data_classification == "PHI"
+            and populated
+            and not bootstrap_approved
+        ):
             raise KeyContinuityError(
-                "Existing hospital data has no pseudonymization key manifest; "
+                "Existing PHI data has no pseudonymization key manifest; "
                 "institutional bootstrap approval is required."
             )
 
