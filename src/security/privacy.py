@@ -56,7 +56,21 @@ def load_policy(path: Path = POLICY_PATH) -> dict:
 
 
 def _environment(environ=None):
-    return os.environ if environ is None else environ
+    if environ is not None:
+        return environ
+
+    # RuntimeSettings is the canonical, validated configuration.  Governance
+    # entry points do not receive it explicitly, so overlay its security-
+    # critical values instead of falling back to the policy's SYNTHETIC
+    # default when the active profile resolved PHI from its JSON document.
+    # The import is intentionally lazy: config imports this module while
+    # constructing SETTINGS and passes an explicit environment in that path.
+    from src.utils.config import SETTINGS
+
+    environment = dict(os.environ)
+    environment["CMF_DATA_CLASSIFICATION"] = SETTINGS.data_classification
+    environment["CMF_OLLAMA_URL"] = SETTINGS.ollama_url
+    return environment
 
 
 def data_classification(environ=None) -> str:

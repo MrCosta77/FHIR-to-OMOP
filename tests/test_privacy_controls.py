@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import duckdb
 import pytest
@@ -99,6 +100,28 @@ def test_phi_role_access_requires_matching_authenticated_allowlisted_identity():
         authorize_actor("Dr Other", "reviewer", environment)
     with pytest.raises(PrivacyError, match="not authorized"):
         authorize_actor("Dr Reviewer", "adjudicator", environment)
+
+
+def test_governance_uses_resolved_profile_classification_without_env_override(
+    monkeypatch,
+):
+    from src.utils import config
+
+    monkeypatch.setattr(
+        config,
+        "SETTINGS",
+        replace(config.SETTINGS, data_classification="PHI"),
+    )
+    monkeypatch.delenv("CMF_DATA_CLASSIFICATION", raising=False)
+    monkeypatch.setenv("CMF_PHI_ENABLED", "true")
+    monkeypatch.setenv("CMF_PHI_POLICY_APPROVED_BY", "Hospital DPO")
+    monkeypatch.setenv("CMF_PHI_RETENTION_DAYS", "30")
+    monkeypatch.setenv("CMF_AUTHENTICATED_USER", "Trusted Reviewer")
+    monkeypatch.setenv("CMF_REVIEWER_ALLOWLIST", "Trusted Reviewer")
+
+    with pytest.raises(PrivacyError, match="matching authenticated"):
+        authorize_actor("Untrusted Reviewer", "reviewer")
+    assert authorize_actor("Trusted Reviewer", "reviewer") == "Trusted Reviewer"
 
 
 def test_security_audit_is_metadata_only_and_rejects_identifiers():
