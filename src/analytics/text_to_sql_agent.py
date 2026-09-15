@@ -9,7 +9,16 @@ import ollama
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from src.utils.config import DB_PATH, MODEL_NAME
+from src.security.privacy import (
+    redact_direct_identifiers,
+    validate_privacy_runtime,
+)
+from src.utils.config import (
+    DB_PATH,
+    MODEL_NAME,
+    OLLAMA_TIMEOUT,
+    OLLAMA_URL,
+)
 
 MAX_RESULT_ROWS = 1000
 _FORBIDDEN_SQL = re.compile(
@@ -43,14 +52,26 @@ CRITICAL RULES:
 5. Output ONLY valid DuckDB SQL code. Do not include markdown formatting, explanations, or any other text.
 """
 
-def generate_sql_query(question):
+def generate_sql_query(question, *, client=None):
     """Requests Ollama to translate English text into SQL using the provided schema context."""
     try:
-        response = ollama.chat(
+        validate_privacy_runtime(OLLAMA_URL)
+        safe_question, _ = redact_direct_identifiers(str(question))
+        client = client or ollama.Client(
+            host=OLLAMA_URL.rsplit("/api/", 1)[0],
+            timeout=OLLAMA_TIMEOUT,
+        )
+        response = client.chat(
             model=MODEL_NAME,
             messages=[
                 {'role': 'system', 'content': SCHEMA_CONTEXT},
-                {'role': 'user', 'content': f"Write a SQL query to answer this clinical question: {question}"}
+                {
+                    'role': 'user',
+                    'content': (
+                        "Write a SQL query to answer this clinical question: "
+                        f"{safe_question}"
+                    ),
+                },
             ],
             options={'temperature': 0.0} # We want exact and deterministic responses
         )
