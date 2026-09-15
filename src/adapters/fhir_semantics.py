@@ -13,6 +13,10 @@ PUBLISHABLE_RESOURCE_STATUSES = {
     "MedicationRequest": frozenset({"active", "on-hold", "completed", "stopped"}),
 }
 
+EXCLUDED_RESOURCE_STATUSES = {
+    "Encounter": frozenset({"entered-in-error"}),
+}
+
 EXCLUDED_CONDITION_VERIFICATION_STATUSES = frozenset({
     "entered-in-error",
     "refuted",
@@ -32,19 +36,22 @@ def _coding_codes(codeable_concept: object) -> set[str]:
 def is_publishable_fhir_resource(resource: dict) -> bool:
     """Return whether a valid FHIR event is eligible for OMOP publication.
 
-    This is a publication policy, not structural FHIR validation. Resources in
-    draft, cancelled, erroneous, refuted, or otherwise non-final states remain
-    valid FHIR but must not become asserted OMOP clinical facts.
+    This is a publication policy, not structural FHIR validation. Eligibility
+    is resource-specific: some types require an explicit final-state allowlist,
+    while Encounter currently excludes only ``entered-in-error`` pending a
+    broader institutional lifecycle policy.
     """
     resource_type = str(resource.get("resourceType", "")).strip()
     if resource_type == "Condition":
         verification = _coding_codes(resource.get("verificationStatus"))
         return not bool(verification & EXCLUDED_CONDITION_VERIFICATION_STATUSES)
 
+    status = str(resource.get("status", "")).strip().casefold()
+    if status in EXCLUDED_RESOURCE_STATUSES.get(resource_type, frozenset()):
+        return False
     allowed = PUBLISHABLE_RESOURCE_STATUSES.get(resource_type)
     if allowed is None:
         return True
-    status = str(resource.get("status", "")).strip().casefold()
     return status in allowed
 
 
@@ -60,10 +67,13 @@ def fhir_publication_exclusion_reason(resource: dict) -> str | None:
             return f"FHIR_CONDITION_VERIFICATION_{excluded[0].upper().replace('-', '_')}"
         return None
 
+    status = str(resource.get("status", "")).strip().casefold()
+    if status in EXCLUDED_RESOURCE_STATUSES.get(resource_type, frozenset()):
+        normalized = status.upper().replace("-", "_")
+        return f"FHIR_{resource_type.upper()}_STATUS_{normalized}"
     allowed = PUBLISHABLE_RESOURCE_STATUSES.get(resource_type)
     if allowed is None:
         return None
-    status = str(resource.get("status", "")).strip().casefold()
     if status in allowed:
         return None
     normalized = status.upper().replace("-", "_") if status else "MISSING"

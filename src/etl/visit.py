@@ -10,7 +10,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from src.adapters.fhir_records import FHIRVisitRecord
-from src.adapters.fhir_semantics import fhir_datetime
+from src.adapters.fhir_semantics import (
+    extract_fhir_publication_exclusions,
+    fhir_datetime,
+    is_publishable_fhir_resource,
+    replace_fhir_publication_exclusions,
+)
+from src.mapping.governance import current_run_id
 from src.omop.cdm54 import create_table_sql
 from src.utils.config import DB_PATH, FHIR_DIR
 from src.utils.helpers import (
@@ -46,8 +52,12 @@ def run_visit_etl():
     fhir_files = glob.glob(os.path.join(FHIR_DIR, "*.json"))
 
     visit_records = []
+    exclusions = []
 
     for file_path in fhir_files:
+        exclusions.extend(
+            extract_fhir_publication_exclusions(file_path, {"Encounter"})
+        )
         with open(file_path, encoding='utf-8') as f:
             bundle = json.load(f)
 
@@ -60,6 +70,8 @@ def run_visit_etl():
                 resource = entry.get('resource', {})
 
                 if resource.get('resourceType') == 'Encounter':
+                    if not is_publishable_fhir_resource(resource):
+                        continue
                     # 1. Get Foreign Key (Patient ID)
                     patient_ref = resource.get('subject', {}).get('reference', '')
                     person_id = stable_person_id(
@@ -112,6 +124,12 @@ def run_visit_etl():
     with duckdb.connect(DB_PATH) as con:
         con.execute('BEGIN TRANSACTION')
         try:
+            replace_fhir_publication_exclusions(
+                con,
+                "FHIR_R4_Encounter",
+                exclusions,
+                run_id=current_run_id(),
+            )
             con.execute("DROP TABLE IF EXISTS visit_occurrence")
             con.execute(create_table_sql("visit_occurrence"))
 
