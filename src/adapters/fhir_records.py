@@ -56,6 +56,8 @@ class FHIRMeasurementRecord:
     source_event_key: str
     component_path: str | None = None
     value_coding: SourceCoding | None = None
+    operator_concept_id: int | None = None
+    value_source_value: str | None = None
 
     def as_staging_row(self) -> tuple:
         value = self.value_coding
@@ -65,6 +67,8 @@ class FHIRMeasurementRecord:
             self.coding.code,
             self.coding.source_value,
             self.value_as_number,
+            self.operator_concept_id,
+            self.value_source_value,
             self.unit,
             self.unit_system,
             self.unit_code,

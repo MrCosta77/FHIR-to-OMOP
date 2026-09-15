@@ -37,6 +37,13 @@ from src.utils.helpers import (
 from src.utils.quarantine import ensure_quarantine_table
 from src.utils.unit_mapping import canonical_ucum_code
 
+FHIR_COMPARATOR_TO_OMOP_CONCEPT_ID = {
+    "<=": 4171754,
+    ">=": 4171755,
+    "<": 4171756,
+    ">": 4172704,
+}
+
 
 def extract_measurements(file_path):
     records = []
@@ -96,6 +103,14 @@ def extract_measurements(file_path):
                     value = quantity.get('value') if quantity else None
                     if value is None and value_coding is None:
                         continue
+                    comparator = quantity.get('comparator') if quantity else None
+                    if (
+                        comparator is not None
+                        and comparator not in FHIR_COMPARATOR_TO_OMOP_CONCEPT_ID
+                    ):
+                        raise ValueError(
+                            f"Unsupported FHIR Quantity comparator: {comparator!r}"
+                        )
                     unit_system = quantity.get('system') if quantity else None
                     unit_code = quantity.get('code') if quantity else None
                     unit = (quantity.get('unit') or unit_code) if quantity else None
@@ -117,6 +132,13 @@ def extract_measurements(file_path):
                         coding=coding,
                         value_as_number=(
                             float(value) if value is not None else None
+                        ),
+                        operator_concept_id=(
+                            FHIR_COMPARATOR_TO_OMOP_CONCEPT_ID.get(comparator)
+                        ),
+                        value_source_value=(
+                            f"{comparator or ''}{value}"
+                            if value is not None else None
                         ),
                         unit=unit,
                         unit_system=unit_system,
@@ -167,6 +189,8 @@ def run_measurement_etl():
                 loinc_code VARCHAR,
                 display_text VARCHAR,
                 value DOUBLE,
+                operator_concept_id INTEGER,
+                value_source_value VARCHAR,
                 unit VARCHAR,
                 unit_system VARCHAR,
                 unit_code VARCHAR,
@@ -183,14 +207,14 @@ def run_measurement_etl():
                 value_athena_vocabulary_id VARCHAR,
                 value_source_vocabulary_id VARCHAR,
                 value_source_code VARCHAR,
-                value_source_value VARCHAR,
+                coded_value_source_value VARCHAR,
                 value_source_version VARCHAR
             )
         """)
 
         if all_records:
             con.executemany(
-                "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO stg_measurement VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [record.as_staging_row() for record in all_records],
             )
 
@@ -258,7 +282,8 @@ def run_measurement_etl():
             INSERT INTO measurement (
                 measurement_id, person_id, measurement_concept_id,
                 measurement_date, measurement_datetime,
-                measurement_type_concept_id, value_as_number,
+                measurement_type_concept_id, operator_concept_id,
+                value_as_number,
                 value_as_concept_id,
                 measurement_source_value, measurement_source_concept_id,
                 unit_concept_id, unit_source_value, unit_source_concept_id,
@@ -274,6 +299,7 @@ def run_measurement_etl():
                 stg.date,
                 stg.event_datetime,
                 32817 AS measurement_type_concept_id,
+                stg.operator_concept_id,
                 stg.value AS value_as_number,
                 CASE
                     WHEN stg.value_source_code IS NULL THEN NULL
@@ -294,7 +320,11 @@ def run_measurement_etl():
                     WHEN COALESCE(stg.unit_code, stg.unit) IS NULL THEN NULL
                     ELSE COALESCE(c_unit_src.concept_id::INTEGER, 0)
                 END AS unit_source_concept_id,
-                COALESCE(stg.value_source_value, stg.value::VARCHAR)
+                COALESCE(
+                    stg.coded_value_source_value,
+                    stg.value_source_value,
+                    stg.value::VARCHAR
+                )
                     AS value_source_value
             FROM stg_measurement stg
             LEFT JOIN concept c_src
