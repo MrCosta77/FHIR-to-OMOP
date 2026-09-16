@@ -18,6 +18,7 @@ from src.quality.run_report import (
     stage_immutable_report,
 )
 from src.utils.config import SETTINGS, load_settings
+from src.utils.database_publication import database_publication_lock
 
 PROJECT_ROOT = SETTINGS.project_root
 
@@ -228,9 +229,28 @@ def prepare_staging_database(run_id):
     staging = RUNS_DIR / f"{run_id}.staging.duckdb"
     if staging.exists():
         raise FileExistsError(f"Staging database already exists: {staging}")
-    if PUBLISHED_DB.exists():
-        shutil.copy2(PUBLISHED_DB, staging)
-    return staging
+    with database_publication_lock(PUBLISHED_DB):
+        published_revision = (
+            sha256_file(PUBLISHED_DB) if PUBLISHED_DB.exists() else None
+        )
+        if PUBLISHED_DB.exists():
+            shutil.copy2(PUBLISHED_DB, staging)
+    return staging, published_revision
+
+
+def publish_staging_database(staging, expected_published_revision):
+    """Replace the published DB only if its copied revision is still current."""
+    with database_publication_lock(PUBLISHED_DB):
+        current_revision = (
+            sha256_file(PUBLISHED_DB) if PUBLISHED_DB.exists() else None
+        )
+        if current_revision != expected_published_revision:
+            raise RuntimeError(
+                "The published database changed after staging was prepared; "
+                "publication was refused to preserve concurrent revisions."
+            )
+        PUBLISHED_DB.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staging, PUBLISHED_DB)
 
 
 def run_step(step, environment):
@@ -283,7 +303,7 @@ def run_step(step, environment):
 
 def main():
     run_id = new_run_id()
-    staging_db = prepare_staging_database(run_id)
+    staging_db, published_revision = prepare_staging_database(run_id)
     manifest_path = MANIFESTS_DIR / f"{run_id}.json"
     started = utc_now()
     source_provenance = git_worktree_provenance()
@@ -344,8 +364,7 @@ def main():
         )
         staged_report_path, report_path = stage_immutable_report(report, REPORTS_DIR)
         try:
-            PUBLISHED_DB.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(staging_db, PUBLISHED_DB)
+            publish_staging_database(staging_db, published_revision)
             database_published = True
         except Exception:
             orphan = RUNS_DIR / f"{run_id}.orphaned-report.json"

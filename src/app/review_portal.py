@@ -29,6 +29,7 @@ from src.mapping.governance import (
 )
 from src.mapping.retrieval_queue import retrieval_suggestion_queue
 from src.utils.config import DB_PATH
+from src.utils.database_publication import database_publication_lock
 
 st.set_page_config(
     page_title="CMF - Blinded Clinical Review", page_icon="👩‍⚕️", layout="wide"
@@ -70,26 +71,29 @@ def get_governed_actors():
 
 
 def register_actor(display_name, roles, administrator, reason, confirm_distinct):
-    with duckdb.connect(DB_PATH) as con:
-        return register_governed_actor(
-            con, display_name, roles, administrator, reason,
-            confirm_distinct=confirm_distinct,
-        )
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            return register_governed_actor(
+                con, display_name, roles, administrator, reason,
+                confirm_distinct=confirm_distinct,
+            )
 
 
 def register_alias(
     actor_id, alias_name, administrator, reason, confirm_owner
 ):
-    with duckdb.connect(DB_PATH) as con:
-        return add_governed_actor_alias(
-            con, actor_id, alias_name, administrator, reason,
-            confirm_owner=confirm_owner,
-        )
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            return add_governed_actor_alias(
+                con, actor_id, alias_name, administrator, reason,
+                confirm_owner=confirm_owner,
+            )
 
 
 def bootstrap_identity_admin(display_name, reason):
-    with duckdb.connect(DB_PATH) as con:
-        return bootstrap_identity_administrator(con, display_name, reason)
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            return bootstrap_identity_administrator(con, display_name, reason)
 
 
 def get_dashboard_metrics():
@@ -107,29 +111,32 @@ def get_dashboard_metrics():
 
 
 def submit_review(decision_id, action, reviewer, rationale):
-    with duckdb.connect(DB_PATH) as con:
-        result = submit_blinded_review(
-            con, decision_id, action, reviewer, rationale
-        )
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            result = submit_blinded_review(
+                con, decision_id, action, reviewer, rationale
+            )
     state = "ready for adjudication" if result["ready_for_adjudication"] else "review 1 of 2"
     st.toast(f"Independent review recorded: {state}")
 
 
 def submit_adjudication(decision_id, action, adjudicator, rationale):
-    with duckdb.connect(DB_PATH) as con:
-        status = adjudicate_mapping_decision(
-            con, decision_id, action, adjudicator, rationale
-        )
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            status = adjudicate_mapping_decision(
+                con, decision_id, action, adjudicator, rationale
+            )
     st.toast(f"Adjudication recorded: {status}")
 
 
 def submit_candidate_correction(
     decision_id, candidate_concept_id, proposer, rationale
 ):
-    with duckdb.connect(DB_PATH) as con:
-        result = submit_counterproposal(
-            con, decision_id, candidate_concept_id, proposer, rationale
-        )
+    with database_publication_lock(DB_PATH):
+        with duckdb.connect(DB_PATH) as con:
+            result = submit_counterproposal(
+                con, decision_id, candidate_concept_id, proposer, rationale
+            )
     state = "created" if result["created"] else "already recorded"
     st.toast(
         f"Counterproposal {state}: {result['candidate_concept_id']} "

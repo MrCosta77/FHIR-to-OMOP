@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 
 import duckdb
+import pytest
 
 import main
 
@@ -35,12 +36,58 @@ def test_staging_copy_isolated_from_published_database(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main, "PUBLISHED_DB", published)
     monkeypatch.setattr(main, "RUNS_DIR", runs)
-    staging = main.prepare_staging_database("RUN-test")
+    staging, revision = main.prepare_staging_database("RUN-test")
+    assert revision == main.sha256_file(published)
     with duckdb.connect(str(staging)) as con:
         con.execute("UPDATE marker SET value = 2")
 
     with duckdb.connect(str(published), read_only=True) as con:
         assert con.execute("SELECT value FROM marker").fetchone()[0] == 1
+
+
+def test_publication_refuses_to_overwrite_concurrent_database_revision(
+    monkeypatch, tmp_path
+):
+    published = tmp_path / "published.duckdb"
+    runs = tmp_path / "runs"
+    with duckdb.connect(str(published)) as con:
+        con.execute("CREATE TABLE marker(value INTEGER)")
+        con.execute("INSERT INTO marker VALUES (1)")
+
+    monkeypatch.setattr(main, "PUBLISHED_DB", published)
+    monkeypatch.setattr(main, "RUNS_DIR", runs)
+    staging, revision = main.prepare_staging_database("RUN-conflict")
+    with duckdb.connect(str(staging)) as con:
+        con.execute("UPDATE marker SET value = 10")
+    with duckdb.connect(str(published)) as con:
+        con.execute("UPDATE marker SET value = 2")
+
+    with pytest.raises(RuntimeError, match="concurrent revisions"):
+        main.publish_staging_database(staging, revision)
+
+    assert staging.exists()
+    with duckdb.connect(str(published), read_only=True) as con:
+        assert con.execute("SELECT value FROM marker").fetchone()[0] == 2
+
+
+def test_publication_replaces_unchanged_copied_revision(monkeypatch, tmp_path):
+    published = tmp_path / "published.duckdb"
+    runs = tmp_path / "runs"
+    with duckdb.connect(str(published)) as con:
+        con.execute("CREATE TABLE marker(value INTEGER)")
+        con.execute("INSERT INTO marker VALUES (1)")
+
+    monkeypatch.setattr(main, "PUBLISHED_DB", published)
+    monkeypatch.setattr(main, "RUNS_DIR", runs)
+    staging, revision = main.prepare_staging_database("RUN-success")
+    with duckdb.connect(str(staging)) as con:
+        con.execute("UPDATE marker SET value = 10")
+
+    main.publish_staging_database(staging, revision)
+
+    assert not staging.exists()
+    with duckdb.connect(str(published), read_only=True) as con:
+        assert con.execute("SELECT value FROM marker").fetchone()[0] == 10
 
 
 def test_manifest_write_is_atomic_and_valid_json(tmp_path):
