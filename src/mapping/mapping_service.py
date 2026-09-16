@@ -100,21 +100,12 @@ def get_versioned_collection(con, chroma_path, target_table):
         if metadata.get("index_signature") == signature and actual_count < expected_count:
             # Resume an interrupted build instead of discarding completed batches.
             pass
-        if not metadata.get("index_signature") and actual_count == expected_count:
-            # One-time migration for legacy indexes. Chroma's historical
-            # default was L2, so retain that metric explicitly.
-            metadata.update({
-                "index_signature": signature,
-                "index_schema_version": INDEX_SCHEMA_VERSION,
-                "vocabulary_id": config["vocabulary"],
-                "domain_id": config["domain"],
-                "distance_metric": metadata.get("hnsw:space", "l2"),
-                "build_complete": True,
-            })
-            collection.modify(
-                metadata={k: v for k, v in metadata.items() if not k.startswith("hnsw:")}
-            )
-            return collection
+        if not metadata.get("index_signature"):
+            # Cardinality cannot prove that a legacy collection contains the
+            # current concept slice or embeddings. Rebuild it under the
+            # versioned cosine contract instead of blessing unknown content.
+            client.delete_collection(config["collection"])
+            collection = None
         elif metadata.get("index_signature") != signature or actual_count > expected_count:
             client.delete_collection(config["collection"])
             collection = None

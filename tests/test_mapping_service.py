@@ -1,6 +1,7 @@
 import json
 
 import duckdb
+import pytest
 
 from src.adapters.fhir_coding import replace_fhir_source_codings
 from src.etl.apply_stcm import apply_stcm_mappings
@@ -72,7 +73,17 @@ def test_few_shot_examples_have_stable_order():
     assert "->" not in prompt
 
 
-def test_stale_chroma_index_is_rebuilt(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "existing_metadata",
+    [
+        {"index_signature": "old"},
+        {},
+    ],
+    ids=["stale-signature", "unversioned-same-count"],
+)
+def test_stale_or_unversioned_chroma_index_is_rebuilt(
+    monkeypatch, tmp_path, existing_metadata
+):
     class FakeCollection:
         def __init__(self, metadata, count):
             self.metadata = metadata
@@ -91,7 +102,7 @@ def test_stale_chroma_index_is_rebuilt(monkeypatch, tmp_path):
 
     class FakeClient:
         def __init__(self):
-            self.stale = FakeCollection({"index_signature": "old"}, 1)
+            self.stale = FakeCollection(existing_metadata, 1)
             self.created = None
             self.deleted = []
 
