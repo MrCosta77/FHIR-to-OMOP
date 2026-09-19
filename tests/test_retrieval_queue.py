@@ -74,3 +74,41 @@ def test_queue_deduplicates_same_semantic_suggestion_across_runs():
         queue = retrieval_suggestion_queue(con)
         assert len(queue) == 1
         assert queue[0]["run_id"] == "RUN-new"
+        assert queue[0]["retrieval_score"] == 0.95
+        assert con.execute(
+            "SELECT COUNT(*) FROM retrieval_candidate_suggestion"
+        ).fetchone()[0] == 1
+
+
+def test_new_run_does_not_reopen_a_dismissed_semantic_suggestion():
+    with duckdb.connect(":memory:") as con:
+        _record(con)
+        con.execute("""
+            UPDATE retrieval_candidate_suggestion SET status = 'DISMISSED'
+        """)
+
+        record_retrieval_suggestion(
+            con,
+            run_id="RUN-new",
+            target_table="measurement",
+            source_value="HGB",
+            candidate_concept_id=3000963,
+            candidate_concept_name="Hemoglobin [Mass/volume] in Blood",
+            retrieval_score=0.96,
+            candidate_rank=1,
+            alias_id="LIS-HGB",
+            lexicon_version="lis-aliases-v1",
+            lexicon_sha256="b" * 64,
+            model_name="qwen-new",
+            prompt_version="prompt-new",
+            llm_confidence=0.82,
+            llm_reason="New evidence, prior human disposition retained.",
+            affected_events=15,
+        )
+
+        assert retrieval_suggestion_queue(con) == []
+        row = con.execute("""
+            SELECT COUNT(*), MIN(status), MIN(run_id), MIN(retrieval_score)
+            FROM retrieval_candidate_suggestion
+        """).fetchone()
+        assert row == (1, "DISMISSED", "RUN-new", 0.96)

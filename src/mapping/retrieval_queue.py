@@ -64,7 +64,7 @@ def record_retrieval_suggestion(
         return False
     ensure_retrieval_suggestion_table(con)
     identity = "|".join([
-        run_id or "UNTRACKED", target_table, source_value.strip().casefold(),
+        target_table, source_value.strip().casefold(),
         str(int(candidate_concept_id)), alias_id or "", lexicon_version or "",
     ])
     suggestion_id = str(
@@ -78,7 +78,19 @@ def record_retrieval_suggestion(
             model_name, prompt_version, llm_confidence, llm_reason,
             affected_events, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
-        ON CONFLICT (suggestion_id) DO NOTHING
+        ON CONFLICT (suggestion_id) DO UPDATE SET
+            run_id = excluded.run_id,
+            source_value = excluded.source_value,
+            candidate_concept_name = excluded.candidate_concept_name,
+            retrieval_score = excluded.retrieval_score,
+            candidate_rank = excluded.candidate_rank,
+            lexicon_sha256 = excluded.lexicon_sha256,
+            model_name = excluded.model_name,
+            prompt_version = excluded.prompt_version,
+            llm_confidence = excluded.llm_confidence,
+            llm_reason = excluded.llm_reason,
+            affected_events = excluded.affected_events,
+            created_at = now()
     """, [
         suggestion_id, run_id, target_table, source_value,
         int(candidate_concept_id), candidate_concept_name, retrieval_score,
