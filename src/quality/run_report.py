@@ -10,7 +10,6 @@ import os
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -179,6 +178,11 @@ def build_run_report(
     if manifest.get("status") != "SUCCESS":
         raise ValueError("Immutable success reports require a successful run manifest.")
     run_id = str(manifest["run_id"])
+    completed_at = manifest.get("completed_at")
+    if not isinstance(completed_at, str) or not completed_at.strip():
+        raise ValueError(
+            "Immutable success reports require the run completion timestamp."
+        )
     database_path = Path(database_path)
     pytest_result = parse_junit(junit_path)
     if pytest_result["status"] != "PASSED":
@@ -194,12 +198,14 @@ def build_run_report(
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "report_builder_version": REPORT_BUILDER_VERSION,
-        "generated_at": datetime.now(UTC).isoformat(),
+        # Report generation is a deterministic projection of the completed run.
+        # Rebuilding the same evidence must therefore produce the same digest.
+        "generated_at": completed_at,
         "run": {
             "run_id": run_id,
             "status": "SUCCESS",
             "started_at": manifest.get("started_at"),
-            "completed_at": manifest.get("completed_at"),
+            "completed_at": completed_at,
             "git_commit": manifest.get("git_commit"),
         },
         "configuration": safe_runtime,

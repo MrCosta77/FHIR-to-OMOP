@@ -107,6 +107,35 @@ def test_report_aggregates_evidence_without_source_paths(tmp_path):
     assert "secret-path" not in serialized
 
 
+def test_rebuilding_same_run_report_produces_same_content_hash(tmp_path):
+    database = tmp_path / "run.duckdb"
+    junit = tmp_path / "pytest.xml"
+    _database(database)
+    _junit(junit)
+
+    first = build_run_report(_manifest(), database, junit)
+    second = build_run_report(_manifest(), database, junit)
+
+    assert first == second
+    assert first["generated_at"] == _manifest()["completed_at"]
+    assert (
+        seal_report(first)["integrity"]["payload_sha256"]
+        == seal_report(second)["integrity"]["payload_sha256"]
+    )
+
+
+def test_success_report_requires_completion_timestamp(tmp_path):
+    database = tmp_path / "run.duckdb"
+    junit = tmp_path / "pytest.xml"
+    _database(database)
+    _junit(junit)
+    manifest = _manifest()
+    manifest["completed_at"] = None
+
+    with pytest.raises(ValueError, match="completion timestamp"):
+        build_run_report(manifest, database, junit)
+
+
 def test_immutable_report_is_content_addressed_and_refuses_overwrite(tmp_path):
     report = _minimal_report()
     path = write_immutable_report(report, tmp_path)
