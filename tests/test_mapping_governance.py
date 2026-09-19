@@ -1,5 +1,9 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import duckdb
 
+import src.mapping.governance.review as review_module
 from src.mapping.governance import (
     adjudicate_mapping_decision,
     blinded_adjudication_queue,
@@ -482,6 +486,60 @@ def test_reviewers_and_adjudicator_must_be_distinct_and_rationales_are_required(
             assert "distinct" in str(exc)
         else:
             raise AssertionError("A reviewer adjudicated their own case")
+
+
+def test_concurrent_reviews_cannot_create_a_third_active_vote(
+    tmp_path, monkeypatch
+):
+    database_path = tmp_path / "concurrent-reviews.duckdb"
+    with duckdb.connect(str(database_path)) as con:
+        ensure_governance_tables(con)
+        decision_id = _proposal(con)
+        submit_blinded_review(
+            con, decision_id, "APPROVE", "Reviewer One", "First rationale"
+        )
+
+    # Keep both transactions at the same admission point. Schema setup has
+    # already completed and is deliberately excluded from this interleaving.
+    original_resolver = review_module.resolve_governed_actor
+    admission_barrier = threading.Barrier(2)
+
+    def synchronized_resolver(con, display_name, role):
+        actor = original_resolver(con, display_name, role)
+        admission_barrier.wait(timeout=10)
+        return actor
+
+    monkeypatch.setattr(review_module, "ensure_governance_tables", lambda con: None)
+    monkeypatch.setattr(
+        review_module, "resolve_governed_actor", synchronized_resolver
+    )
+
+    def submit(reviewer):
+        with duckdb.connect(str(database_path)) as con:
+            return submit_blinded_review(
+                con, decision_id, "APPROVE", reviewer,
+                f"Concurrent rationale from {reviewer}",
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(submit, "Reviewer Two"),
+            executor.submit(submit, "Reviewer Three"),
+        ]
+        outcomes = []
+        for future in futures:
+            try:
+                outcomes.append(future.result(timeout=15))
+            except duckdb.TransactionException as exc:
+                outcomes.append(exc)
+
+    assert sum(isinstance(item, dict) for item in outcomes) == 1
+    assert sum(isinstance(item, duckdb.TransactionException) for item in outcomes) == 1
+    with duckdb.connect(str(database_path)) as con:
+        assert con.execute("""
+            SELECT COUNT(*) FROM clinical_mapping_review
+            WHERE mapping_decision_id = ? AND COALESCE(active, TRUE)
+        """, [decision_id]).fetchone()[0] == 2
 
 
 def test_clinical_review_agreement_reports_raw_agreement_and_cohens_kappa():

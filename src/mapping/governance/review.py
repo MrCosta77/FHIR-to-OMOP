@@ -14,7 +14,9 @@ from .identity import resolve_governed_actor
 from .schema import ensure_governance_tables
 
 
-def submit_blinded_review(con, decision_id, action, reviewer, rationale):
+def submit_blinded_review(
+    con, decision_id, action, reviewer, rationale, *, _manage_transaction=True
+):
     """Record one independent review without exposing or publishing peer votes."""
     action = action.strip().upper()
     if action not in {"APPROVE", "REJECT"}:
@@ -27,16 +29,33 @@ def submit_blinded_review(con, decision_id, action, reviewer, rationale):
     if not rationale:
         raise ValueError("A clinical rationale is required.")
     ensure_governance_tables(con)
+    if _manage_transaction:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            result = submit_blinded_review(
+                con, decision_id, action, reviewer, rationale,
+                _manage_transaction=False,
+            )
+            con.execute("COMMIT")
+            return result
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
     actor = resolve_governed_actor(con, reviewer, "reviewer")
     reviewer_actor_id = actor["actor_id"]
     reviewer = actor["display_name"]
+    # A real write to this decision serializes admission to its two review
+    # slots. Concurrent DuckDB transactions can no longer both observe the
+    # same stale review count and insert a third active vote.
     row = con.execute("""
-        SELECT status, COALESCE(publication_eligible, TRUE), proposed_by,
-               target_table, source_adapter, source_vocabulary_id,
-               source_code, source_value, assigned_concept_id,
-               proposed_by_actor_id
-        FROM mapping_decision
+        UPDATE mapping_decision
+        SET review_gate_version = COALESCE(review_gate_version, 0) + 1
         WHERE mapping_decision_id = ?
+        RETURNING status, COALESCE(publication_eligible, TRUE), proposed_by,
+                  target_table, source_adapter, source_vocabulary_id,
+                  source_code, source_value, assigned_concept_id,
+                  proposed_by_actor_id
     """, [decision_id]).fetchone()
     if not row:
         raise ValueError(f"Unknown mapping decision: {decision_id}")

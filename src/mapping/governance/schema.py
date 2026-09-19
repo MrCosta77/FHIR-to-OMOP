@@ -89,7 +89,8 @@ def ensure_governance_tables(con):
             proposed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             reviewed_at TIMESTAMP,
             reviewer VARCHAR,
-            review_reason VARCHAR
+            review_reason VARCHAR,
+            review_gate_version BIGINT NOT NULL DEFAULT 0
         )
     """)
     for name, datatype in (
@@ -111,6 +112,7 @@ def ensure_governance_tables(con):
         ("proposal_rationale", "VARCHAR"),
         ("supersedes_decision_id", "VARCHAR"),
         ("proposed_by_actor_id", "VARCHAR"),
+        ("review_gate_version", "BIGINT DEFAULT 0"),
     ):
         _add_column(con, "mapping_decision", name, datatype)
     con.execute("""
