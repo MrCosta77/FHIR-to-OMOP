@@ -13,6 +13,22 @@ from .identity import resolve_governed_actor
 from .schema import ensure_governance_tables
 
 
+def _require_two_independent_reviews(con, decision_id):
+    reviews = con.execute("""
+        SELECT reviewer_actor_id, verdict FROM clinical_mapping_review
+        WHERE mapping_decision_id = ? AND COALESCE(active, TRUE)
+        ORDER BY submitted_at, review_id
+    """, [decision_id]).fetchall()
+    if len(reviews) != 2:
+        raise ValueError(
+            "Exactly two independent reviews are required before adjudication."
+        )
+    reviewer_actor_ids = {actor_id for actor_id, _ in reviews}
+    if len(reviewer_actor_ids) != 2 or None in reviewer_actor_ids:
+        raise ValueError("Clinical reviews must come from two distinct reviewers.")
+    return reviews, reviewer_actor_ids
+
+
 def adjudicate_mapping_decision(
     con, decision_id, action, adjudicator, rationale, *, _manage_transaction=True
 ):
@@ -54,16 +70,9 @@ def adjudicate_mapping_decision(
         raise ValueError(
             "A counterproposal author cannot adjudicate their own candidate."
         )
-    reviews = con.execute("""
-        SELECT reviewer_actor_id, verdict FROM clinical_mapping_review
-        WHERE mapping_decision_id = ? AND COALESCE(active, TRUE)
-        ORDER BY submitted_at, review_id
-    """, [decision_id]).fetchall()
-    if len(reviews) != 2:
-        raise ValueError("Exactly two independent reviews are required before adjudication.")
-    reviewer_actor_ids = {actor_id for actor_id, _ in reviews}
-    if len(reviewer_actor_ids) != 2 or None in reviewer_actor_ids:
-        raise ValueError("Clinical reviews must come from two distinct reviewers.")
+    reviews, reviewer_actor_ids = _require_two_independent_reviews(
+        con, decision_id
+    )
     if adjudicator_actor_id in reviewer_actor_ids:
         raise ValueError("The adjudicator must be distinct from both reviewers.")
     unanimous = reviews[0][1] == reviews[1][1]
@@ -185,6 +194,10 @@ def _finalize_mapping_decision(
             "This pre-ingestion proposal is not adjudication-eligible; "
             "bind it to an explicit source vocabulary and ingested OMOP event first."
         )
+    # Keep the publication invariant at the mutation boundary. The public
+    # adjudication path validates this earlier for clearer feedback, but no
+    # present or future internal caller may bypass the two-review requirement.
+    _require_two_independent_reviews(con, decision_id)
     default_source_vocabulary, target_vocabulary, expected_domain = (
         TARGET_GOVERNANCE[target_table]
     )

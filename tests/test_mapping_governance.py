@@ -2,6 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
+import pytest
 
 import src.mapping.governance.review as review_module
 from src.mapping.governance import (
@@ -21,6 +22,7 @@ from src.mapping.governance import (
     submit_blinded_review,
     submit_counterproposal,
 )
+from src.mapping.governance.publication import _finalize_mapping_decision
 
 
 def _register_test_actors(con):
@@ -152,6 +154,27 @@ def test_adjudication_is_the_only_operation_that_publishes_stcm():
         assert con.execute("""
             SELECT run_id, reviewed_by FROM mapping_provenance
         """).fetchone() == ("RUN-test", "Approved_by_Human")
+
+
+def test_internal_finalizer_cannot_bypass_independent_reviews():
+    with duckdb.connect(":memory:") as con:
+        ensure_governance_tables(con)
+        _create_stcm(con)
+        _create_concepts(con)
+        decision_id = _proposal(con)
+
+        with pytest.raises(ValueError, match="Exactly two independent reviews"):
+            _finalize_mapping_decision(
+                con, decision_id, "APPROVE", "Clinical Adjudicator",
+                "Attempted internal bypass.",
+            )
+
+        assert con.execute("""
+            SELECT status FROM mapping_decision WHERE mapping_decision_id = ?
+        """, [decision_id]).fetchone()[0] == "PENDING"
+        assert con.execute(
+            "SELECT COUNT(*) FROM source_to_concept_map"
+        ).fetchone()[0] == 0
 
 
 def test_rejection_persists_policy_and_never_publishes():
