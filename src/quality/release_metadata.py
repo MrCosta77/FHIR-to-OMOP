@@ -31,17 +31,41 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _direct_python_packages(text: str) -> set[str]:
-    packages: set[str] = set()
+def _locked_direct_python_packages(text: str) -> dict[str, str]:
+    """Return exact pins whose uv provenance points to requirements.in."""
+    direct: dict[str, str] = {}
+    current: tuple[str, str] | None = None
+    for raw_line in text.splitlines():
+        match = re.match(
+            r"^([A-Za-z0-9_.-]+)==([^\s\\;]+)(?:\s|\\|;|$)", raw_line
+        )
+        if match:
+            current = (
+                match.group(1).lower().replace("_", "-"),
+                match.group(2),
+            )
+            continue
+        provenance = raw_line.strip()
+        if current and re.fullmatch(
+            r"#\s+(?:via\s+)?-r requirements\.in", provenance
+        ):
+            direct[current[0]] = current[1]
+    return direct
+
+
+def _exact_python_pins(text: str) -> dict[str, str]:
+    pins: dict[str, str] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        match = re.match(r"([A-Za-z0-9_.-]+)", line)
+        match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([^\s]+)", line)
         if not match:
-            raise ReleaseMetadataError(f"Invalid requirements.in line: {raw_line}")
-        packages.add(match.group(1).lower().replace("_", "-"))
-    return packages
+            raise ReleaseMetadataError(
+                f"Direct Python dependency is not exactly pinned: {raw_line}"
+            )
+        pins[match.group(1).lower().replace("_", "-")] = match.group(2)
+    return pins
 
 
 def _cff_scalar(text: str, key: str) -> str:
@@ -120,16 +144,34 @@ def validate_release_metadata(root: Path = ROOT, *, release: bool = False) -> di
         )
     if "--generate-hashes" not in requirements_lock or "--hash=sha256:" not in requirements_lock:
         raise ReleaseMetadataError("requirements.lock is not a generated hashed lock")
-    direct_python = _direct_python_packages(requirements_in)
-    missing_python = sorted(
-        package
-        for package in direct_python
-        if not re.search(rf"(?m)^{re.escape(package)}==[^\s\\]+", requirements_lock)
-    )
+    direct_pins = _exact_python_pins(requirements_in)
+    direct_python = set(direct_pins)
+    locked_direct_pins = _locked_direct_python_packages(requirements_lock)
+    missing_python = sorted(direct_python - set(locked_direct_pins))
     if missing_python:
         raise ReleaseMetadataError(
-            "Direct Python dependencies missing exact lock entries: "
+            "Direct Python dependencies missing from lock provenance: "
             + ", ".join(missing_python)
+        )
+    stale_python = sorted(set(locked_direct_pins) - direct_python)
+    if stale_python:
+        raise ReleaseMetadataError(
+            "Locked direct dependencies not declared in requirements.in: "
+            + ", ".join(stale_python)
+        )
+    version_drift = sorted(
+        package for package in direct_python
+        if locked_direct_pins[package] != direct_pins[package]
+    )
+    if version_drift:
+        details = ", ".join(
+            f"{package} ({direct_pins[package]} != "
+            f"{locked_direct_pins[package]})"
+            for package in version_drift
+        )
+        raise ReleaseMetadataError(
+            "Direct Python dependency versions differ from requirements.lock: "
+            + details
         )
 
     try:

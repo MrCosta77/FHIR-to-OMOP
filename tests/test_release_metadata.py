@@ -136,6 +136,35 @@ def test_release_validator_rejects_runtime_dependency_drift(tmp_path):
         validate_release_metadata(tmp_path)
 
 
+def test_release_validator_rejects_stale_direct_lock_dependency(tmp_path):
+    _copy_release_files(tmp_path)
+    lock_path = tmp_path / "requirements.lock"
+    lock = lock_path.read_text(encoding="utf-8")
+    lock_path.write_text(
+        lock
+        + "\nstale-package==1.0.0 \\\n"
+        + "    --hash=sha256:" + "0" * 64 + "\n"
+        + "    # via -r requirements.in\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="stale-package"):
+        validate_release_metadata(tmp_path)
+
+
+def test_release_validator_rejects_direct_lock_version_drift(tmp_path):
+    _copy_release_files(tmp_path)
+    lock_path = tmp_path / "requirements.lock"
+    lock = lock_path.read_text(encoding="utf-8")
+    lock_path.write_text(
+        lock.replace("duckdb==1.5.5", "duckdb==1.5.4", 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseMetadataError, match="versions differ"):
+        validate_release_metadata(tmp_path)
+
+
 def test_release_validator_rejects_precommit_ruff_drift(tmp_path):
     _copy_release_files(tmp_path)
     pre_commit = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
