@@ -43,25 +43,59 @@ class _E2EFakeCollection:
         }
 
 class _E2EFakeOllama:
+    EXPECTED_CONCEPT_BY_SOURCE_CODE = {
+        "FEVER": 9001,
+        "ACETAMINOPHEN_500": 9002,
+        "HBA1C_RATIO": 9003,
+        "CURRENT_SMOKER": 9004,
+        "TTE": 9005,
+        "CARDIAC_PACEMAKER": 9006,
+    }
+
     def list(self):
         return {"models": [{"model": "llama3.2:3b", "digest": "sha256:e2e-model"}]}
 
+    @staticmethod
+    def _prompt_json(prompt, field):
+        prefix = f"{field}: "
+        matches = [
+            line.removeprefix(prefix)
+            for line in prompt.splitlines()
+            if line.startswith(prefix)
+        ]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"Expected exactly one structured {field!r} prompt field."
+            )
+        return json.loads(matches[0])
+
     def chat(self, **kwargs):
+        assert len(kwargs["messages"]) == 1
+        assert kwargs["messages"][0]["role"] == "user"
         prompt = kwargs["messages"][0]["content"]
+        source_value = self._prompt_json(prompt, "Source value")
+        context = self._prompt_json(prompt, "Context")
+        candidates = self._prompt_json(prompt, "Candidates")
+        assert isinstance(source_value, str)
+        assert isinstance(context, dict)
+        assert isinstance(candidates, list) and candidates
+        assert all(
+            isinstance(candidate.get("concept_id"), int)
+            and isinstance(candidate.get("concept_name"), str)
+            for candidate in candidates
+        )
 
-        concept_id = 0
-        for cand in [9001, 9002, 9003, 9004, 9005, 9006]:
-            if str(cand) in prompt:
-                concept_id = cand
-                break
-
-        decision = "ABSTAIN"
-        if any(token in prompt for token in ["Fever", "acetaminophen 500", "HBA1C_RATIO", "Current smoker", "Transthoracic echocardiography", "Implantable cardiac pacemaker"]):
-            decision = "SELECT"
+        expected_concept_id = self.EXPECTED_CONCEPT_BY_SOURCE_CODE.get(
+            context.get("source_code")
+        )
+        candidate_ids = {candidate["concept_id"] for candidate in candidates}
+        decision = "SELECT" if expected_concept_id in candidate_ids else "ABSTAIN"
 
         return {"message": {"content": json.dumps({
             "decision": decision,
-            "selected_concept_id": concept_id if decision == "SELECT" else None,
+            "selected_concept_id": (
+                expected_concept_id if decision == "SELECT" else None
+            ),
             "confidence": 0.95,
             "reason": "E2E testing reason.",
             "clinical_signals": ["e2e test signal"],
