@@ -229,7 +229,14 @@ def load_settings(
     model_name = str(values["model_name"]).strip()
     ollama_url = str(values["ollama_url"]).strip()
     classification = str(values["data_classification"]).strip().upper()
-    lis_noise_ratio = float(values["lis_noise_ratio"])
+    try:
+        lis_noise_ratio = float(values["lis_noise_ratio"])
+        if not math.isfinite(lis_noise_ratio) or not 0.0 <= lis_noise_ratio <= 1.0:
+            raise ValueError()
+    except (TypeError, ValueError) as exc:
+        raise SettingsError(
+            "CMF_LIS_NOISE_RATIO must be a finite number between 0 and 1."
+        ) from exc
     simulate_lis_noise = _parse_boolean(
         values["simulate_lis_noise"], "CMF_SIMULATE_LIS_NOISE"
     )

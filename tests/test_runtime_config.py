@@ -58,6 +58,19 @@ def test_invalid_ollama_timeout_fails_closed(value):
         load_settings({"CMF_OLLAMA_TIMEOUT_SECONDS": value})
 
 
+@pytest.mark.parametrize(
+    "value", ["-0.1", "1.1", "nan", "inf", "-inf", "not-a-number"]
+)
+def test_invalid_lis_noise_ratio_fails_closed(value):
+    with pytest.raises(SettingsError, match="CMF_LIS_NOISE_RATIO"):
+        load_settings({"CMF_LIS_NOISE_RATIO": value})
+
+
+@pytest.mark.parametrize("value", ["0", "0.5", "1"])
+def test_lis_noise_ratio_accepts_closed_unit_interval(value):
+    assert load_settings({"CMF_LIS_NOISE_RATIO": value}).lis_noise_ratio == float(value)
+
+
 def test_unknown_profile_fails_closed():
     with pytest.raises(SettingsError, match="Unsupported CMF_PROFILE"):
         load_settings({"CMF_PROFILE": "typo"})
