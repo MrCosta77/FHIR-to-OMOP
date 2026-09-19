@@ -27,7 +27,7 @@ def _report():
         "threshold_analysis": [{
             "threshold": 0.8, "admitted_proposals": 0,
             "correct_proposals": 0, "incorrect_proposals": 0,
-            "review_queue_precision": None, "positive_case_coverage": 0.0,
+            "review_queue_precision": None, "positive_case_recall": 0.0,
         }],
     }
 
@@ -46,7 +46,7 @@ def test_comparison_reports_improvement_and_transition():
     })
     after["threshold_analysis"][0].update({
         "admitted_proposals": 1, "correct_proposals": 1,
-        "review_queue_precision": 1.0, "positive_case_coverage": 1.0,
+        "review_queue_precision": 1.0, "positive_case_recall": 1.0,
     })
 
     before["loinc_reranker_version"] = "after"
@@ -59,6 +59,22 @@ def test_comparison_reports_improvement_and_transition():
     assert comparison["before_few_shot_mode"] == "none"
     assert comparison["after_few_shot_mode"] == "synthetic-development"
     assert "0 → 1" in render_markdown(comparison)
+
+
+def test_comparison_accepts_legacy_coverage_name_as_recall():
+    before = _report()
+    after = deepcopy(before)
+    legacy_value = before["threshold_analysis"][0].pop(
+        "positive_case_recall"
+    )
+    before["threshold_analysis"][0]["positive_case_coverage"] = legacy_value
+
+    comparison = compare_reports(before, after)
+
+    recall = comparison["threshold_analysis"][0]["positive_case_recall"]
+    assert recall == {"before": 0.0, "after": 0.0, "delta": 0.0}
+    assert "positive_case_coverage" not in comparison["threshold_analysis"][0]
+    assert "| Recall |" in render_markdown(comparison)
 
 
 def test_comparison_rejects_different_case_sets():

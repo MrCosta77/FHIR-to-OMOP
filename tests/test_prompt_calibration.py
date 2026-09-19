@@ -204,5 +204,5 @@ def test_threshold_analysis_never_treats_abstention_as_review_proposal():
         "correct_proposals": 1,
         "incorrect_proposals": 0,
         "review_queue_precision": 1.0,
-        "positive_case_coverage": 0.5,
+        "positive_case_recall": 0.5,
     }

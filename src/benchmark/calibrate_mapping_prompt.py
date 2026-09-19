@@ -289,7 +289,7 @@ def summarize(cases: list[dict]) -> dict:
 
 
 def threshold_analysis(cases: list[dict]) -> list[dict]:
-    """Report review-queue precision and coverage without authorizing publication."""
+    """Report review-queue precision and positive-case recall."""
     positives = [case for case in cases if case["expected_decision"] == "SELECT"]
     rows = []
     for threshold in CALIBRATION_THRESHOLDS:
@@ -305,7 +305,7 @@ def threshold_analysis(cases: list[dict]) -> list[dict]:
             "correct_proposals": correct,
             "incorrect_proposals": len(admitted) - correct,
             "review_queue_precision": correct / len(admitted) if admitted else None,
-            "positive_case_coverage": correct / len(positives) if positives else None,
+            "positive_case_recall": correct / len(positives) if positives else None,
         })
     return rows
 

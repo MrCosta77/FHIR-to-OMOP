@@ -51,6 +51,13 @@ def _validate_compatible(before: dict, after: dict) -> None:
             raise ValueError("Calibration reports must not authorize deployment.")
 
 
+def _threshold_value(row: dict, metric: str):
+    """Read current metrics while accepting the legacy recall misnomer."""
+    if metric == "positive_case_recall" and metric not in row:
+        return row.get("positive_case_coverage")
+    return row.get(metric)
+
+
 def compare_reports(before: dict, after: dict) -> dict:
     """Return metric deltas and case transitions for compatible reports."""
     _validate_compatible(before, after)
@@ -71,13 +78,13 @@ def compare_reports(before: dict, after: dict) -> dict:
     thresholds = []
     threshold_metrics = (
         "admitted_proposals", "correct_proposals", "incorrect_proposals",
-        "review_queue_precision", "positive_case_coverage",
+        "review_queue_precision", "positive_case_recall",
     )
     for threshold in sorted(old_thresholds):
         row = {"threshold": threshold}
         for metric in threshold_metrics:
-            old = old_thresholds[threshold].get(metric)
-            new = new_thresholds[threshold].get(metric)
+            old = _threshold_value(old_thresholds[threshold], metric)
+            new = _threshold_value(new_thresholds[threshold], metric)
             row[metric] = {
                 "before": old,
                 "after": new,
@@ -168,7 +175,7 @@ def render_markdown(report: dict) -> str:
         )
     lines.extend([
         "", "## Threshold analysis", "",
-        "| Threshold | Proposals | Correct | Incorrect | Precision | Coverage |",
+        "| Threshold | Proposals | Correct | Incorrect | Precision | Recall |",
         "|---:|---:|---:|---:|---:|---:|",
     ])
     for row in report["threshold_analysis"]:
@@ -178,7 +185,7 @@ def render_markdown(report: dict) -> str:
             f"{_format_pair(row, 'correct_proposals')} | "
             f"{_format_pair(row, 'incorrect_proposals')} | "
             f"{_format_pair(row, 'review_queue_precision', percent=True)} | "
-            f"{_format_pair(row, 'positive_case_coverage', percent=True)} |"
+            f"{_format_pair(row, 'positive_case_recall', percent=True)} |"
         )
     lines.extend([
         "", "## Changed cases", "",
