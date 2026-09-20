@@ -95,7 +95,8 @@ def rerank_loinc_search(
     ranked = []
     for index, concept_id in enumerate(ids):
         name = documents[index]
-        distance = float(distances[index]) if index < len(distances) else None
+        raw_distance = distances[index] if index < len(distances) else None
+        distance = float(raw_distance) if raw_distance is not None else None
         candidate_axes = extract_loinc_axes(name)
         score = _distance_score(distance, metric)
         signals = []

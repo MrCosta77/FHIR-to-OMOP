@@ -60,6 +60,23 @@ def test_reranker_preserves_embedding_order_when_source_axis_is_unknown():
     assert reranked["ids"][0] == ["generic", "blood"]
 
 
+def test_reranker_treats_null_distance_as_unavailable_similarity():
+    search = {
+        "ids": [["unavailable", "measured"]],
+        "documents": [[
+            "Hemoglobin [Mass/volume] in Blood",
+            "Hemoglobin [Mass/volume] in Blood",
+        ]],
+        "distances": [[None, 0.10]],
+    }
+
+    reranked, diagnostics = rerank_loinc_search("HGB", search)
+
+    assert reranked["ids"][0] == ["measured", "unavailable"]
+    assert reranked["distances"][0] == [0.10, None]
+    assert diagnostics[1]["rerank_score"] == 0.0
+
+
 def test_context_reranks_but_does_not_change_embedding_query():
     class Collection:
         metadata = {"distance_metric": "cosine"}
