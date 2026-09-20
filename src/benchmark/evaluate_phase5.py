@@ -46,6 +46,9 @@ DEFAULT_PROTOCOL = runtime_asset(
 DEFAULT_DATABASE = SETTINGS.db_path
 DEFAULT_CHROMA = SETTINGS.chroma_path
 EVALUATOR_VERSION = "1.0.0"
+PHASE5_PROTOCOL_SHA256 = (
+    "7baff5455bc9e33907a31a14e91d2de97ec7ecfb65813c4974e167c4a96d2180"
+)
 DOMAIN_TARGETS = {
     "Condition": "condition_occurrence",
     "Drug": "drug_exposure",
@@ -56,7 +59,13 @@ DOMAIN_TARGETS = {
 
 
 def load_protocol(path: Path, fixture_path: Path) -> dict:
-    protocol = json.loads(path.read_text(encoding="utf-8"))
+    protocol_bytes = path.read_bytes()
+    protocol_hash = hashlib.sha256(protocol_bytes).hexdigest()
+    if protocol_hash != PHASE5_PROTOCOL_SHA256:
+        raise ValueError(
+            "Phase 5 protocol hash differs from the frozen evaluator contract."
+        )
+    protocol = json.loads(protocol_bytes.decode("utf-8"))
     actual_hash = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
     if protocol.get("protocol_version") != "phase5-v1":
         raise ValueError("Unsupported or missing Phase 5 protocol version.")

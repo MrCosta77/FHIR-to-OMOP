@@ -139,6 +139,19 @@ def test_protocol_rejects_a_different_fixture(tmp_path):
         load_protocol(PROTOCOL, changed)
 
 
+def test_protocol_rejects_modified_thresholds(tmp_path):
+    protocol = json.loads(PROTOCOL.read_text(encoding="utf-8"))
+    protocol["arms"][1]["selection_threshold"] = 0.1
+    changed = tmp_path / "phase5_protocol.json"
+    changed.write_text(
+        json.dumps(protocol, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="protocol hash"):
+        load_protocol(changed, FIXTURE)
+
+
 def test_versioned_phase5_result_is_case_free_and_matches_frozen_run():
     text = SUMMARY.read_text(encoding="utf-8")
     result = json.loads(text)
