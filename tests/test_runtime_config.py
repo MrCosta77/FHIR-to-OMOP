@@ -25,6 +25,13 @@ def test_development_profile_resolves_portable_paths(tmp_path):
     assert settings.db_path == (tmp_path / "data" / "omop_clinical.duckdb").resolve()
     assert settings.fhir_dir == (tmp_path / "synthea" / "output" / "fhir").resolve()
     assert settings.reports_dir == (tmp_path / "data" / "run_reports").resolve()
+    assert settings.cdm_holder == "Mário Luís Gonçalves da Costa"
+
+
+def test_benchmark_profile_preserves_unicode_cdm_holder():
+    settings = load_settings({"CMF_PROFILE": "benchmark"})
+
+    assert settings.cdm_holder == "Mário Luís Gonçalves da Costa"
 
 
 def test_environment_overrides_profile_without_loading_dotenv(tmp_path):

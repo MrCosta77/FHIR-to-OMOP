@@ -21,7 +21,7 @@
         "ollama_timeout": 120.0,
         "cdm_source_name": "Clinical Mapping Framework (Synthea RWE)",
         "cdm_source_abbreviation": "CMF-Synthea",
-        "cdm_holder": "M\u00c3\u00a1rio Lu\u00c3\u00ads Gon\u00c3\u00a7alves da Costa",
+        "cdm_holder": "M\u00e1rio Lu\u00eds Gon\u00e7alves da Costa",
         "cdm_source_description": "Synthetic patient records generated via Synthea and transformed into OMOP CDM.",
         "cdm_source_release_date": "",
         "cdm_source_documentation_reference": "https://github.com/synthetichealth/synthea",
