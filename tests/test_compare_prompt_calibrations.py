@@ -51,7 +51,7 @@ def test_comparison_reports_improvement_and_transition():
 
     before["loinc_reranker_version"] = "after"
     after["few_shot_mode"] = "synthetic-development"
-    comparison = compare_reports(before, after)
+    comparison = compare_reports(before, after, experimental_axis="few-shot")
 
     assert comparison["summary"]["retrieval_hits"]["delta"] == 1
     assert comparison["summary"]["positive_abstentions"]["delta"] == -1
@@ -69,7 +69,7 @@ def test_comparison_accepts_legacy_coverage_name_as_recall():
     )
     before["threshold_analysis"][0]["positive_case_coverage"] = legacy_value
 
-    comparison = compare_reports(before, after)
+    comparison = compare_reports(before, after, experimental_axis="reranker")
 
     recall = comparison["threshold_analysis"][0]["positive_case_recall"]
     assert recall == {"before": 0.0, "after": 0.0, "delta": 0.0}
@@ -83,4 +83,34 @@ def test_comparison_rejects_different_case_sets():
     after["cases"][0]["source_value"] = "Different"
 
     with pytest.raises(ValueError, match="same labelled cases"):
-        compare_reports(before, after)
+        compare_reports(before, after, experimental_axis="reranker")
+
+
+def test_comparison_allows_only_the_declared_experimental_axis():
+    before = _report()
+    after = deepcopy(before)
+    after["loinc_reranker_version"] = "after"
+
+    comparison = compare_reports(
+        before, after, experimental_axis="reranker"
+    )
+    assert comparison["experimental_axis"] == "reranker"
+
+    after["model"] = "different-model"
+    with pytest.raises(ValueError, match="Incompatible calibration field: model"):
+        compare_reports(before, after, experimental_axis="reranker")
+
+
+def test_comparison_is_case_order_independent():
+    before = _report()
+    second = deepcopy(before["cases"][0])
+    second["case_id"] = "POS-002"
+    second["source_value"] = "WBC"
+    before["cases"].append(second)
+    after = deepcopy(before)
+    after["cases"].reverse()
+
+    comparison = compare_reports(
+        before, after, experimental_axis="reranker"
+    )
+    assert comparison["case_transitions"] == []

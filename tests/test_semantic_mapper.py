@@ -9,8 +9,10 @@ import pytest
 
 from src.adapters.fhir_coding import replace_fhir_source_codings
 from src.mapping.governance import ensure_governance_tables
+from src.mapping.mapping_service import MappingSourceTerm
 from src.mapping.semantic_mapper import (
     PROMPT_VERSION,
+    _measurement_context,
     build_prompt,
     parse_llm_decision,
     run_semantic_mapping,
@@ -58,6 +60,54 @@ def test_procedure_prompt_is_domain_locked():
     assert "Target domain: Procedure" in prompt
     assert "Never invent an ID" in prompt
     assert "observations or devices" in prompt
+
+
+def test_measurement_prompt_contains_only_explicit_clinical_context():
+    prompt = build_prompt(
+        "measurement",
+        "GLU",
+        [{"concept_id": 1004, "concept_name": "Glucose in serum"}],
+        clinical_context="Units: mg/dL; Observed value kind: numeric",
+    )
+
+    assert '"measurement_evidence": "Units: mg/dL; Observed value kind: numeric"' in prompt
+
+
+def test_measurement_context_is_scoped_by_source_coding_identity():
+    with duckdb.connect(":memory:") as con:
+        con.execute("""
+            CREATE TABLE measurement (
+                measurement_id BIGINT, measurement_concept_id INTEGER,
+                measurement_source_value VARCHAR, unit_source_value VARCHAR,
+                value_as_number DOUBLE, value_as_concept_id INTEGER,
+                value_source_value VARCHAR
+            )
+        """)
+        con.executemany(
+            "INSERT INTO measurement VALUES (?, 0, 'GLU', ?, 1.0, NULL, NULL)",
+            [(1, "mg/dL"), (2, "mmol/L")],
+        )
+        replace_fhir_source_codings(
+            con,
+            "measurement",
+            [
+                (
+                    "measurement", 1, "event-1", None, "urn:hospital:a",
+                    "FHIR_A", "GLU-A", "Glucose A", None, None,
+                ),
+                (
+                    "measurement", 2, "event-2", None, "urn:hospital:b",
+                    "FHIR_B", "GLU-B", "Glucose B", None, None,
+                ),
+            ],
+        )
+
+        context = _measurement_context(
+            con,
+            MappingSourceTerm("GLU", "urn:hospital:a", "FHIR_A", "GLU-A"),
+        )
+
+    assert context == "Units: mg/dL; Observed value kind: numeric"
 
 
 @pytest.mark.parametrize(

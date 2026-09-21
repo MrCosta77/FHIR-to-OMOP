@@ -16,6 +16,7 @@ import ollama
 from src.clinical_mapping_core import DECISION_SCHEMA, parse_mapping_decision
 from src.mapping.loinc_reranking import (
     LOINC_RERANKER_VERSION,
+    distance_to_similarity,
     render_measurement_context,
     retrieve_mapping_candidates,
 )
@@ -56,6 +57,105 @@ NEGATIVE_TERMS = (
 )
 CALIBRATION_THRESHOLDS = (0.70, 0.75, 0.80, 0.85, 0.90)
 FEW_SHOT_MODES = ("approved", "none", "synthetic-development")
+REFERENCE_STATUS = "PROVISIONAL_TECHNICAL"
+REFERENCE_BASIS = "synthetic_lis_noise_ground_truth"
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def validate_calibration_references(con, cases: list[dict]) -> dict:
+    """Require every positive reference to exist in the searchable LOINC slice."""
+    positives = [
+        case for case in cases if case["expected_decision"] == "SELECT"
+    ]
+    references: dict[int, set[str]] = {}
+    for case in positives:
+        concept_id = case.get("expected_concept_id")
+        concept_name = str(case.get("expected_concept_name") or "").strip()
+        if isinstance(concept_id, bool) or not isinstance(concept_id, int):
+            raise ValueError(
+                f"{case['case_id']}: positive calibration reference requires "
+                "an integer concept_id"
+            )
+        if not concept_name:
+            raise ValueError(
+                f"{case['case_id']}: positive calibration reference requires "
+                "a concept name"
+            )
+        references.setdefault(concept_id, set()).add(concept_name)
+
+    errors = []
+    for concept_id, expected_names in sorted(references.items()):
+        if len(expected_names) != 1:
+            errors.append(
+                f"{concept_id}: inconsistent expected names {sorted(expected_names)!r}"
+            )
+            continue
+        row = con.execute("""
+            SELECT concept_name, domain_id, vocabulary_id,
+                   standard_concept, invalid_reason
+            FROM concept
+            WHERE concept_id = ?
+        """, [concept_id]).fetchone()
+        expected_name = next(iter(expected_names))
+        expected = (expected_name, "Measurement", "LOINC", "S", None)
+        if row is None:
+            errors.append(f"{concept_id}: absent from Athena concept")
+        elif row != expected:
+            errors.append(f"{concept_id}: expected {expected!r}, found {row!r}")
+    if errors:
+        raise ValueError(
+            "Calibration references are outside the searchable active Standard "
+            "LOINC Measurement slice:\n" + "\n".join(errors)
+        )
+    return {
+        "status": REFERENCE_STATUS,
+        "basis": REFERENCE_BASIS,
+        "positive_reference_count": len(positives),
+        "distinct_concept_count": len(references),
+        "searchable_slice_validated": True,
+        "clinical_gold_standard": False,
+        "limitation": (
+            "A unique synthetic source concept does not prove that noisy text "
+            "is clinically unequivocal; clinical review is still required."
+        ),
+    }
+
+
+def calibration_reference_exclusions(con) -> dict[str, int]:
+    """Count synthetic truth rows excluded from the searchable LOINC slice."""
+    rows = con.execute("""
+        WITH reference_rows AS (
+            SELECT DISTINCT corrupted_source_value, true_concept_id
+            FROM lis_noise_ground_truth
+            WHERE corrupted_source_value IS NOT NULL
+              AND TRIM(corrupted_source_value) <> ''
+              AND true_concept_id IS NOT NULL
+        )
+        SELECT CASE
+                   WHEN c.concept_id IS NULL THEN 'ABSENT_FROM_ATHENA'
+                   WHEN c.invalid_reason IS NOT NULL THEN 'INVALID_CONCEPT'
+                   WHEN c.standard_concept IS DISTINCT FROM 'S'
+                       THEN 'NON_STANDARD_CONCEPT'
+                   WHEN c.domain_id IS DISTINCT FROM 'Measurement'
+                       THEN 'WRONG_DOMAIN'
+                   WHEN c.vocabulary_id IS DISTINCT FROM 'LOINC'
+                       THEN 'OUTSIDE_LOINC_VOCABULARY'
+               END AS reason,
+               COUNT(*)
+        FROM reference_rows r
+        LEFT JOIN concept c ON c.concept_id = r.true_concept_id
+        WHERE c.concept_id IS NULL
+           OR c.invalid_reason IS NOT NULL
+           OR c.standard_concept IS DISTINCT FROM 'S'
+           OR c.domain_id IS DISTINCT FROM 'Measurement'
+           OR c.vocabulary_id IS DISTINCT FROM 'LOINC'
+        GROUP BY reason
+        ORDER BY reason
+    """).fetchall()
+    return {reason: count for reason, count in rows}
 
 
 def load_probe_cases(con) -> list[dict]:
@@ -103,21 +203,26 @@ def load_probe_cases(con) -> list[dict]:
 def load_expanded_cases(
     con, *, positive_limit: int = 40, split: str = "development"
 ) -> list[dict]:
-    """Load a deterministic, unambiguous synthetic LIS calibration sample."""
+    """Load a deterministic single-target synthetic LIS calibration sample."""
     if positive_limit <= 0:
         raise ValueError("positive_limit must be positive")
     if split not in {"development", "holdout", "all"}:
         raise ValueError("split must be development, holdout or all")
     rows = con.execute("""
-        SELECT corrupted_source_value,
-               MIN(true_concept_id) AS true_concept_id,
-               MIN(true_source_value) AS true_source_value
-        FROM lis_noise_ground_truth
-        WHERE corrupted_source_value IS NOT NULL
-          AND TRIM(corrupted_source_value) <> ''
-          AND true_concept_id IS NOT NULL
-        GROUP BY corrupted_source_value
-        HAVING COUNT(DISTINCT true_concept_id) = 1
+        SELECT g.corrupted_source_value,
+               MIN(g.true_concept_id) AS true_concept_id,
+               MIN(c.concept_name) AS canonical_concept_name
+        FROM lis_noise_ground_truth g
+        JOIN concept c ON c.concept_id = g.true_concept_id
+        WHERE g.corrupted_source_value IS NOT NULL
+          AND TRIM(g.corrupted_source_value) <> ''
+          AND g.true_concept_id IS NOT NULL
+          AND c.domain_id = 'Measurement'
+          AND c.vocabulary_id = 'LOINC'
+          AND c.standard_concept = 'S'
+          AND c.invalid_reason IS NULL
+        GROUP BY g.corrupted_source_value
+        HAVING COUNT(DISTINCT g.true_concept_id) = 1
     """).fetchall()
 
     selected = []
@@ -163,6 +268,7 @@ def calibration_few_shot(
     sample_mode: str,
     evaluation_split: str,
     example_limit: int = 3,
+    evaluation_cases: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
     """Build one explicit calibration arm without contaminating holdout."""
     if mode not in FEW_SHOT_MODES:
@@ -170,7 +276,27 @@ def calibration_few_shot(
     if mode == "none":
         return "", []
     if mode == "approved":
-        rows = approved_mapping_examples(con, TARGET_TABLE, example_limit)
+        if evaluation_cases is None:
+            raise ValueError(
+                "approved few-shot calibration requires the labelled evaluation "
+                "cases so leakage can be excluded"
+            )
+        excluded_sources = {
+            str(case.get("source_value") or "").strip().casefold()
+            for case in evaluation_cases
+        }
+        excluded_concepts = {
+            int(case["expected_concept_id"])
+            for case in evaluation_cases
+            if case.get("expected_concept_id") is not None
+        }
+        eligible_rows = [
+            row
+            for row in approved_mapping_examples(con, TARGET_TABLE, None)
+            if str(row[0]).strip().casefold() not in excluded_sources
+            and int(row[1]) not in excluded_concepts
+        ]
+        rows = eligible_rows[:example_limit]
         prompt = render_mapping_examples(
             rows, "LOINC Measurement", evidence_type="human-approved"
         )
@@ -178,8 +304,9 @@ def calibration_few_shot(
             {
                 "source_value": source,
                 "expected_concept_id": int(concept_id),
+                "expected_concept_name": name,
             }
-            for source, concept_id, _name in rows
+            for source, concept_id, name in rows
         ]
         return prompt, manifest
     if sample_mode != "expanded" or evaluation_split != "holdout":
@@ -209,7 +336,9 @@ def calibration_few_shot(
     manifest = [
         {
             "case_id": case["case_id"],
+            "source_value": case["source_value"],
             "expected_concept_id": case["expected_concept_id"],
+            "expected_concept_name": case["expected_concept_name"],
         }
         for case in examples
     ]
@@ -337,12 +466,17 @@ def calibrate_prompt(
                 con, positive_limit=positive_limit, split=split
             )
         )
+        reference_validation = validate_calibration_references(con, cases)
+        reference_validation["ground_truth_exclusions"] = (
+            calibration_reference_exclusions(con)
+        )
         few_shot, few_shot_manifest = calibration_few_shot(
             con,
             mode=few_shot_mode,
             sample_mode=sample_mode,
             evaluation_split=split,
             example_limit=few_shot_examples,
+            evaluation_cases=cases,
         )
         expected_signature = vocabulary_signature(con, TARGET_TABLE)
         if collection is None:
@@ -376,6 +510,7 @@ def calibrate_prompt(
                 case["source_value"],
                 candidates,
                 few_shot,
+                clinical_context=clinical_context,
             )
             started = time.perf_counter()
             response = client.chat(
@@ -426,13 +561,10 @@ def calibrate_prompt(
             )
             distance = selected["distance"] if selected else None
             metric = metadata.get("distance_metric", "cosine")
-            retrieval_score = None
-            if distance is not None:
-                retrieval_score = (
-                    max(0.0, min(1.0, 1.0 - distance))
-                    if metric == "cosine"
-                    else 1.0 / (1.0 + max(0.0, distance))
-                )
+            retrieval_score = (
+                distance_to_similarity(distance, metric)
+                if distance is not None else None
+            )
             result["selected_retrieval_score"] = retrieval_score
             result["governed_score"] = (
                 min(retrieval_score, decision["confidence"])
@@ -471,6 +603,8 @@ def calibrate_prompt(
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest(),
+        "few_shot_prompt_sha256": _text_sha256(few_shot),
+        "reference_validation": reference_validation,
         "index_signature": metadata.get("index_signature"),
         "summary": summarize(results),
         "threshold_analysis": threshold_analysis(results),

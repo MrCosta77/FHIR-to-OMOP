@@ -17,13 +17,17 @@ from src.benchmark.evaluate_phase5 import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "cases.jsonl"
-PROTOCOL = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_protocol.json"
+PROTOCOL = (
+    PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_protocol_v2.json"
+)
 SUMMARY = PROJECT_ROOT / "benchmarks" / "dirty_hospital" / "phase5_held_out_summary.json"
 
 
 def test_phase5_protocol_is_frozen_to_the_release_fixture():
     protocol = load_protocol(PROTOCOL, FIXTURE)
     assert protocol["evaluation_split"] == "held_out"
+    assert protocol["protocol_version"] == "phase5-v2"
+    assert protocol["generation"]["format"] == phase5.PROMPT_VERSION
     assert protocol["policy"]["held_out_adjustment_forbidden"] is True
     assert protocol["fixture_sha256"] == hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
     assert [arm["name"] for arm in protocol["arms"]] == [

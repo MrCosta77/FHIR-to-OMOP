@@ -1,10 +1,19 @@
+import pytest
+
 from src.mapping.loinc_reranking import (
     LOINC_RERANKER_VERSION,
+    distance_to_similarity,
     extract_loinc_axes,
     render_measurement_context,
     rerank_loinc_search,
     retrieve_mapping_candidates,
 )
+
+
+def test_distance_similarity_is_shared_and_metric_aware():
+    assert distance_to_similarity(0.4, "cosine") == 0.6
+    assert distance_to_similarity(0.4, "l2") == pytest.approx(1 / 1.4)
+    assert distance_to_similarity(None, "l2") == 0.0
 
 
 def test_explicit_loinc_axes_are_extracted_without_imputing_missing_specimen():

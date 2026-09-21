@@ -52,6 +52,18 @@ def test_candidate_parser_uses_exact_id_and_cosine_score():
     assert selected_candidate(results, "The answer is 999") is None
 
 
+def test_candidate_parser_uses_shared_l2_similarity_transform():
+    results = {
+        "ids": [["123"]],
+        "documents": [["Candidate"]],
+        "distances": [[0.4]],
+    }
+
+    assert selected_candidate(results, "123", "l2") == (
+        123, "Candidate", 0.4, 0.7143
+    )
+
+
 def test_few_shot_examples_have_stable_order():
     with duckdb.connect(":memory:") as con:
         _create_provenance(con)

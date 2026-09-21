@@ -17,6 +17,12 @@ SUMMARY_METRICS = (
     "safe_negative_abstentions",
     "contract_failures",
 )
+EXPERIMENTAL_AXES = {
+    "few-shot": {"few_shot_mode", "few_shot_prompt_sha256"},
+    "model": {"model", "model_digest"},
+    "prompt": {"prompt_version"},
+    "reranker": {"loinc_reranker_version"},
+}
 
 
 def _load(path: Path) -> tuple[dict, str]:
@@ -24,23 +30,29 @@ def _load(path: Path) -> tuple[dict, str]:
     return json.loads(raw), hashlib.sha256(raw).hexdigest()
 
 
-def _case_signature(report: dict) -> list[tuple]:
-    return [
-        (
+def _case_signature(report: dict) -> dict[str, tuple]:
+    signatures = {}
+    for case in report.get("cases", []):
+        case_id = case.get("case_id")
+        if not case_id or case_id in signatures:
+            raise ValueError("Calibration case_id values must be present and unique.")
+        signatures[case_id] = (
             case.get("case_id"), case.get("source_value"),
             case.get("expected_decision"), case.get("expected_concept_id"),
         )
-        for case in report.get("cases", [])
-    ]
+    return signatures
 
 
-def _validate_compatible(before: dict, after: dict) -> None:
+def _validate_compatible(before: dict, after: dict, experimental_axis: str) -> None:
+    if experimental_axis not in EXPERIMENTAL_AXES:
+        raise ValueError(f"Unsupported experimental axis: {experimental_axis}")
+    allowed_differences = EXPERIMENTAL_AXES[experimental_axis]
     for field in (
         "model", "model_digest", "prompt_version", "generation_parameters",
         "top_k", "sample_mode", "positive_limit", "split", "index_signature",
-        "loinc_reranker_version",
+        "loinc_reranker_version", "few_shot_mode", "few_shot_prompt_sha256",
     ):
-        if before.get(field) != after.get(field):
+        if field not in allowed_differences and before.get(field) != after.get(field):
             raise ValueError(f"Incompatible calibration field: {field}")
     if _case_signature(before) != _case_signature(after):
         raise ValueError("Calibration reports do not contain the same labelled cases.")
@@ -58,9 +70,9 @@ def _threshold_value(row: dict, metric: str):
     return row.get(metric)
 
 
-def compare_reports(before: dict, after: dict) -> dict:
+def compare_reports(before: dict, after: dict, *, experimental_axis: str) -> dict:
     """Return metric deltas and case transitions for compatible reports."""
-    _validate_compatible(before, after)
+    _validate_compatible(before, after, experimental_axis)
     summary = {}
     for metric in SUMMARY_METRICS:
         old = before["summary"][metric]
@@ -93,7 +105,10 @@ def compare_reports(before: dict, after: dict) -> dict:
         thresholds.append(row)
 
     transitions = []
-    for old, new in zip(before["cases"], after["cases"], strict=True):
+    before_cases = {case["case_id"]: case for case in before["cases"]}
+    after_cases = {case["case_id"]: case for case in after["cases"]}
+    for case_id in sorted(before_cases):
+        old, new = before_cases[case_id], after_cases[case_id]
         changes = []
         if old.get("retrieval_hit") != new.get("retrieval_hit"):
             changes.append("retrieval_hit")
@@ -125,6 +140,7 @@ def compare_reports(before: dict, after: dict) -> dict:
         "comparison": "prompt-calibration-before-vs-after",
         "status": "DEVELOPMENT_ONLY",
         "deployment_authorized": False,
+        "experimental_axis": experimental_axis,
         "generated_at": datetime.now(UTC).isoformat(),
         "model": after["model"],
         "prompt_version": after["prompt_version"],
@@ -155,6 +171,7 @@ def render_markdown(report: dict) -> str:
         "# Prompt calibration: before vs after",
         "",
         f"- Split: `{report['split']}`",
+        f"- Experimental axis: `{report['experimental_axis']}`",
         f"- Model: `{report['model']}`",
         f"- Prompt: `{report['prompt_version']}`",
         f"- Reranker: `{report['before_reranker_version']}` → "
@@ -204,10 +221,15 @@ def main() -> None:
     parser.add_argument("--before", type=Path, required=True)
     parser.add_argument("--after", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--experimental-axis", choices=sorted(EXPERIMENTAL_AXES), required=True
+    )
     args = parser.parse_args()
     before, before_sha = _load(args.before)
     after, after_sha = _load(args.after)
-    report = compare_reports(before, after)
+    report = compare_reports(
+        before, after, experimental_axis=args.experimental_axis
+    )
     report["inputs"] = {
         "before": {"path": str(args.before), "sha256": before_sha},
         "after": {"path": str(args.after), "sha256": after_sha},

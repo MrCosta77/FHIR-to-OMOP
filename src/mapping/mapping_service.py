@@ -12,6 +12,7 @@ from src.mapping.governance import (
     register_decision,
     rejection_policy_exists,
 )
+from src.mapping.loinc_reranking import distance_to_similarity
 from src.omop.mapping_targets import TARGETS
 from src.utils.config import (
     MODEL_NAME,
@@ -193,7 +194,11 @@ def render_mapping_examples(rows, label, *, evidence_type):
 
 def approved_mapping_examples(con, target_table, limit=3):
     """Return stable distinct human-approved mappings for prompt evidence."""
-    return con.execute("""
+    limit_clause = "" if limit is None else "LIMIT ?"
+    parameters = [target_table]
+    if limit is not None:
+        parameters.append(int(limit))
+    return con.execute(f"""
         SELECT source_value, assigned_concept_id, normalized_value
         FROM mapping_provenance
         WHERE reviewed_by = 'Approved_by_Human' AND target_table = ?
@@ -202,8 +207,8 @@ def approved_mapping_examples(con, target_table, limit=3):
             ORDER BY created_at, provenance_id
         ) = 1
         ORDER BY LOWER(TRIM(source_value)), assigned_concept_id
-        LIMIT ?
-    """, [target_table, int(limit)]).fetchall()
+        {limit_clause}
+    """, parameters).fetchall()
 
 
 def get_few_shot_prompt(con, target_table, label, limit=3):
@@ -257,11 +262,7 @@ def selected_candidate(search_results, answer, distance_metric="cosine"):
     for index, concept_id in enumerate(ids):
         if str(concept_id) == selected_id and selected_id != "0":
             distance = float(distances[index]) if index < len(distances) else 1.0
-            if distance_metric == "l2":
-                score = 1.0 - (distance / 2.0)
-            else:
-                score = 1.0 - distance
-            score = round(max(0.0, min(1.0, score)), 4)
+            score = round(distance_to_similarity(distance, distance_metric), 4)
             return int(concept_id), documents[index], distance, score
     return None
 

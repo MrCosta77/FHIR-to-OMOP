@@ -24,6 +24,7 @@ from src.benchmark.evaluate_dirty_hospital import (
     validate_cases,
     validate_reference_concepts,
 )
+from src.mapping.loinc_reranking import distance_to_similarity
 from src.mapping.mapping_service import TARGETS, get_versioned_collection
 from src.mapping.semantic_mapper import (
     DECISION_SCHEMA,
@@ -41,13 +42,13 @@ from src.utils.config import SETTINGS
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE = runtime_asset("benchmarks", "dirty_hospital", "cases.jsonl")
 DEFAULT_PROTOCOL = runtime_asset(
-    "benchmarks", "dirty_hospital", "phase5_protocol.json"
+    "benchmarks", "dirty_hospital", "phase5_protocol_v2.json"
 )
 DEFAULT_DATABASE = SETTINGS.db_path
 DEFAULT_CHROMA = SETTINGS.chroma_path
 EVALUATOR_VERSION = "1.0.0"
 PHASE5_PROTOCOL_SHA256 = (
-    "7baff5455bc9e33907a31a14e91d2de97ec7ecfb65813c4974e167c4a96d2180"
+    "ededa4d52c5c0154cf129cd928b5c48fb37ec7af42e3e56a1e09a498d0c6fa23"
 )
 DOMAIN_TARGETS = {
     "Condition": "condition_occurrence",
@@ -67,7 +68,7 @@ def load_protocol(path: Path, fixture_path: Path) -> dict:
         )
     protocol = json.loads(protocol_bytes.decode("utf-8"))
     actual_hash = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
-    if protocol.get("protocol_version") != "phase5-v1":
+    if protocol.get("protocol_version") != "phase5-v2":
         raise ValueError("Unsupported or missing Phase 5 protocol version.")
     if protocol.get("evaluation_split") != "held_out":
         raise ValueError("The frozen Phase 5 protocol must evaluate held_out.")
@@ -75,6 +76,15 @@ def load_protocol(path: Path, fixture_path: Path) -> dict:
         raise ValueError("Fixture hash differs from the frozen Phase 5 protocol.")
     if not protocol.get("policy", {}).get("held_out_adjustment_forbidden"):
         raise ValueError("The protocol must forbid held-out adjustment.")
+    expected_generation = {
+        "format": PROMPT_VERSION,
+        **GENERATION_PARAMETERS,
+        "timeout_seconds": OLLAMA_TIMEOUT,
+    }
+    if protocol.get("generation") != expected_generation:
+        raise ValueError(
+            "Phase 5 generation settings differ from the frozen runtime contract."
+        )
     return protocol
 
 
@@ -142,8 +152,9 @@ def retrieval_candidates(collection, source_text: str, *, top_k: int) -> list[di
     metric = (collection.metadata or {}).get("distance_metric", "cosine")
     candidates = []
     for index, concept_id in enumerate(ids):
-        distance = float(distances[index]) if index < len(distances) else 1.0
-        score = 1.0 - (distance / 2.0) if metric == "l2" else 1.0 - distance
+        raw_distance = distances[index] if index < len(distances) else None
+        distance = float(raw_distance) if raw_distance is not None else None
+        score = distance_to_similarity(distance, metric)
         candidates.append({
             "concept_id": int(concept_id),
             "concept_name": names[index],

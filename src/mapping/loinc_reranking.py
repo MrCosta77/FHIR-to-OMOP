@@ -58,10 +58,12 @@ def extract_loinc_axes(value: str) -> dict[str, frozenset[str]]:
     return result
 
 
-def _distance_score(distance: float | None, metric: str) -> float:
+def distance_to_similarity(distance: float | None, metric: str) -> float:
+    """Convert a Chroma distance into one bounded, shared similarity score."""
     if distance is None:
         return 0.0
-    if metric == "cosine":
+    normalized_metric = str(metric or "cosine").strip().casefold()
+    if normalized_metric == "cosine":
         return max(0.0, min(1.0, 1.0 - float(distance)))
     return 1.0 / (1.0 + max(0.0, float(distance)))
 
@@ -98,7 +100,7 @@ def rerank_loinc_search(
         raw_distance = distances[index] if index < len(distances) else None
         distance = float(raw_distance) if raw_distance is not None else None
         candidate_axes = extract_loinc_axes(name)
-        score = _distance_score(distance, metric)
+        score = distance_to_similarity(distance, metric)
         signals = []
         for axis, source_values in source_axes.items():
             if not source_values:

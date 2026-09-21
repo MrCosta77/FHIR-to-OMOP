@@ -92,7 +92,14 @@ def parse_llm_decision(content: str, candidate_ids) -> dict:
     return parse_mapping_decision(content, candidate_ids).to_dict()
 
 
-def build_prompt(target_table: str, source_value: str, candidates: list[dict], few_shot="") -> str:
+def build_prompt(
+    target_table: str,
+    source_value: str,
+    candidates: list[dict],
+    few_shot="",
+    *,
+    clinical_context: str = "",
+) -> str:
     config = TARGETS[target_table]
     prompt = DOMAIN_PROMPTS[target_table]
     request = MappingRequest(
@@ -100,6 +107,10 @@ def build_prompt(target_table: str, source_value: str, candidates: list[dict], f
         target_domain=config["domain"],
         target_vocabulary=config["vocabulary"],
         candidates=tuple(Candidate.from_mapping(candidate) for candidate in candidates),
+        context=(
+            (("measurement_evidence", clinical_context),)
+            if clinical_context.strip() else ()
+        ),
     )
     return render_mapping_prompt(
         request,
@@ -175,7 +186,38 @@ def _unmapped_terms(con, target_table: str) -> list[MappingSourceTerm]:
 def _measurement_context(con, source_term: MappingSourceTerm) -> str:
     if source_term.source_value is None:
         return ""
-    row = con.execute("""
+    has_fhir_identity = bool(con.execute("""
+        SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = 'main'
+          AND table_name = 'fhir_event_source_coding'
+    """).fetchone()[0])
+    identity_filter = ""
+    parameters: list[object] = [source_term.source_value]
+    if has_fhir_identity and source_term.is_scoped:
+        identity_filter = """
+          AND EXISTS (
+              SELECT 1 FROM fhir_event_source_coding coding
+              WHERE coding.target_table = 'measurement'
+                AND coding.target_id = measurement.measurement_id
+                AND coding.source_system_uri IS NOT DISTINCT FROM ?
+                AND coding.source_vocabulary_id IS NOT DISTINCT FROM ?
+                AND coding.source_code IS NOT DISTINCT FROM ?
+          )
+        """
+        parameters.extend([
+            source_term.source_system,
+            source_term.source_vocabulary_id,
+            source_term.source_code,
+        ])
+    elif has_fhir_identity:
+        identity_filter = """
+          AND NOT EXISTS (
+              SELECT 1 FROM fhir_event_source_coding coding
+              WHERE coding.target_table = 'measurement'
+                AND coding.target_id = measurement.measurement_id
+          )
+        """
+    row = con.execute(f"""
         SELECT LIST(DISTINCT unit_source_value) FILTER (
                    WHERE unit_source_value IS NOT NULL
                      AND TRIM(unit_source_value) <> ''
@@ -188,7 +230,8 @@ def _measurement_context(con, source_term: MappingSourceTerm) -> str:
         FROM measurement
         WHERE measurement_concept_id = 0
           AND measurement_source_value = ?
-    """, [source_term.source_value]).fetchone()
+          {identity_filter}
+    """, parameters).fetchone()
     units, has_numeric, has_coded = row or ([], False, False)
     return render_measurement_context(
         units or [], has_numeric=bool(has_numeric), has_coded=bool(has_coded)
@@ -282,7 +325,13 @@ def run_semantic_mapping(
             prompt_source, redaction_categories = redact_direct_identifiers(
                 prompt_input
             )
-            prompt = build_prompt(target_table, prompt_source, candidates, few_shot)
+            prompt = build_prompt(
+                target_table,
+                prompt_source,
+                candidates,
+                few_shot,
+                clinical_context=clinical_context,
+            )
             response = client.chat(
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
