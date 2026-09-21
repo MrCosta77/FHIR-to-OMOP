@@ -9,6 +9,26 @@ sys.path.append(str(PROJECT_ROOT))
 from src.utils.config import DB_PATH
 
 
+def average_observation_years(con) -> float | None:
+    """Average summed inclusive observation days per person, using 365.25 days/year."""
+    value = con.execute("""
+        WITH per_person AS (
+            SELECT person_id,
+                   SUM(DATEDIFF(
+                       'day', observation_period_start_date,
+                       observation_period_end_date
+                   ) + 1) AS observed_days
+            FROM observation_period
+            WHERE observation_period_start_date IS NOT NULL
+              AND observation_period_end_date IS NOT NULL
+              AND observation_period_end_date >= observation_period_start_date
+            GROUP BY person_id
+        )
+        SELECT AVG(observed_days) / 365.25 FROM per_person
+    """).fetchone()[0]
+    return float(value) if value is not None else None
+
+
 def generate_report():
     print("\n📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊📊")
     print("      REAL-WORLD EVIDENCE (RWE) - COHORT DISCOVERY")
@@ -18,13 +38,13 @@ def generate_report():
         # 1. POPULATION OVERVIEW
         print("1. POPULATION OVERVIEW\n" + "-"*50)
         pop_count = con.execute("SELECT COUNT(*) FROM person").fetchone()[0]
-        avg_obs = con.execute("""
-            SELECT AVG(DATEDIFF('year', observation_period_start_date, observation_period_end_date))
-            FROM observation_period
-        """).fetchone()[0]
+        avg_obs = average_observation_years(con)
 
         print(f"Total Patients in Cohort: {pop_count}")
-        print(f"Average Observation Time per Patient: {avg_obs:.1f} years\n")
+        observation_text = (
+            f"{avg_obs:.1f} years" if avg_obs is not None else "not available"
+        )
+        print(f"Average Observation Time per Patient: {observation_text}\n")
 
         # 2. TOP 5 CLINICAL CONDITIONS
         print("2. TOP 5 CLINICAL CONDITIONS (Exact Matches)\n" + "-"*50)

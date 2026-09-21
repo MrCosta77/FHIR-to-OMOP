@@ -20,11 +20,53 @@ rscript <- file.path(
   if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
 )
 worker <- file.path(project_root, "src", "analytics", "run_dqd_worker.R")
+database_path <- Sys.getenv(
+  "CMF_DB_PATH", unset = file.path(project_root, "data", "omop_clinical.duckdb")
+)
+if (!file.exists(database_path)) {
+  stop("DQD database does not exist: ", database_path)
+}
+threshold_path <- system.file(
+  "csv", "OMOP_CDMv5.4_Field_Level.csv",
+  package = "DataQualityDashboard"
+)
+if (!file.exists(threshold_path)) {
+  stop("DataQualityDashboard threshold file is unavailable.")
+}
+
+shard_contract <- function(mode, table = NULL) {
+  list(
+    schema_version = "cmf-dqd-shard-v1",
+    mode = mode,
+    table = if (is.null(table)) "" else table,
+    database_md5 = unname(tools::md5sum(database_path)),
+    thresholds_md5 = unname(tools::md5sum(threshold_path)),
+    dqd_version = as.character(utils::packageVersion("DataQualityDashboard"))
+  )
+}
+
+same_contract <- function(actual, expected) {
+  identical(actual$schema_version, expected$schema_version) &&
+    identical(actual$mode, expected$mode) &&
+    identical(actual$table, expected$table) &&
+    identical(actual$database_md5, expected$database_md5) &&
+    identical(actual$thresholds_md5, expected$thresholds_md5) &&
+    identical(actual$dqd_version, expected$dqd_version)
+}
 
 run_worker <- function(mode, output_folder, table = NULL) {
   label <- if (is.null(table)) mode else paste(mode, table, sep = ":")
   existing_json <- list.files(output_folder, pattern = "\\.json$", full.names = TRUE)
+  manifest_path <- file.path(output_folder, ".cmf-shard-manifest.json")
+  expected_contract <- shard_contract(mode, table)
   if (length(existing_json) == 1L) {
+    if (!file.exists(manifest_path)) {
+      stop("Cannot resume ", label, ": shard manifest is missing.")
+    }
+    actual_contract <- jsonlite::read_json(manifest_path, simplifyVector = TRUE)
+    if (!same_contract(actual_contract, expected_contract)) {
+      stop("Cannot resume ", label, ": shard contract does not match current inputs.")
+    }
     message("⏭️  Reusing completed DQD shard: ", label)
     return(invisible(NULL))
   }
@@ -45,6 +87,9 @@ run_worker <- function(mode, output_folder, table = NULL) {
   if (!identical(status, 0L)) {
     stop("DQD shard failed twice: ", label, " (exit status ", status, ")")
   }
+  jsonlite::write_json(
+    expected_contract, manifest_path, auto_unbox = TRUE, pretty = TRUE
+  )
 }
 
 find_result <- function(folder) {
@@ -58,10 +103,6 @@ find_result <- function(folder) {
 run_worker("base", base_folder)
 shard_json <- c(find_result(base_folder))
 
-threshold_path <- system.file(
-  "csv", "OMOP_CDMv5.4_Field_Level.csv",
-  package = "DataQualityDashboard"
-)
 thresholds <- readr::read_csv(threshold_path, show_col_types = FALSE)
 heavy_tables <- sort(unique(thresholds$cdmTableName[
   !is.na(thresholds$plausibleValueHigh) |

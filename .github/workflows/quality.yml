@@ -19,6 +19,8 @@ jobs:
       - run: python -m src.utils.config
       - run: python -m ruff check .
       - run: python -m pytest -m "not integration" -v
+      - name: Run synthetic hospital E2E acceptance
+        run: python -m pytest tests/test_e2e_hospital_acceptance.py -v
       - name: Build and smoke-test isolated wheel
         shell: bash
         run: |
