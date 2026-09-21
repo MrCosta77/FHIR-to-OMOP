@@ -20,6 +20,21 @@ nunca publica diretamente no CDM e pode sempre abster-se.
 6. Avaliar em dados held-out; exemplos few-shot nunca podem contaminar o teste.
 7. Manter processamento local e definir controlos explícitos para PHI.
 
+## Estado operacional atual
+
+Este roadmap conserva marcos e resultados históricos. Para execução, a fonte de
+verdade são `config/profiles/*.json`, `src/clinical_mapping_core/decision.py` e
+o protocolo de benchmark selecionado. O estado corrente usa prompt
+`mapping-json-v5`, modelo local `qwen2.5-coder:7b`, threshold de seleção 0,90 e
+threshold de entrada em revisão 0,80. O perfil hospitalar é PHI fail-closed e
+exige os gates de integração e DQD. Nenhuma proposta do LLM é publicada sem duas
+revisões independentes e adjudicação separada.
+
+Neste projeto, few-shot significa apenas exemplos aprovados adicionados ao
+contexto do prompt durante inferência. Não existe treino, fine-tuning ou alteração
+dos pesos do modelo. Resultados e thresholds antigos abaixo devem ser lidos como
+evidência histórica, não como configuração runtime atual.
+
 ## Arquitetura-alvo
 
 ```text

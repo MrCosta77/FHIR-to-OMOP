@@ -149,6 +149,22 @@ staging DuckDB. The published database is replaced only after every mandatory
 step and quality gate succeeds; failed staging databases are retained for
 forensic inspection and do not alter the last successful publication.
 
+### Current operational contract
+
+The executable configuration files are the source of truth; historical roadmap
+entries and benchmark reports describe earlier experiments rather than current
+runtime defaults. The current contract uses prompt `mapping-json-v5`, local
+model `qwen2.5-coder:7b`, a 0.90 direct-selection threshold and a 0.80
+review-proposal threshold in both supplied profiles. Development processes
+synthetic data with optional gates; hospital mode is PHI fail-closed and
+requires integration and DQD gates. No LLM decision publishes directly: every
+proposal requires two independent reviews and separate adjudication.
+
+Few-shot examples are approved mappings inserted into the prompt as inference
+context. They do not train, fine-tune or modify the model weights. Development
+calibration may compare few-shot modes, but held-out evaluation excludes them
+unless a new frozen protocol explicitly states otherwise.
+
 ## 📊 Results & Validation
 
 ### 1. Mapping Accuracy (against seeded synthetic LIS noise)
