@@ -128,7 +128,7 @@ def _write_patient_bundle(path, *, patient_id, full_url):
     )
 
 
-def test_directory_rejects_resource_identity_repeated_across_bundles(tmp_path):
+def test_directory_rejects_resource_identity_repeated_within_namespace(tmp_path):
     _write_patient_bundle(
         tmp_path / "patient-a.json",
         patient_id="patient-1",
@@ -142,6 +142,23 @@ def test_directory_rejects_resource_identity_repeated_across_bundles(tmp_path):
 
     with pytest.raises(ValueError, match="duplicate resource Patient/patient-1"):
         validate_directory(tmp_path)
+
+
+def test_directory_accepts_same_resource_id_from_distinct_namespaces(tmp_path):
+    _write_patient_bundle(
+        tmp_path / "patient-a.json",
+        patient_id="patient-1",
+        full_url="https://hospital-a.example/fhir/Patient/patient-1",
+    )
+    _write_patient_bundle(
+        tmp_path / "patient-b.json",
+        patient_id="patient-1",
+        full_url="https://hospital-b.example/fhir/Patient/patient-1",
+    )
+
+    counts = validate_directory(tmp_path)
+
+    assert counts["Patient"] == 2
 
 
 def test_directory_rejects_full_url_repeated_across_bundles(tmp_path):
@@ -167,6 +184,39 @@ def test_relative_clinical_full_url_is_rejected(tmp_path):
         lambda p: p["entry"][2].update(fullUrl="Condition/condition-1"),
     )
     with pytest.raises(ValueError, match="absolute fullUrl namespace"):
+        validate_bundle(path)
+
+
+@pytest.mark.parametrize(
+    "codeable",
+    [
+        {"text": "Local diagnosis stated in clinical text"},
+        {"coding": [{"code": "LOCAL-123", "display": "Local diagnosis"}]},
+        {"coding": [{"display": "Local diagnosis without code"}]},
+    ],
+)
+def test_validator_accepts_governed_text_or_incomplete_coding_fallback(
+    tmp_path, codeable
+):
+    path = _mutated_bundle(
+        tmp_path,
+        lambda payload: payload["entry"][2]["resource"].update(code=codeable),
+    )
+
+    counts = validate_bundle(path)
+
+    assert counts["Condition"] == 1
+
+
+def test_validator_rejects_clinical_resource_without_usable_concept(tmp_path):
+    path = _mutated_bundle(
+        tmp_path,
+        lambda payload: payload["entry"][2]["resource"].update(
+            code={"coding": [{}], "text": "   "}
+        ),
+    )
+
+    with pytest.raises(ValueError, match="has no usable concept"):
         validate_bundle(path)
 
 

@@ -55,9 +55,12 @@ def _manifest():
         "configuration": {"runtime": {
             "profile": "development", "model_name": "local",
             "similarity_threshold": 0.9, "data_classification": "SYNTHETIC",
+            "proposal_review_threshold": 0.8, "lis_noise_ratio": 0.1,
             "ollama_url": "http://localhost:11434/api/generate",
             "simulate_lis_noise": False, "require_integration": True,
             "include_dqd": False, "db_path": "secret-path",
+        }, "source_provenance": {
+            "git_dirty": True, "git_status_sha256": "a" * 64,
         }},
         "steps": [{
             "name": "quality", "script": "tests", "status": "SUCCESS",
@@ -103,8 +106,26 @@ def test_report_aggregates_evidence_without_source_paths(tmp_path):
     assert report["mapping"]["domains"]["condition_occurrence"]["coverage"] == 0.5
     assert report["mapping"]["decision_counts"][0]["count"] == 1
     assert report["readiness"]["deployment_authorized"] is False
+    assert report["configuration"]["proposal_review_threshold"] == 0.8
+    assert report["configuration"]["lis_noise_ratio"] == 0.1
+    assert report["run"]["source_provenance"] == {
+        "git_dirty": True, "git_status_sha256": "a" * 64,
+    }
     assert "Patient/secret.json" not in serialized
     assert "secret-path" not in serialized
+
+
+@pytest.mark.parametrize(
+    "xml", ["<testsuites/>", '<testsuites><testsuite tests="0"/></testsuites>']
+)
+def test_report_rejects_junit_without_executed_tests(tmp_path, xml):
+    database = tmp_path / "run.duckdb"
+    junit = tmp_path / "pytest.xml"
+    _database(database)
+    junit.write_text(xml, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no executed tests"):
+        build_run_report(_manifest(), database, junit)
 
 
 def test_rebuilding_same_run_report_produces_same_content_hash(tmp_path):

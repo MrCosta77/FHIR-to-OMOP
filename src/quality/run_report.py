@@ -28,6 +28,7 @@ CLINICAL_TARGETS = {
 }
 SAFE_RUNTIME_KEYS = {
     "profile", "model_name", "similarity_threshold",
+    "proposal_review_threshold", "lis_noise_ratio",
     "data_classification", "simulate_lis_noise", "require_integration",
     "include_dqd",
 }
@@ -71,6 +72,8 @@ def parse_junit(path: Path) -> dict:
         for key in totals:
             totals[key] += int(suite.attrib.get(key, 0))
         duration += float(suite.attrib.get("time", 0.0))
+    if not suites or totals["tests"] <= 0:
+        raise ValueError("JUnit evidence contains no executed tests.")
     return {
         "status": "PASSED" if totals["failures"] == totals["errors"] == 0 else "FAILED",
         **totals,
@@ -194,6 +197,13 @@ def build_run_report(
         mapping = mapping_metrics(con, run_id)
     runtime = manifest.get("configuration", {}).get("runtime", {})
     safe_runtime = {key: runtime.get(key) for key in sorted(SAFE_RUNTIME_KEYS)}
+    source_provenance = manifest.get("configuration", {}).get(
+        "source_provenance", {}
+    )
+    safe_source_provenance = {
+        "git_dirty": source_provenance.get("git_dirty"),
+        "git_status_sha256": source_provenance.get("git_status_sha256"),
+    }
     steps = _safe_steps(manifest.get("steps", []))
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -207,6 +217,7 @@ def build_run_report(
             "started_at": manifest.get("started_at"),
             "completed_at": completed_at,
             "git_commit": manifest.get("git_commit"),
+            "source_provenance": safe_source_provenance,
         },
         "configuration": safe_runtime,
         "inputs": summarize_inputs(manifest.get("inputs", [])),
