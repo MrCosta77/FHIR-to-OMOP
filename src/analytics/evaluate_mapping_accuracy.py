@@ -35,7 +35,7 @@ def mapping_accuracy_metrics(con) -> dict[str, int | float]:
 
 
 def evaluate_accuracy():
-    print("📊 EVALUATING AI MAPPING ACCURACY (RAG + FEW-SHOT)")
+    print("📊 EVALUATING GOVERNED MAPPING OUTCOMES")
     print("-" * 50)
 
     with duckdb.connect(DB_PATH) as con:
@@ -59,12 +59,12 @@ def evaluate_accuracy():
         recall = metrics["recall"]
 
         print(f"Total Simulated/Corrupted Records: {total}")
-        print(f"Total Mapped by AI: {mapped}")
+        print(f"Total Mapped by Governed Pipeline: {mapped}")
         print(f"Strictly Correct Matches: {correct}\n")
 
         print("🏆 FINAL PERFORMANCE METRICS:")
-        print(f" - Coverage  : {coverage:.2f}% (Proportion of dirty terms the AI attempted to map)")
-        print(f" - Precision : {precision:.2f}% (Proportion of AI mappings that were exactly correct)")
+        print(f" - Coverage  : {coverage:.2f}% (Proportion of dirty events with a published mapping)")
+        print(f" - Precision : {precision:.2f}% (Proportion of published mappings that were exactly correct)")
         print(f" - Recall    : {recall:.2f}% (Proportion of total corrupted records successfully resolved)\n")
 
 if __name__ == "__main__":

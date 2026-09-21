@@ -70,7 +70,7 @@ def record_retrieval_suggestion(
     suggestion_id = str(
         uuid.uuid5(uuid.NAMESPACE_URL, f"cmf:retrieval-suggestion:{identity}")
     )
-    con.execute("""
+    inserted = con.execute("""
         INSERT INTO retrieval_candidate_suggestion (
             suggestion_id, run_id, target_table, source_value,
             candidate_concept_id, candidate_concept_name, retrieval_score,
@@ -78,27 +78,39 @@ def record_retrieval_suggestion(
             model_name, prompt_version, llm_confidence, llm_reason,
             affected_events, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
-        ON CONFLICT (suggestion_id) DO UPDATE SET
-            run_id = excluded.run_id,
-            source_value = excluded.source_value,
-            candidate_concept_name = excluded.candidate_concept_name,
-            retrieval_score = excluded.retrieval_score,
-            candidate_rank = excluded.candidate_rank,
-            lexicon_sha256 = excluded.lexicon_sha256,
-            model_name = excluded.model_name,
-            prompt_version = excluded.prompt_version,
-            llm_confidence = excluded.llm_confidence,
-            llm_reason = excluded.llm_reason,
-            affected_events = excluded.affected_events,
-            created_at = now()
+        ON CONFLICT (suggestion_id) DO NOTHING
+        RETURNING suggestion_id
     """, [
         suggestion_id, run_id, target_table, source_value,
         int(candidate_concept_id), candidate_concept_name, retrieval_score,
         int(candidate_rank), alias_id, lexicon_version, lexicon_sha256,
         model_name, prompt_version, float(llm_confidence), llm_reason,
         int(affected_events),
+    ]).fetchone()
+    if inserted is not None:
+        return True
+
+    con.execute("""
+        UPDATE retrieval_candidate_suggestion SET
+            run_id = ?,
+            source_value = ?,
+            candidate_concept_name = ?,
+            retrieval_score = ?,
+            candidate_rank = ?,
+            lexicon_sha256 = ?,
+            model_name = ?,
+            prompt_version = ?,
+            llm_confidence = ?,
+            llm_reason = ?,
+            affected_events = ?,
+            created_at = now()
+        WHERE suggestion_id = ?
+    """, [
+        run_id, source_value, candidate_concept_name, retrieval_score,
+        int(candidate_rank), lexicon_sha256, model_name, prompt_version,
+        float(llm_confidence), llm_reason, int(affected_events), suggestion_id,
     ])
-    return True
+    return False
 
 
 def retrieval_suggestion_queue(con) -> list[dict]:

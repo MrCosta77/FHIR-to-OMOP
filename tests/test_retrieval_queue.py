@@ -51,8 +51,8 @@ def test_weak_retrieval_candidate_does_not_enter_queue():
 
 def test_queue_deduplicates_same_semantic_suggestion_across_runs():
     with duckdb.connect(":memory:") as con:
-        _record(con)
-        record_retrieval_suggestion(
+        assert _record(con) is True
+        created = record_retrieval_suggestion(
             con,
             run_id="RUN-new",
             target_table="measurement",
@@ -71,6 +71,7 @@ def test_queue_deduplicates_same_semantic_suggestion_across_runs():
             affected_events=12,
         )
 
+        assert created is False
         queue = retrieval_suggestion_queue(con)
         assert len(queue) == 1
         assert queue[0]["run_id"] == "RUN-new"
