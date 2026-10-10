@@ -28,6 +28,10 @@ Start with [Results & Validation](#results--validation) for measured outcomes or
 the relevant checks. Passing tests and synthetic acceptance scenarios establish
 behaviour under their stated conditions—not clinical or regulatory fitness.
 
+For a concise evaluation path, see the
+[portfolio case study](docs/PORTFOLIO_CASE_STUDY.md) and the
+[60–90 second demonstration script](docs/DEMO_90_SECONDS.md).
+
 ```mermaid
 flowchart TD
     %% Define Styles
@@ -79,10 +83,10 @@ This project was built with strict adherence to clinical data management standar
 Standard OMOP vocabularies handle the majority of clinical data, but real-world data (like legacy LIS lab results) is messy. This framework uses a progressive retrieval-adjudication system:
 
 1. **RAG Retrieval:** Unmapped text triggers a vector search (ChromaDB) against standard OMOP vocabularies. Measurement retrieves a wider LOINC pool and deterministically reranks it by explicit specimen, property and method signals; observed unit and value kind may inform reranking but individual values are never sent to the model. Only the final top 5 candidates reach the local LLM.
-2. **LLM Adjudication:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed.
+2. **LLM Candidate Selection:** A local LLM evaluates the 5 candidates through a strict JSON schema and returns either `SELECT` with one retrieved ID or `ABSTAIN` with a null ID. Invalid JSON, extra fields, and invented IDs fail closed; the model never performs clinical adjudication.
 3. **Blinded Human-in-the-Loop (Streamlit):** Every proposal receives a stable `mapping_decision_id`, `run_id`, affected-event provenance, model digest, prompt/vocabulary/index version, generation parameters, confidence, rationale, clinical signals and status. Governed `actor_id` values—not typed names—enforce two distinct reviewers and a third adjudicator; approved aliases handle accents and verified name variants without weakening separation of duties. Rejections become active policy and suppress identical future proposals.
 4. **Fail-closed privacy boundary:** The default classification is synthetic. PHI mode requires explicit institutional approval and retention configuration, authenticated role allowlists, a loopback-only Ollama endpoint, direct-identifier redaction before prompting, and metadata-only security audit logs. The standalone portal is not an identity provider and must not be used with PHI without institution-managed authentication.
-5. **Active Learning (Few-Shot):** Human-approved mappings are dynamically injected back into the LLM's prompt in subsequent runs, creating a continuous feedback loop where the audit trail becomes the training data.
+5. **Governed Few-Shot Context:** Human-approved mappings can be inserted into subsequent prompts as versioned inference examples. They do not train or modify model weights, and held-out evaluation excludes them unless a frozen protocol explicitly states otherwise.
 
 The retrieval layer is reproducible: the configured Chroma collections for
 Condition, Drug, Measurement, and Procedure carry
@@ -154,7 +158,7 @@ forensic inspection and do not alter the last successful publication.
 The executable configuration files are the source of truth; historical roadmap
 entries and benchmark reports describe earlier experiments rather than current
 runtime defaults. The current contract uses prompt `mapping-json-v5`, local
-model `qwen2.5-coder:7b`, a 0.90 direct-selection threshold and a 0.80
+model `qwen2.5-coder:7b`, a 0.90 candidate-selection threshold and a 0.80
 review-proposal threshold in both supplied profiles. Development processes
 synthetic data with optional gates; hospital mode is PHI fail-closed and
 requires integration and DQD gates. No LLM decision publishes directly: every

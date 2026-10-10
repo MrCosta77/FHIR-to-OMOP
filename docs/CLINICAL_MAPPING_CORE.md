@@ -36,7 +36,7 @@ enforced by `tests/test_clinical_mapping_core.py`.
 - `ModelProvenance`: model, prompt, generation and index identity attached to a
   validated decision without source-system or storage details.
 
-The JSON schema remains `mapping-json-v2`. `semantic_mapper.py` keeps its public
+The current JSON schema is `mapping-json-v5`. `semantic_mapper.py` keeps its public
 compatibility functions, but delegates parsing and prompt rendering to the core.
 Existing adapters therefore preserve their inputs, prompts, persistence status,
 redaction, audit events and human-publication gate.
@@ -62,7 +62,8 @@ then construct the same `MappingRequest`. The core does not allow a source
 adapter to bypass candidate binding, invent IDs or publish a result.
 
 The API now supports the first additional source boundary, `hospital-csv-v1`,
-without importing that adapter back into the core. Do not split this directory
-into another repository or publish it to PyPI until the CSV path also completes
-governed retrieval/adjudication, versioning and compatibility policy are
-explicit, and all boundary/behavior tests remain green.
+without importing that adapter back into the core. That path completes governed
+retrieval, event binding, review and adjudication in synthetic acceptance tests.
+Keep the core in this repository until its compatibility policy is explicit and
+another independent adapter or controlled deployment confirms that the boundary
+is stable enough to version separately.

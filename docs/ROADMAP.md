@@ -4,8 +4,8 @@
 
 Transformar o FHIR-to-OMOP num laboratório reproduzível para harmonizar FHIR e,
 progressivamente, HL7 v2, CSV hospitalar, códigos locais e texto clínico para
-OMOP CDM. O LLM é um adjudicador local e governado: nunca inventa concept IDs,
-nunca publica diretamente no CDM e pode sempre abster-se.
+OMOP CDM. O LLM é um seletor local e governado de candidatos: nunca inventa
+concept IDs, nunca publica diretamente no CDM e pode sempre abster-se.
 
 ## Princípios obrigatórios
 
@@ -129,7 +129,7 @@ conceito selecionado.
 
 Critério de saída: nenhuma resposta livre consegue alterar um mapping ou o CDM.
 
-Estado técnico em 2026-08-27: concluído. O contrato JSON `mapping-json-v2` está
+Estado técnico em 2026-08-27: concluído. O contrato JSON `mapping-json-v5` está
 ativo nos seis adaptadores. IDs fora do top-k, campos adicionais, JSON
 inválido e combinações SELECT/ABSTAIN incoerentes falham fechadas. Confiança,
 motivo, sinais clínicos, digest do modelo, parâmetros de geração, versão do
@@ -353,4 +353,5 @@ doubles controlados de Chroma/Ollama; não deve ser apresentado como validação
 da infraestrutura real. Essa evidência é separada: a Phase 5 executa
 Athena/Chroma/Ollama reais, enquanto a aceitação 7D.4D prova binding, handoff,
 revisão, adjudicação, STCM e aplicação sem tocar em dados locais. A release
-técnica v0.2.0 foi concluída; a v0.2.1 consolida estas correções de manutenção.
+técnica atual é a v0.3.0; alterações posteriores permanecem em `Unreleased` até
+ao próximo ciclo de release.

@@ -27,6 +27,11 @@ All notable changes to this project are documented here. The format follows
 ### Documentation
 
 - Document the configurable Ollama timeout in the environment example.
+- Add a portfolio case study and a safety-bounded 60–90 second demonstration
+  script for evaluating the governed mapping workflow.
+- Align public documentation with the current `mapping-json-v5` contract and
+  clarify that approved few-shot examples are inference context, not model
+  training or automatic clinical publication.
 
 ## [0.3.0] - 2026-09-06
 
