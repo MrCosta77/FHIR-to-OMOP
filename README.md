@@ -44,7 +44,8 @@ flowchart TD
     RAG["🔍 RAG Retrieval<br>(ChromaDB Vector Search)"]:::process
     LLM["🤖 Local LLM<br>(Qwen/Llama)"]:::process
     
-    Portal["🖥️ Human-in-the-loop<br>(Streamlit Portal)"]:::human
+    Review["👥 Two blinded reviews<br>(Streamlit Portal)"]:::human
+    Adjudication["⚖️ Independent adjudication"]:::human
     RStudio["📊 Validation<br>(OHDSI DQD)"]:::process
 
     %% Relationships
@@ -53,8 +54,9 @@ flowchart TD
     DB -->|"Unmapped Terms"| RAG
     RAG -->|"Top 5 Candidates"| LLM
     LLM -->|"SELECT/ABSTAIN"| DB
-    DB -->|"Pending Review"| Portal
-    Portal -->|"Approved Mappings"| DB
+    DB -->|"Pending Proposal"| Review
+    Review -->|"Two completed reviews"| Adjudication
+    Adjudication -->|"Approved Mapping"| DB
     DB -->|"Final OMOP CDM"| RStudio
 ```
 
@@ -63,7 +65,7 @@ flowchart TD
 
 This project was built with strict adherence to clinical data management standards, focusing on determinism, auditability, and OHDSI conventions:
 
-1. **OMOP-Canonical Mapping (STCM):** AI candidates are stored as proposals, not mappings. Only a named human approval publishes a candidate to `approved_mapping_set` and `source_to_concept_map`; pending and rejected candidates never enter the active mapping set.
+1. **OMOP-Canonical Mapping (STCM):** AI candidates are stored as proposals, not mappings. Publication to `approved_mapping_set` and `source_to_concept_map` requires two independent blinded reviews followed by adjudication from a third distinct governed actor; pending and rejected candidates never enter the active mapping set.
 2. **Deterministic Tie-Breaking:** Avoids SQL *fan-out* issues (`QUALIFY ROW_NUMBER() = 1`) and guarantees high-fidelity mappings using the official `Maps To` relationship and Domain routing.
 3. **Hierarchical Phenotyping:** RWE analytics leverage the `CONCEPT_ANCESTOR` table for accurate disease-group phenotyping rather than relying on brittle string matching.
 4. **FHIR Unit Provenance:** `valueQuantity.unit`, `system`, and `code` are retained through staging. UCUM codes are matched case-sensitively to Standard OMOP `Unit` Concepts, while the original unit text and source concept are preserved.
@@ -103,9 +105,9 @@ The six domain adapters share one governed semantic-mapping engine. Procedure
 and Device retrieval is restricted to current Standard SNOMED concepts in the
 required domain; Observation combines only current Standard SNOMED and LOINC
 Observation concepts. LLM output is recorded only as an event-level proposal
-or abstention and never changes a clinical table before named human approval.
-Approval preserves the selected concept's actual vocabulary rather than
-inferring it from the target table.
+or abstention and never changes a clinical table before two independent blinded
+reviews and separate adjudication. Governed publication preserves the selected
+concept's actual vocabulary rather than inferring it from the target table.
 
 The model-facing contracts, fail-closed parser, prompt renderer and provenance
 value objects are isolated in the dependency-free `src/clinical_mapping_core/`
