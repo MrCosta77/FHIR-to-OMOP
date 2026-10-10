@@ -28,10 +28,6 @@ Start with [Results & Validation](#results--validation) for measured outcomes or
 the relevant checks. Passing tests and synthetic acceptance scenarios establish
 behaviour under their stated conditions—not clinical or regulatory fitness.
 
-For a concise evaluation path, see the
-[portfolio case study](docs/PORTFOLIO_CASE_STUDY.md) and the
-[60–90 second demonstration script](docs/DEMO_90_SECONDS.md).
-
 ```mermaid
 flowchart TD
     %% Define Styles
