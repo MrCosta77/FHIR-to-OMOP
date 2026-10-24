@@ -6,6 +6,8 @@ import duckdb
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 from src.utils.config import DB_PATH
 
 
@@ -62,24 +64,32 @@ def generate_report():
             print(f" - {name[:40]:<40} | {count} occurrences")
         print("\n")
 
-        # 3. PHENOTYPING: HYPERTENSION CASCADE
-        print("3. PHENOTYPING: HYPERTENSION CASCADE (Specific Phenotype)\n" + "-"*50)
+        # 3. PHENOTYPING: HYPERTENSION CASCADE (CONCEPT_ANCESTOR Hierarchical Expansion)
+        print("3. PHENOTYPING: HYPERTENSION CASCADE (Hierarchical Phenotype)\n" + "-"*50)
+        # Using ancestor_concept_id = 316866 ('Hypertensive disorder') to capture all SNOMED subtypes
         ht_patients = con.execute("""
-            SELECT COUNT(DISTINCT person_id) FROM condition_occurrence
-            WHERE condition_concept_id = 320128 -- Essential hypertension
+            SELECT COUNT(DISTINCT co.person_id)
+            FROM condition_occurrence co
+            JOIN concept_ancestor ca ON co.condition_concept_id = ca.descendant_concept_id
+            WHERE ca.ancestor_concept_id = 316866 -- Hypertensive disorder (includes Essential hypertension & subtypes)
         """).fetchone()[0]
 
+        # Antihypertensive target medications: ACE inhibitors, ARBs, CCBs, Thiazides
+        # Expanded hierarchically from standard ingredient concepts:
+        # Lisinopril (1308216), Enalapril (1341927), Losartan (1319998), Amlodipine (1307046), Hydrochlorothiazide (974166)
         ht_meds = con.execute("""
             SELECT COUNT(DISTINCT de.person_id)
             FROM drug_exposure de
             JOIN condition_occurrence co ON de.person_id = co.person_id
-            WHERE co.condition_concept_id = 320128
-            AND de.drug_concept_id IN (1308216, 1319998, 1341927) -- ACE Inhibitors / ARBs
+            JOIN concept_ancestor ca ON co.condition_concept_id = ca.descendant_concept_id
+            JOIN concept_ancestor da ON de.drug_concept_id = da.descendant_concept_id
+            WHERE ca.ancestor_concept_id = 316866
+              AND da.ancestor_concept_id IN (1308216, 1341927, 1319998, 1307046, 974166)
         """).fetchone()[0]
 
-        print(f"Patients Diagnosed with Hypertension: {ht_patients}")
+        print(f"Patients Diagnosed with Hypertension (Hierarchical): {ht_patients}")
         pct = (ht_meds / ht_patients * 100) if ht_patients > 0 else 0
-        print(f"Patients on Target Medication:        {ht_meds} ({pct:.1f}%)\n")
+        print(f"Patients on Target Antihypertensive Medication:      {ht_meds} ({pct:.1f}%)\n")
 
         # 4. HIERARCHICAL PHENOTYPING (THE POWER OF CONCEPT_ANCESTOR)
         print("4. HIERARCHICAL PHENOTYPING (Using CONCEPT_ANCESTOR)\n" + "-"*50)
@@ -98,6 +108,7 @@ def generate_report():
         get_hierarchical_count(320136, "Any Respiratory System Disease")
         get_hierarchical_count(134057, "Any Cardiovascular Disease")       # ID validado hoje!
         get_hierarchical_count(201603, "Any Dental/Oral Disease")          # ID validado hoje!
+
 
 if __name__ == "__main__":
     generate_report()
